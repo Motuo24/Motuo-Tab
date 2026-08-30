@@ -20,7 +20,7 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 ## Installation
 
-Currently supports Chromium-based browsers (Chrome / Edge, etc.). Firefox users can use the "Single-file HTML" method.
+Currently supports Chromium-based browsers (Chrome / Edge, etc.). Firefox users can use the "Single-file HTML" method; to point the new tab directly at a local file, see the AutoConfig tutorial below.
 
 ### Release download (recommended)
 
@@ -39,6 +39,45 @@ Download [dist/newtab.html](dist/newtab.html) and double-click to use it. You ca
 - Edge: Settings → On startup → Open specific pages → add the file
 - Chrome: needs an extension such as "New Tab Redirect" pointing to the file
 - Other browsers (e.g. Firefox): just use the single file
+
+### Firefox: Point the new tab to a local HTML via AutoConfig
+
+Firefox does not allow pointing the new tab page at a local `file://` path and has no built-in setting for it. Using Mozilla's official **AutoConfig** mechanism (written into the Firefox install directory, bypassing extension caching) is currently the only way to point the new tab directly at a local `file://` path. The following applies to Firefox 136 and later.
+
+**Step 1: open the `defaults/pref/` folder inside the Firefox install directory**
+
+- Windows: `C:\Program Files\Mozilla Firefox\defaults\pref`
+- macOS: `/Applications/Firefox.app/Contents/Resources/defaults/pref/` (adjust to your actual system path)
+- Linux: `/opt/firefox/defaults/pref/`
+
+Create `autoconfig.js` with:
+
+```ini
+pref("general.config.filename", "mozilla.cfg");
+pref("general.config.obscure_value", 0);
+pref("general.config.sandbox_enabled", false);
+```
+
+**Step 2: go back to the Firefox install root (the parent of `defaults`) and create `mozilla.cfg`**
+
+The first line must be a comment (a hard requirement of Firefox, otherwise the whole file is ignored):
+
+```js
+// My new tab
+try {
+  const ff = {};
+  ChromeUtils.defineESModuleGetters(ff, {
+    AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs"
+  });
+  ff.AboutNewTab.newTabURL = 'file:///C:/path/to/your/index.html';
+} catch (e) {
+  ChromeUtils.reportError(e);
+}
+```
+
+Replace `file:///C:/path/to/your/index.html` with the real absolute path of your local HTML (same on Linux/macOS, e.g. `file:///home/you/index.html`).
+
+**Step 3: restart Firefox and press `Ctrl+T`** to verify the new tab now points to the file.
 
 ### Online version (GitHub Pages)
 

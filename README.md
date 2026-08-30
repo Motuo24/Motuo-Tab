@@ -20,7 +20,7 @@
 
 ## 安装
 
-目前仅支持 Chromium 内核浏览器（Chrome / Edge 等）。Firefox 用户请用「单文件 HTML」方式。
+目前仅支持 Chromium 内核浏览器（Chrome / Edge 等）。Firefox 用户请用「单文件 HTML」；如需把新标签页直接指向本地文件，见下方 AutoConfig 教程。
 
 ### 发行版下载（推荐）
 
@@ -39,6 +39,45 @@
 - Edge：设置 → 启动时 → 打开特定页面 → 添加该文件
 - Chrome：配合「New Tab Redirect」等扩展指向该文件
 - 其他浏览器（如 Firefox）：直接用单文件即可
+
+### Firefox：AutoConfig 设置新标签页指向本地 HTML
+
+Firefox 默认不允许把新标签页指向本地 `file://` 路径，且无内置设置项。通过 Mozilla 官方的 **AutoConfig** 机制（写在 Firefox 安装目录里，不经过扩展缓存），是目前唯一能直接让新标签页指向本地 `file://` 路径的办法。以下针对 Firefox 136 及以上版本。
+
+**第一步：进入 Firefox 安装目录下的 `defaults/pref/` 文件夹**
+
+- Windows：`C:\Program Files\Mozilla Firefox\defaults\pref`
+- macOS：`/Applications/Firefox.app/Contents/Resources/defaults/pref/`（按你系统实际情况）
+- Linux：`/opt/firefox/defaults/pref/`
+
+新建文件 `autoconfig.js`，内容：
+
+```ini
+pref("general.config.filename", "mozilla.cfg");
+pref("general.config.obscure_value", 0);
+pref("general.config.sandbox_enabled", false);
+```
+
+**第二步：回到 Firefox 安装根目录（即 `defaults` 的上一级），新建 `mozilla.cfg`**
+
+第一行必须是一行注释（这是 Firefox 的硬性要求，否则整个文件会被忽略）：
+
+```js
+// My new tab
+try {
+  const ff = {};
+  ChromeUtils.defineESModuleGetters(ff, {
+    AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs"
+  });
+  ff.AboutNewTab.newTabURL = 'file:///C:/path/to/your/index.html';
+} catch (e) {
+  ChromeUtils.reportError(e);
+}
+```
+
+把 `file:///C:/path/to/your/index.html` 换成本地 HTML 的真实绝对路径（Linux/macOS 同理，写成 `file:///home/you/index.html` 这类格式）。
+
+**第三步：重启 Firefox，按 `Ctrl+T` 验证**新标签页已指向该文件。
 
 ### 在线版（GitHub Pages）
 

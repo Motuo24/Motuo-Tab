@@ -24,9 +24,11 @@ jobs:
       - run: npm test
       - name: Package extension zip
         run: |
-          cd dist/extension
-          zip -r ../motuo-tab-extension.zip .
-          cd ../..
+          # 打包成带 extension/ 外层目录的压缩包：
+          # 解压后即为 README「选择解压后的 extension 文件夹」对应的文件夹
+          cd dist
+          zip -r motuo-tab-extension.zip extension
+          cd ..
       - uses: softprops/action-gh-release@v2
         with:
           files: |

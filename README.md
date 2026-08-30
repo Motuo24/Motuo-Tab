@@ -30,11 +30,11 @@
 2. 开启右上角「开发者模式」
 3. 点「加载已解压的扩展程序」，选择解压后的 `extension` 文件夹
 
-之后新开标签页即是 Motuo-Tab。（若已上架应用商店，也可直接从商店搜索安装。）
+之后新开标签页即是 Motuo-Tab。
 
 ### 单文件 HTML（免安装）
 
-直接下载 [dist/newtab.html](dist/newtab.html)，双击打开即用；也可设为浏览器新标签页：
+从 [Releases](../../releases) 下载单文件版 `newtab.html`，双击打开即用；也可设为浏览器新标签页：
 
 - Edge：设置 → 启动时 → 打开特定页面 → 添加该文件
 - Chrome：配合「New Tab Redirect」等扩展指向该文件

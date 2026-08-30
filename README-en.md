@@ -30,11 +30,11 @@ Download the latest extension package (`motuo-tab-extension.zip`) from [Releases
 2. Enable "Developer mode" in the top-right corner
 3. Click "Load unpacked" and select the unzipped `extension` folder
 
-New tabs will now show Motuo-Tab. (If published to a web store, you can also install it directly from there.)
+New tabs will now show Motuo-Tab.
 
 ### Single-file HTML (no installation)
 
-Download [dist/newtab.html](dist/newtab.html) and double-click to use it. You can also set it as your new tab page:
+Download the single-file `newtab.html` from [Releases](../../releases) and double-click to use it. You can also set it as your new tab page:
 
 - Edge: Settings → On startup → Open specific pages → add the file
 - Chrome: needs an extension such as "New Tab Redirect" pointing to the file

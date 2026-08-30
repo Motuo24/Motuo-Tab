@@ -4,6 +4,9 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 [中文](README.md) · [English](README-en.md)
 
+> All data is stored locally in your browser (LocalStorage / IndexedDB) — **no backend required**.
+> The extension, single-file, and online versions behave identically: moving the file or using it online works the same.
+
 ---
 
 ## Features
@@ -17,35 +20,38 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 ## Installation
 
-### Method 1: Browser extension (recommended, Chrome / Edge)
+Currently supports Chromium-based browsers (Chrome / Edge, etc.). Firefox users can use the "Single-file HTML" method.
+
+### Release download (recommended)
+
+Download the latest extension package (`motuo-tab-extension.zip`) from [Releases](../../releases), unzip it, and install in Chrome / Edge:
+
+1. Open `chrome://extensions` (Edge: `edge://extensions`)
+2. Enable "Developer mode" in the top-right corner
+3. Click "Load unpacked" and select the unzipped `extension` folder
+
+New tabs will now show Motuo-Tab. (If published to a web store, you can also install it directly from there.)
+
+### Single-file HTML (no installation)
+
+Download [dist/newtab.html](dist/newtab.html) and double-click to use it. You can also set it as your new tab page:
+
+- Edge: Settings → On startup → Open specific pages → add the file
+- Chrome: needs an extension such as "New Tab Redirect" pointing to the file
+- Other browsers (e.g. Firefox): just use the single file
+
+### Online version (GitHub Pages)
+
+Visit the online URL directly — no installation needed. Data still stays in your local browser (LocalStorage).
+
+### Manual build (for developers)
 
 ```bash
 npm install
 npm run build
 ```
 
-Then load the `dist/extension` folder in your browser:
-
-1. Open `chrome://extensions` (Edge: `edge://extensions`)
-2. Enable "Developer mode" in the top-right corner
-3. Click "Load unpacked" and select `dist/extension`
-
-New tabs will now show Motuo-Tab.
-
-### Method 2: Single-file HTML
-
-```bash
-npm run build
-```
-
-- The artifact is `dist/newtab.html`; double-click to use it directly.
-- To set it as your new tab page:
-  - Edge: Settings → On startup → Open specific pages → add the file
-  - Chrome: needs an extension such as "New Tab Redirect" pointing to the file
-
-### Method 3: GitHub Pages
-
-Push the repository to GitHub, then in Settings → Pages choose **GitHub Actions** as the source to deploy the build output (see "GitHub Actions").
+Artifacts: `dist/newtab.html` (single-file) and `dist/extension` (MV3 extension).
 
 ## Usage
 

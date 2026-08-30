@@ -4,6 +4,9 @@
 
 [中文](README.md) · [English](README-en.md)
 
+> 数据全部保存在浏览器本地（LocalStorage / IndexedDB），**不依赖任何后端**。
+> 无论使用扩展版、本地单文件版还是在线版，功能完全一致：更换文件位置、或直接在线使用，均正常工作。
+
 ---
 
 ## 功能
@@ -17,35 +20,38 @@
 
 ## 安装
 
-### 方式 1：浏览器扩展（推荐，Chrome / Edge）
+目前仅支持 Chromium 内核浏览器（Chrome / Edge 等）。Firefox 用户请用「单文件 HTML」方式。
+
+### 发行版下载（推荐）
+
+从 [Releases](../../releases) 下载最新版扩展压缩包（`motuo-tab-extension.zip`），解压后在 Chrome / Edge 中安装：
+
+1. 打开 `chrome://extensions`（Edge 用 `edge://extensions`）
+2. 开启右上角「开发者模式」
+3. 点「加载已解压的扩展程序」，选择解压后的 `extension` 文件夹
+
+之后新开标签页即是 Motuo-Tab。（若已上架应用商店，也可直接从商店搜索安装。）
+
+### 单文件 HTML（免安装）
+
+直接下载 [dist/newtab.html](dist/newtab.html)，双击打开即用；也可设为浏览器新标签页：
+
+- Edge：设置 → 启动时 → 打开特定页面 → 添加该文件
+- Chrome：配合「New Tab Redirect」等扩展指向该文件
+- 其他浏览器（如 Firefox）：直接用单文件即可
+
+### 在线版（GitHub Pages）
+
+直接访问线上地址即可使用，无需下载安装；数据仍存于本机浏览器（LocalStorage）。
+
+### 手动构建（开发者）
 
 ```bash
 npm install
 npm run build
 ```
 
-然后在浏览器加载 `dist/extension` 目录：
-
-1. 打开 `chrome://extensions`（Edge 用 `edge://extensions`）
-2. 开启右上角「开发者模式」
-3. 点「加载已解压的扩展程序」，选择 `dist/extension`
-
-之后新开标签页即是 Motuo-Tab。
-
-### 方式 2：单文件 HTML
-
-```bash
-npm run build
-```
-
-- 产物 `dist/newtab.html`，双击即可使用
-- 想设为新标签页：
-  - Edge：设置 → 启动时 → 打开特定页面 → 添加该文件
-  - Chrome：需配合「New Tab Redirect」等扩展指向该文件
-
-### 方式 3：GitHub Pages 在线使用
-
-推送 GitHub 后，在 Settings → Pages 选择 **GitHub Actions** 部署，构建产物自动上线（见「GitHub Actions」）。
+产物：`dist/newtab.html`（单文件）与 `dist/extension`（MV3 扩展目录）。
 
 ## 使用
 

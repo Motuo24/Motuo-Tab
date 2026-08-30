@@ -128,11 +128,6 @@ dist/                 # 构建产物（gitignore）
 
 发布版本：`git tag v1.0.0 && git push origin v1.0.0`。
 
-## 上架商店（可选）
-
-- **Edge Add-ons**（免费）：打包 `dist/extension` 上传至 https://partner.microsoft.com
-- **Chrome Web Store**（一次性 $5 注册费）：上传至 https://chrome.google.com/webstore/devconsole
-
 ## 许可证
 
 [MIT](LICENSE) © 2026 Motuo24

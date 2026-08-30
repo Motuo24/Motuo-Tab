@@ -128,11 +128,6 @@ dist/                 # build output (gitignored)
 
 Release: `git tag v1.0.0 && git push origin v1.0.0`.
 
-## Store submission (optional)
-
-- **Edge Add-ons** (free): zip `dist/extension` and upload at https://partner.microsoft.com
-- **Chrome Web Store** (one-time $5 fee): upload at https://chrome.google.com/webstore/devconsole
-
 ## License
 
 [MIT](LICENSE) © 2026 Motuo24

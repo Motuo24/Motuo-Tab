@@ -24,7 +24,7 @@
 
 ### 发行版下载（推荐）
 
-从 [Releases](../../releases) 下载最新版扩展压缩包（`motuo-tab-extension.zip`），解压后在 Chrome / Edge 中安装：
+从 [Releases](../../releases) 下载最新版扩展压缩包，解压后在 Chrome / Edge 中安装：
 
 1. 打开 `chrome://extensions`（Edge 用 `edge://extensions`）
 2. 开启右上角「开发者模式」

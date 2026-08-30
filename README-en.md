@@ -24,7 +24,7 @@ Currently supports Chromium-based browsers (Chrome / Edge, etc.). Firefox users 
 
 ### Release download (recommended)
 
-Download the latest extension package (`motuo-tab-extension.zip`) from [Releases](../../releases), unzip it, and install in Chrome / Edge:
+Download the latest extension package from [Releases](../../releases), unzip it, and install in Chrome / Edge:
 
 1. Open `chrome://extensions` (Edge: `edge://extensions`)
 2. Enable "Developer mode" in the top-right corner

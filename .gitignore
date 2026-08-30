@@ -1,0 +1,14 @@
+# 依赖
+node_modules/
+
+# 构建产物（CI 中生成；本地先 npm run build 再 npm test）
+dist/
+
+# 日志 / 临时文件
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# 本地同步工具临时目录（不在版本库中保留）
+.sync_temp_dir/

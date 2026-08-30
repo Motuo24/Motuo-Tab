@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<!--
+  ============================================================================
+   Motuo-Tab v1.0 · 浏览器 New Tab 替换页（单文件 HTML）
+  ============================================================================
+   开发者：Motuo24 · 博客 https://pod.xr24.cn
+   共约 3100 行：CSS 1139 行 / JS 1864 行 / HTML 96 行
+  ----------------------------------------------------------------------------
+   目录（用 Ctrl+F 搜索下列锚点可快速跳转）：
+     [HTML-HEAD]   <head> 与 <style> (CSS)
+     [HTML-BODY]   <body> 顶层 DOM 结构
+     [JS-SEARCH]   IIFE 1 · 搜索模块（引擎、历史、建议、站内直达）
+     [JS-MAIN]     IIFE 2 · 主模块（卡片 CRUD、编辑、壁纸、AI）
+     [CSS-AI]      AI 助手样式
+   ----------------------------------------------------------------------------
+   localStorage 键一览（更详细的位置见各模块顶部 CONFIG 注释）：
+     newtab.engine.v1         当前搜索引擎
+     newtab.customEngines.v1  自定义引擎列表
+     newtab.searchHistory.v1  搜索历史（最多 20 条）
+     newtab.shortcuts.v1      快捷方式数据
+     newtab.sitedirect.v1     站内搜索直达开关
+     newtab.solidColor.v1     纯色壁纸
+     newtab.blur.v1           壁纸模糊度
+     newtab.alpha.v1          卡片透明度
+     newtab.toggleImg.v1      图标卡片透明开关
+     newtab.toggleLtr.v1      文字卡片透明开关
+     newtab.ai.config.v1      AI 配置（endpoint/key/model）
+     newtab.ai.history.v1     AI 对话历史
+   IndexedDB：MotuoTabDB → objectStore "wallpapers" (key="wallpaper")
+   快捷键：Ctrl+E 专注模式 / Ctrl+K 编辑模式 / Ctrl+A AI 助手 / Esc 关闭弹窗
+  ============================================================================
+-->
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>New Tab</title>
+  <link rel="icon" href="favicon.ico" />
+<link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+  <div id="bgContainer"></div>
+
+  <!-- 顶部搜索框 -->
+  <div class="page-title">Motuo Tab</div>
+  <div class="search-wrap">
+    <form class="search-box" id="searchForm" autocomplete="off">
+      <span class="logo" id="engineTrigger" aria-label="切换搜索引擎" title="切换搜索引擎">
+        <img id="engineIcon" src="https://www.baidu.com/favicon.ico" alt="" width="26" height="26" style="border-radius:4px;" onerror="this.style.display='none';this.nextElementSibling.style.display=''" />
+        <svg id="engineIconFallback" width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none">
+          <circle cx="12" cy="12" r="9" stroke="#2468f2" stroke-width="1.8"/>
+          <path d="M12 7v5l3 2" stroke="#2468f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="12" cy="12" r="1.6" fill="#2468f2"/>
+        </svg>
+        <!-- 搜索引擎下拉 -->
+        <div class="engine-selector" id="engineSelector">
+          <div class="opt current" data-engine="baidu"><img class="opt-icon" src="https://www.baidu.com/favicon.ico" alt="" /><span>百度</span></div>
+          <div class="opt" data-engine="bing"><img class="opt-icon" src="https://www.bing.com/favicon.ico" alt="" /><span>必应</span></div>
+          <div class="opt" data-engine="google"><img class="opt-icon" src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEX7J5qZdq2yzDGnGSV3J4cFDztxbAnNQACtyAAAj4IKVfVoyYBqFTwvT0E.jpeg" alt="" /><span>谷歌</span></div>
+        </div>
+      </span>
+      <input type="text" id="searchInput" placeholder="使用百度搜索，或者输入网址" aria-label="搜索" />
+      <div class="search-suggestions" id="searchSuggestions"></div>
+    </form>
+  </div>
+
+  <!-- 快捷方式：完全由 JS 数据驱动渲染 -->
+  <nav class="shortcuts" aria-label="快捷方式">
+    <div class="slot" id="addSlot" role="button" tabindex="0" title="添加快捷方式">+</div>
+  </nav>
+
+  <!-- 添加卡片弹窗 -->
+  <div class="modal-mask" id="addModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="addTitle">
+      <h3 id="addTitle">
+        <span>添加快捷方式</span>
+        <button class="close" data-close="addModal" aria-label="关闭">×</button>
+      </h3>
+      <form id="addForm" class="form">
+        <label class="field">
+          <span>名称</span>
+          <input type="text" id="addName" required maxlength="20" placeholder="例如 GitHub" />
+        </label>
+        <label class="field">
+          <span>网址</span>
+          <input type="text" id="addUrl" required placeholder="例如 https://github.com" />
+        </label>
+        <fieldset class="field-group">
+          <legend>图标来源</legend>
+          <label class="radio"><input type="radio" name="iconSrc" value="auto" checked /> 自动抓取（根目录 favicon → HTML 声明 → 随机色）</label>
+          <label class="radio"><input type="radio" name="iconSrc" value="image" /> 使用图片链接</label>
+          <label class="radio"><input type="radio" name="iconSrc" value="color" /> 颜色</label>
+        </fieldset>
+        <label class="field" id="addImageField" style="display:none;">
+          <span>图片链接</span>
+          <input type="text" id="addImage" placeholder="https://example.com/icon.png" />
+          <div class="image-toolbar">
+            <button type="button" class="btn btn-secondary btn-mini" id="addImageFileBtn">📁 选本地图片</button>
+            <span class="image-hint">也可按 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴图片，或拖入下方区域</span>
+          </div>
+          <input type="file" id="addImageFile" accept="image/*" hidden />
+          <div class="image-dropzone" id="addImageDropzone">把图片拖到这里</div>
+        </label>
+        <label class="field" id="addColorField" style="display:none;">
+          <span>选择颜色</span>
+          <div class="color-picker" id="addColorPicker">
+            <span class="color-dot" data-color="blue"   style="background:#1e6cff"></span>
+            <span class="color-dot" data-color="pink"   style="background:#e94e84"></span>
+            <span class="color-dot" data-color="orange" style="background:#e88a2b"></span>
+            <span class="color-dot" data-color="purple" style="background:#7a4df0"></span>
+            <span class="color-dot" data-color="sky"    style="background:#2aa7ff"></span>
+            <span class="color-dot" data-color="green"  style="background:#1aa86b"></span>
+            <span class="color-dot" data-color="amber"  style="background:#f4811f"></span>
+            <span class="color-dot" data-color="white"  style="background:#ffffff;border:2px solid rgba(31,35,41,0.12)"></span>
+          </div>
+        </label>
+        <label class="field" id="addLetterField" style="display:none;">
+          <span>图标文字</span>
+          <input type="text" id="addLetter" maxlength="2" placeholder="默认使用名称首字" />
+        </label>
+        <div class="preview">
+          <div class="preview-label">预览</div>
+          <div class="preview-card">
+            <div class="tile preview-tile" id="previewTile"></div>
+            <div class="label" id="previewLabel">名称</div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" data-close="addModal">取消</button>
+          <button type="submit" class="btn btn-primary">添加</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 个性化弹窗 -->
+  <div class="modal-mask" id="personalizeModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="personalizeTitle">
+      <h3 id="personalizeTitle">
+        <span>个性化</span>
+        <button class="close" data-close="personalizeModal" aria-label="关闭">×</button>
+      </h3>
+      <div class="personalize-body">
+        <div class="personalize-section">
+          <div class="personalize-section-title">图片壁纸</div>
+          <div class="personalize-row">
+            <button class="btn btn-secondary" id="wallpaperBtn">设置壁纸</button>
+            <button class="btn btn-secondary" id="resetWallpaperBtn">重置壁纸</button>
+          </div>
+          <input type="file" id="wallpaperFile" accept="image/*" />
+          <div class="slider-row">
+            <span style="font-size:12px;color:#9aa0a6;">模糊</span>
+            <input type="range" id="blurSlider" min="0" max="20" step="1" value="3" />
+            <span class="slider-val" id="blurVal" style="color:#4b5158;font-weight:400;">3px</span>
+          </div>
+        </div>
+        <div class="personalize-section">
+          <div class="personalize-section-title">纯色壁纸</div>
+          <div class="personalize-row">
+            <input type="color" id="solidColorPicker" value="#f0f2f5" />
+            <button class="btn btn-secondary" id="resetSolidColorBtn">重置</button>
+          </div>
+        </div>
+        <div class="personalize-section">
+          <div class="personalize-section-title">卡片透明度</div>
+          <div class="slider-row">
+            <input type="range" id="alphaSlider" min="0.3" max="1" step="0.05" value="1" />
+            <span class="slider-val" id="alphaVal">100%</span>
+          </div>
+          <label class="toggle-row">
+            <input type="checkbox" id="toggleImgAlpha" checked />
+            <span>图标卡片背景透明</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" id="toggleLtrAlpha" checked />
+            <span>文字卡片背景透明</span>
+          </label>
+        </div>
+        <div class="personalize-actions">
+          <button class="btn btn-secondary" id="resetPersonalizeBtn">恢复默认</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关于弹窗 -->
+  <div class="modal-mask" id="aboutModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="aboutTitle" style="max-width:380px;">
+      <h3 id="aboutTitle">
+        <span>关于</span>
+        <button class="close" data-close="aboutModal" aria-label="关闭">×</button>
+      </h3>
+      <div style="text-align:center;padding:16px 0 8px;">
+        <div style="font-size:15px;font-weight:600;color:#1f2329;margin-bottom:4px;">Motuo-Tab</div>
+        <div style="font-size:12px;color:#9aa0a6;margin-bottom:16px;">浏览器标签页 · v1.0</div>
+        <div style="font-size:13px;color:#4b5158;line-height:1.7;">
+          <div>开发者：<strong>Motuo24</strong></div>
+          <div>博客：<a href="https://pod.xr24.cn" target="_blank" rel="noopener" style="color:#2468f2;text-decoration:none;">pod.xr24.cn</a></div>
+        </div>
+        <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(31,35,41,0.06);font-size:12px;color:#9aa0a6;">
+          简洁高效的浏览器起始页<br>支持快捷方式管理、个性化定制、AI 智能助手
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 快捷键说明弹窗 -->
+  <div class="modal-mask" id="shortcutModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="shortcutTitle" style="max-width:340px;">
+      <h3 id="shortcutTitle">
+        <span>快捷键</span>
+        <button class="close" data-close="shortcutModal" aria-label="关闭">×</button>
+      </h3>
+      <div style="padding:12px 0 4px;display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;">
+          <kbd style="display:inline-block;min-width:72px;padding:3px 10px;font-size:12px;font-family:inherit;color:#5b6470;background:#f3f5f8;border:1px solid rgba(31,35,41,0.08);border-radius:4px;text-align:center;line-height:1.6;">Ctrl+E</kbd>
+          <span style="font-size:14px;color:#1f2329;">切换专注模式</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;">
+          <kbd style="display:inline-block;min-width:72px;padding:3px 10px;font-size:12px;font-family:inherit;color:#5b6470;background:#f3f5f8;border:1px solid rgba(31,35,41,0.08);border-radius:4px;text-align:center;line-height:1.6;">Ctrl+K</kbd>
+          <span style="font-size:14px;color:#1f2329;">切换编辑模式</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;">
+          <kbd style="display:inline-block;min-width:72px;padding:3px 10px;font-size:12px;font-family:inherit;color:#5b6470;background:#f3f5f8;border:1px solid rgba(31,35,41,0.08);border-radius:4px;text-align:center;line-height:1.6;">Ctrl+A</kbd>
+          <span style="font-size:14px;color:#1f2329;">快速打开 AI 助手</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自定义搜索引擎管理弹窗 -->
+  <div class="modal-mask" id="engineModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="engineModalTitle" style="max-width:420px;">
+      <h3 id="engineModalTitle">
+        <span>管理自定义搜索引擎</span>
+        <button class="close" data-close="engineModal" aria-label="关闭">×</button>
+      </h3>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <!-- 添加表单 -->
+        <div style="display:flex;flex-direction:column;gap:8px;background:#f7f8fc;border-radius:10px;padding:12px;">
+          <div style="font-size:12px;color:#9aa0a6;font-weight:500;">添加搜索引擎</div>
+          <input type="text" id="engineName" placeholder="名称，如 搜狗" style="height:36px;padding:0 10px;border:1px solid rgba(31,35,41,0.12);border-radius:8px;font-size:13px;font-family:inherit;outline:none;" />
+          <input type="text" id="engineUrl" placeholder="搜索引擎地址" style="height:36px;padding:0 10px;border:1px solid rgba(31,35,41,0.12);border-radius:8px;font-size:13px;font-family:inherit;outline:none;" />
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="engineIcon" placeholder="图标链接（可选）" style="flex:1;height:36px;padding:0 10px;border:1px solid rgba(31,35,41,0.12);border-radius:8px;font-size:13px;font-family:inherit;outline:none;" />
+            <button id="engineAddBtn" class="btn btn-primary" style="flex-shrink:0;">添加</button>
+          </div>
+          <div style="font-size:11px;color:#9aa0a6;line-height:1.5;">搜索引擎地址填写方法：用 <code style="background:rgba(31,35,41,0.06);padding:0 4px;border-radius:3px;font-size:11px;">%s</code> 代替搜索词，例如 <code style="background:rgba(31,35,41,0.06);padding:0 4px;border-radius:3px;font-size:11px;">https://www.sogou.com/web?query=%s</code></div>
+        </div>
+        <!-- 已有引擎列表 -->
+        <div style="font-size:12px;color:#9aa0a6;font-weight:500;">已有自定义引擎</div>
+        <div id="customEngineList" style="display:flex;flex-direction:column;gap:4px;min-height:40px;">
+          <div class="placeholder" style="display:flex;align-items:center;justify-content:center;padding:16px;font-size:12px;color:#9aa0a6;background:#f7f8fc;border-radius:8px;border:1px dashed rgba(31,35,41,0.12);">
+            暂无自定义引擎
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通用配置弹窗 -->
+  <div class="modal-mask" id="generalConfigModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="generalConfigTitle" style="max-width:360px;">
+      <h3 id="generalConfigTitle">
+        <span>通用配置</span>
+        <button class="close" data-close="generalConfigModal" aria-label="关闭">×</button>
+      </h3>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button id="exportBtn" class="btn btn-secondary" style="width:100%;height:40px;font-size:14px;">导出备份</button>
+        <button id="importBtn" class="btn btn-secondary" style="width:100%;height:40px;font-size:14px;">导入备份</button>
+        <input type="file" id="importFile" accept="application/json,.json" style="display:none;" />
+      </div>
+    </div>
+  </div>
+
+  <!-- 右下角浮动按钮 -->
+  <button class="fab" id="fabBtn" aria-label="菜单" title="菜单">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="6"  r="1.6" fill="currentColor"/>
+      <circle cx="12" cy="12" r="1.6" fill="currentColor"/>
+      <circle cx="12" cy="18" r="1.6" fill="currentColor"/>
+    </svg>
+  </button>
+
+  <!-- 菜单 + 药丸包装 -->
+  <div class="menu-wrapper" id="menuWrapper">
+    <div class="menu" id="menu" role="menu">
+      <button id="generalConfigBtn" role="menuitem">通用配置</button>
+      <hr />
+      <button id="editBtn" role="menuitem">编辑页面</button>
+      <hr />
+      <button id="personalizeBtn" role="menuitem">个性化</button>
+      <hr />
+      <button id="shortcutBtn" role="menuitem">快捷键</button>
+      <hr />
+      <button id="aboutBtn" role="menuitem">关于</button>
+      <hr />
+      <button id="clearBtn" class="danger" role="menuitem">清空所有</button>
+    </div>
+    <!-- 站内搜索直达药丸 -->
+    <label class="site-direct-pill" id="siteDirectPill">
+      <span>站内搜索直达</span>
+      <input type="checkbox" id="toggleSiteDirect" checked />
+    </label>
+  </div>
+
+  <!-- 卡片右键菜单 -->
+  <div class="ctx-menu" id="ctxMenu">
+    <button data-action="newtab">新标签页打开</button>
+    <button data-action="edit">编辑</button>
+    <button data-action="delete" class="danger">删除</button>
+    <hr />
+    <button data-action="copy">复制链接</button>
+    <button data-action="copymd">复制为 Markdown</button>
+  </div>
+
+  <!-- 编辑模式提示条 -->
+  <div class="edit-banner" id="editBanner">
+    <span>编辑模式中：拖动卡片排序，拖到底部删除</span>
+    <button id="exitEditBtn">完成</button>
+  </div>
+
+  <!-- 删除区：编辑模式下拖入即删 -->
+  <div class="dropzone" id="dropzone" aria-hidden="true">
+    <div class="dropzone-inner">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m1 0v14a2 2 0 01-2 2H8a2 2 0 01-2-2V6h12z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>拖到这里删除</span>
+    </div>
+  </div>
+
+  <!-- AI 助手按钮 -->
+  <button class="ai-fab" id="aiFab" aria-label="AI 助手" title="AI 助手">AI</button>
+
+  <!-- AI 聊天面板 -->
+  <div class="ai-panel" id="aiPanel">
+    <div class="ai-panel-header">
+      <span>AI 助手</span>
+      <div style="display:flex;gap:6px;">
+        <button class="ai-clear" id="aiClear" title="清空对话">🗑</button>
+        <button class="ai-config-btn" id="aiConfigToggle" title="AI 配置">⚙</button>
+        <button class="ai-close" id="aiClose">×</button>
+      </div>
+    </div>
+    <div class="ai-messages" id="aiMessages">
+      <div class="ai-msg ai-msg-assistant ai-msg-persist" style="white-space:normal;">
+        你好！我是 Motuo-Tab 小助手，可以帮你：<br>
+        「把知乎移到 DeepSeek 后面」<br>
+        「把 MiniMax 的图标改成蓝色」<br>
+        「添加百度到末尾」<br>
+        问我关于这个工具的问题也可以哦
+      </div>
+    </div>
+    <div class="ai-config" id="aiConfigPanel">
+      <label class="field">
+        <span>API 地址</span>
+        <input type="url" id="aiEndpoint" placeholder="https://api.deepseek.com 或完整路径 https://open.bigmodel.cn/api/paas/v4/chat/completions" autocomplete="off" />
+      </label>
+      <label class="field">
+        <span>API Key</span>
+        <input type="text" id="aiKey" placeholder="sk-xxxxxxxx" autocomplete="off" />
+      </label>
+      <label class="field">
+        <span>模型名称</span>
+        <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
+      </label>
+      <label class="field field-toggle">
+        <span>联网搜索（博查AI · 实时搜索增强）</span>
+        <input type="checkbox" id="aiWebSearch" />
+      </label>
+      <label class="field" id="bochaKeyField">
+        <span>博查AI 密钥</span>
+        <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
+      </label>
+    </div>
+    <div class="ai-input-row">
+      <textarea class="ai-input" id="aiInput" rows="1" placeholder="输入指令…" style="resize:none;"></textarea>
+      <button class="ai-send" id="aiSend">发送</button>
+    </div>
+    <div class="ai-deep-search-row">
+      <label class="ai-deep-search-toggle">
+        <input type="checkbox" id="aiDeepSearch" />
+        <span class="ai-deep-search-track"></span>
+        <span class="ai-deep-search-label">深度思考</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- AI 面板遮罩 -->
+  <div class="ai-overlay" id="aiOverlay"></div>
+
+  <!-- 速记按钮 + 面板 -->
+  <button class="note-fab" id="noteFab" aria-label="速记" title="速记">速记</button>
+  <div class="note-panel" id="notePanel" aria-hidden="true">
+    <div class="note-panel-header">
+      <span>速记</span>
+      <button class="note-close" id="noteClose" aria-label="关闭">×</button>
+    </div>
+    <textarea class="note-input" id="noteInput" placeholder="随手记点东西…输入即自动保存" spellcheck="false"></textarea>
+    <div class="note-status">
+      <span class="note-saved" id="noteSaved">已加载</span>
+      <span class="note-count" id="noteCount">0 字</span>
+      <button class="note-clear" id="noteClear">清空</button>
+    </div>
+  </div>
+
+  <script src="scripts/search.js"></script>
+  <script src="scripts/main.js"></script>
+  <script src="scripts/idle.js"></script>
+
+</body>
+</html>

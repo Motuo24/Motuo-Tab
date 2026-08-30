@@ -79,9 +79,9 @@ try {
 
 **第三步：重启 Firefox，按 `Ctrl+T` 验证**新标签页已指向该文件。
 
-### 在线版（GitHub Pages）
+### 在线使用 / 预览
 
-直接访问线上地址即可使用，无需下载安装；数据仍存于本机浏览器（LocalStorage）。
+直接访问 [https://xr24.cn/motuo-tab-online/](https://xr24.cn/motuo-tab-online/) 即可使用，无需下载安装；数据仍存于本机浏览器（LocalStorage）。
 
 ### 手动构建（开发者）
 
@@ -162,7 +162,6 @@ dist/                 # 构建产物（gitignore）
 | 工作流 | 触发 | 作用 |
 |--------|------|------|
 | `ci.yml` | push / PR | 构建 + 测试 |
-| `pages.yml` | push main | 部署 GitHub Pages |
 | `release.yml` | tag `v*` | 发布 Release（newtab.html + 扩展 zip） |
 
 发布版本：`git tag v1.0.0 && git push origin v1.0.0`。

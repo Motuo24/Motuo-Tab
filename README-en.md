@@ -79,9 +79,9 @@ Replace `file:///C:/path/to/your/index.html` with the real absolute path of your
 
 **Step 3: restart Firefox and press `Ctrl+T`** to verify the new tab now points to the file.
 
-### Online version (GitHub Pages)
+### Online preview / use
 
-Visit the online URL directly — no installation needed. Data still stays in your local browser (LocalStorage).
+Visit [https://xr24.cn/motuo-tab-online/](https://xr24.cn/motuo-tab-online/) directly — no installation needed. Data still stays in your local browser (LocalStorage).
 
 ### Manual build (for developers)
 
@@ -162,7 +162,6 @@ dist/                 # build output (gitignored)
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | push / PR | build + test |
-| `pages.yml` | push main | deploy GitHub Pages |
 | `release.yml` | tag `v*` | publish Release (newtab.html + extension zip) |
 
 Release: `git tag v1.0.0 && git push origin v1.0.0`.

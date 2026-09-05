@@ -719,6 +719,7 @@
   .help-item > strong { display: block; color: var(--text-1); margin-bottom: 4px; }
   .help-item > span { display: block; }
   .help-p { margin: 0 0 10px; }
+  .help-intro { text-indent: 2em; margin-bottom: 14px; }
   .help-note {
     margin: 14px 0 0;
     padding: 8px 10px;
@@ -727,9 +728,10 @@
     background: var(--surface-2);
     border-radius: 8px;
   }
-  .help-ul, .help-ol { margin: 6px 0 0 18px; padding: 0; }
+  .help-ul, .help-ol { list-style: none; margin: 6px 0 0 18px; padding: 0; }
   .help-ul li, .help-ol li { margin-bottom: 6px; }
   .help-ul li:last-child, .help-ol li:last-child { margin-bottom: 0; }
+  .help-ul li::before, .help-ol li::before { content: "·"; margin-right: 6px; color: var(--text-3); }
   .help-kbd {
     display: inline-block;
     padding: 2px 7px;

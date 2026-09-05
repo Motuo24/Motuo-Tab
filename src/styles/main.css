@@ -772,6 +772,21 @@
   }
   .help-footer strong { display: block; color: var(--text-1); margin-bottom: 4px; }
   .help-footer p { margin: 0; color: var(--text-2); }
+
+  /* 快捷键弹窗：独立键帽 chip */
+  .shortcut-keys { display: inline-flex; align-items: center; gap: 4px; min-width: 140px; }
+  .shortcut-kbd {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    line-height: 1.6;
+    color: var(--text-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .shortcut-sep { color: var(--text-4); }
   .modal h3 {
     font-size: 16px;
     color: #1f2329;

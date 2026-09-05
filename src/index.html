@@ -391,15 +391,15 @@
       <textarea class="ai-input" id="aiInput" rows="1" placeholder="输入指令，如「把知乎移到最前面」" style="resize:none;"></textarea>
       <div class="ai-footer-bar">
         <div class="ai-footer-toggles">
-          <label class="ai-deep-search-toggle" title="让模型先推理再回答，响应会稍慢">
+          <label class="ai-mode-btn" title="让模型先推理再回答，响应会稍慢">
             <input type="checkbox" id="aiDeepSearch" />
-            <span class="ai-deep-search-track"></span>
-            <span class="ai-deep-search-label">深度思考</span>
+            <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 18h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10 22h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <span>深度思考</span>
           </label>
-          <label class="ai-deep-search-toggle" title="联网搜索（博查AI），密钥在 ⚙ 配置中填写">
+          <label class="ai-mode-btn" title="联网搜索（博查AI），密钥在 ⚙ 配置中填写">
             <input type="checkbox" id="aiWebSearch" />
-            <span class="ai-deep-search-track"></span>
-            <span class="ai-deep-search-label">联网搜索</span>
+            <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>联网搜索</span>
           </label>
         </div>
         <button class="ai-send" id="aiSend">发送</button>

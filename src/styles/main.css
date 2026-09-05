@@ -711,8 +711,10 @@
     font-size: 13px;
     line-height: 1.75;
     color: var(--text-2);
+    counter-reset: help-sec;
   }
   .help-section h4 { font-size: 15px; font-weight: 600; color: var(--text-1); margin: 0 0 10px; }
+  .help-section h4::before { counter-increment: help-sec; content: counter(help-sec) ". "; }
   .help-section + .help-section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
   .help-item { margin-bottom: 14px; }
   .help-item:last-child { margin-bottom: 0; }

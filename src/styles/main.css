@@ -19,10 +19,6 @@
     --tile-ltr-bg: rgba(38,43,52, var(--ui-ltr-alpha));
     --overlay-bg: linear-gradient(rgba(12,14,18,0.72), rgba(12,14,18,0.72));
   }
-  html[data-theme="auto"] {
-    --tile-img-bg: transparent;
-    --tile-ltr-bg: rgba(255,255,255, var(--ui-ltr-alpha));
-  }
   #bgContainer {
     position: fixed;
     inset: 0;
@@ -1697,9 +1693,10 @@
   }
   .theme-switch button.active:hover { background: var(--surface); color: var(--accent); }
 
-  /* 自动模式：文字与图片卡背景按壁纸像素实时反色 ==========
+  /* 自动模式：文字按壁纸像素实时反色 ==========
      用 mix-blend-mode:difference + 白色文字：黑色壁纸→白字、白色壁纸→黑字、
-     一半黑一半白→各自反色。图片卡只反色“背景层”，图标本身保持原样。
+     一半黑一半白→各自反色。只作用于文字（标题、卡片名），
+     快捷方式的图片与卡片背景保持正常、不随壁纸反色。
      注意 .shortcuts 默认带 transform 会形成堆叠上下文，
      从而隔离混合效果，这里去掉它让文字能直接与壁纸混合。 */
   html[data-theme="auto"] .shortcuts { transform: none; }
@@ -1707,23 +1704,6 @@
   html[data-theme="auto"] .shortcut .label {
     color: #ffffff;
     mix-blend-mode: difference;
-  }
-  /* 图片卡：只让背景层随壁纸反色，图标本身保持原样。
-     图标带透明通道，透过透明区看到的背景会随壁纸反转（白壁纸→黑、黑壁纸→白）。 */
-  html[data-theme="auto"] .shortcut .tile:has(img),
-  html[data-theme="auto"] .slot {
-    background: transparent;
-    position: relative;
-  }
-  html[data-theme="auto"] .shortcut .tile:has(img)::before,
-  html[data-theme="auto"] .slot::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: #ffffff;
-    mix-blend-mode: difference;
-    z-index: -1;
   }
 
   /* ========== 深色模式覆盖层 ========== */

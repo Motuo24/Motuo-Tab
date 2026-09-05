@@ -1092,6 +1092,12 @@
     justify-content: space-between;
     gap: 8px;
   }
+  .ai-footer-toggles {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
   .ai-send {
     height: 34px;
     padding: 0 18px;
@@ -1145,49 +1151,6 @@
   .ai-config input:focus {
     border-color: #2468f2;
     box-shadow: 0 0 0 3px rgba(36,104,242,0.12);
-  }
-  /* 联网搜索 toggle：复选框变成开关样式 */
-  .ai-config .field-toggle {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0;
-  }
-  .ai-config .field-toggle > span {
-    flex: 1;
-    line-height: 1.4;
-  }
-  .ai-config input[type="checkbox"] {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 36px;
-    height: 20px;
-    padding: 0;
-    background: rgba(31,35,41,0.18);
-    border: none;
-    border-radius: 10px;
-    position: relative;
-    cursor: pointer;
-    transition: background .15s ease;
-    flex-shrink: 0;
-  }
-  .ai-config input[type="checkbox"]::after {
-    content: '';
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
-    background: #fff;
-    border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    transition: transform .18s ease;
-  }
-  .ai-config input[type="checkbox"]:checked {
-    background: #2468f2;
-  }
-  .ai-config input[type="checkbox"]:checked::after {
-    transform: translateX(16px);
   }
   /* AI 气泡底部的撤销按钮 + 取消标签 */
   .ai-undo-btn {

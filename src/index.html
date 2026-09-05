@@ -378,12 +378,8 @@
         <span>模型名称</span>
         <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
       </label>
-      <label class="field field-toggle">
-        <span>联网搜索（博查AI · 实时搜索增强）</span>
-        <input type="checkbox" id="aiWebSearch" />
-      </label>
       <label class="field" id="bochaKeyField">
-        <span>博查AI 密钥</span>
+        <span>博查AI 密钥（联网搜索用）</span>
         <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
       </label>
     </div>
@@ -394,11 +390,18 @@
     <div class="ai-input-row">
       <textarea class="ai-input" id="aiInput" rows="1" placeholder="输入指令，如「把知乎移到最前面」" style="resize:none;"></textarea>
       <div class="ai-footer-bar">
-        <label class="ai-deep-search-toggle" title="让模型先推理再回答，响应会稍慢">
-          <input type="checkbox" id="aiDeepSearch" />
-          <span class="ai-deep-search-track"></span>
-          <span class="ai-deep-search-label">深度思考</span>
-        </label>
+        <div class="ai-footer-toggles">
+          <label class="ai-deep-search-toggle" title="让模型先推理再回答，响应会稍慢">
+            <input type="checkbox" id="aiDeepSearch" />
+            <span class="ai-deep-search-track"></span>
+            <span class="ai-deep-search-label">深度思考</span>
+          </label>
+          <label class="ai-deep-search-toggle" title="联网搜索（博查AI），密钥在 ⚙ 配置中填写">
+            <input type="checkbox" id="aiWebSearch" />
+            <span class="ai-deep-search-track"></span>
+            <span class="ai-deep-search-label">联网搜索</span>
+          </label>
+        </div>
         <button class="ai-send" id="aiSend">发送</button>
       </div>
     </div>

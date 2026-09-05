@@ -785,6 +785,12 @@
 
       fabBtn.addEventListener('click', function (e) {
         e.stopPropagation();
+        // 弹窗通常从菜单打开：若已有弹窗打开，再点菜单按钮视为“返回”，关闭它
+        var openModal = document.querySelector('.modal-mask.open');
+        if (openModal) {
+          closeModal(openModal);
+          return;
+        }
         toggleMenu();
       });
 

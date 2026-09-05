@@ -681,7 +681,7 @@
     border-top: 1px solid var(--border);
   }
   .help-nav {
-    width: 128px;
+    width: 132px;
     flex: 0 0 auto;
     padding: 10px 6px;
     border-right: 1px solid var(--border);
@@ -699,6 +699,7 @@
     color: var(--text-2);
     text-decoration: none;
     cursor: pointer;
+    white-space: nowrap;
   }
   .help-nav-item:hover { background: var(--surface-2); color: var(--text-1); }
   .help-nav-item.active { background: var(--surface-2); color: var(--accent); font-weight: 600; }
@@ -714,7 +715,7 @@
     counter-reset: help-sec;
   }
   .help-section { padding-left: 16px; }
-  .help-section h4 { font-size: 15px; font-weight: 600; color: var(--text-1); margin: 0 0 10px -16px; }
+  .help-section h4 { font-size: 15px; font-weight: 600; color: var(--text-1); margin: 0 0 10px -16px; white-space: nowrap; }
   .help-section h4::before { counter-increment: help-sec; content: counter(help-sec) ". "; }
   .help-section + .help-section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
   .help-item { margin-bottom: 14px; }

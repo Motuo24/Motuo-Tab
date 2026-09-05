@@ -1689,14 +1689,19 @@
   }
   .theme-switch button.active:hover { background: var(--surface); color: var(--accent); }
 
-  /* ========== 自动模式：文字按壁纸像素实时反色 ==========
+  /* 自动模式：文字与图标卡按壁纸像素实时反色 ==========
      用 mix-blend-mode:difference + 白色文字：黑色壁纸→白字、白色壁纸→黑字、
-     一半黑一半白→各自反色。注意 .shortcuts 默认带 transform 会形成堆叠上下文，
+     一半黑一半白→各自反色。整张卡片（背景+图标）也一并反色。
+     注意 .shortcuts 默认带 transform 会形成堆叠上下文，
      从而隔离混合效果，这里去掉它让文字能直接与壁纸混合。 */
   html[data-theme="auto"] .shortcuts { transform: none; }
   html[data-theme="auto"] .page-title,
   html[data-theme="auto"] .shortcut .label {
     color: #ffffff;
+    mix-blend-mode: difference;
+  }
+  html[data-theme="auto"] .shortcut .tile,
+  html[data-theme="auto"] .slot {
     mix-blend-mode: difference;
   }
 

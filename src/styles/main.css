@@ -787,6 +787,7 @@
     border-radius: 4px;
   }
   .shortcut-sep { color: var(--text-4); }
+  .shortcut-desc { flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
   .modal h3 {
     font-size: 16px;
     color: #1f2329;

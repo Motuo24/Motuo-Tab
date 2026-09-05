@@ -1441,6 +1441,39 @@
         openModal(document.getElementById('helpModal'));
       });
 
+      // 帮助弹窗：左侧章节导航 → 平滑滚动到对应区块，并按滚动位置高亮当前章节
+      (function initHelpModal() {
+        var modal = document.getElementById('helpModal');
+        if (!modal) return;
+        var content = modal.querySelector('.help-content');
+        var nav = modal.querySelector('.help-nav');
+        if (!content || !nav) return;
+        var items = Array.prototype.slice.call(nav.querySelectorAll('.help-nav-item'));
+        var sections = Array.prototype.slice.call(content.querySelectorAll('.help-section'));
+
+        function setActive(idx) {
+          items.forEach(function (a, i) { a.classList.toggle('active', i === idx); });
+        }
+        items.forEach(function (a, i) {
+          a.addEventListener('click', function (e) {
+            e.preventDefault();
+            var sec = sections[i];
+            if (!sec) return;
+            content.scrollTo({ top: sec.offsetTop - 12, behavior: 'smooth' });
+            setActive(i);
+          });
+        });
+        function onScroll() {
+          var top = content.scrollTop + 48;
+          var idx = 0;
+          sections.forEach(function (sec, i) {
+            if (sec.offsetTop <= top) idx = i;
+          });
+          setActive(idx);
+        }
+        content.addEventListener('scroll', onScroll);
+      })();
+
       document.getElementById('generalConfigBtn').addEventListener('click', function () {
         toggleMenu(false);
         openModal(document.getElementById('generalConfigModal'));

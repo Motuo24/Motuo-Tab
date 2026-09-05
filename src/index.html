@@ -278,40 +278,77 @@
 
   <!-- 帮助弹窗 -->
   <div class="modal-mask" id="helpModal" aria-hidden="true">
-    <div class="modal" role="dialog" aria-labelledby="helpTitle" style="max-width:480px;">
+    <div class="modal" id="helpDialog" role="dialog" aria-labelledby="helpTitle" style="max-width:640px;">
       <h3 id="helpTitle">
         <span>帮助</span>
         <button class="close" data-close="helpModal" aria-label="关闭">×</button>
       </h3>
-      <div class="help-body">
-        <div class="help-h">配置 AI 助手</div>
-        <p class="help-p">点击 AI 助手面板右上角的 <span class="help-kbd">⚙</span> 打开 AI 配置面板，填入三项即可对话：</p>
-        <p class="help-p"><span class="help-code">API 地址</span>：填供应商开放接口，支持两种写法——完整路径（如 <span class="help-code">https://open.bigmodel.cn/api/paas/v4/chat/completions</span>），或仅域名（如 <span class="help-code">https://api.deepseek.com</span>，会自动补全 /v1/chat/completions）。</p>
-        <p class="help-p"><span class="help-code">API Key</span>：到模型平台创建。例如 DeepSeek 开放平台 <a class="help-link" href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>、智谱 <a class="help-link" href="https://open.bigmodel.cn" target="_blank" rel="noopener">open.bigmodel.cn</a> 等，注册后生成 <span class="help-code">sk-</span> 开头的密钥。</p>
-        <p class="help-p"><span class="help-code">模型名称</span>：填该平台提供的模型名，如 <span class="help-code">deepseek-chat</span>、<span class="help-code">glm-4-flash</span>。</p>
-        <p class="help-p">密钥仅保存在本地浏览器（localStorage），不会上传到任何服务器。</p>
+      <div class="help-layout">
+        <nav class="help-nav" aria-label="帮助章节">
+          <a class="help-nav-item active" href="#help-section-ai">配置 AI 助手</a>
+          <a class="help-nav-item" href="#help-section-bocha">博查 AI 密钥</a>
+          <a class="help-nav-item" href="#help-section-keys">键盘快捷键</a>
+          <a class="help-nav-item" href="#help-section-tips">搜索直达 &amp; 技巧</a>
+        </nav>
+        <div class="help-content">
+          <section class="help-section" id="help-section-ai">
+            <h4>配置 AI 助手</h4>
+            <p class="help-p">点击 AI 助手面板右上角的 <span class="help-kbd">⚙</span> 打开配置面板，填入下面的三项即可开始对话：</p>
+            <div class="help-item">
+              <strong>API 地址</strong>
+              <span>填供应商开放接口，支持两种写法：</span>
+              <ul class="help-ul">
+                <li>完整路径，如 <span class="help-code">https://open.bigmodel.cn/api/paas/v4/chat/completions</span></li>
+                <li>仅域名，如 <span class="help-code">https://api.deepseek.com</span>（会自动补全 /v1/chat/completions）</li>
+              </ul>
+            </div>
+            <div class="help-item">
+              <strong>API Key</strong>
+              <span>到模型平台创建，注册后生成 <span class="help-code">sk-</span> 开头的密钥。例如：</span>
+              <ul class="help-ul">
+                <li>DeepSeek：<a class="help-link" href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a></li>
+                <li>智谱：<a class="help-link" href="https://open.bigmodel.cn" target="_blank" rel="noopener">open.bigmodel.cn</a></li>
+              </ul>
+            </div>
+            <div class="help-item">
+              <strong>模型名称</strong>
+              <span>填该平台提供的模型名，如 <span class="help-code">deepseek-chat</span>、<span class="help-code">glm-4-flash</span>。</span>
+            </div>
+            <p class="help-note">密钥仅保存在本地浏览器（localStorage），不会上传到任何服务器。</p>
+          </section>
 
-        <div class="help-h">博查 AI 密钥（联网搜索）</div>
-        <p class="help-p">AI 面板底部勾选「联网搜索」后，AI 会搜索互联网获取实时信息（天气、新闻、股价等）。联网需要「博查AI 密钥」：</p>
-        <p class="help-p">① 打开 <a class="help-link" href="https://open.bochaai.com" target="_blank" rel="noopener">open.bochaai.com</a> 注册/登录；② 进入「API 密钥」页面创建并复制 Key（<span class="help-code">sk-</span> 开头）；③ 回到本页 ⚙ 配置填入「博查AI 密钥」，再勾选「联网搜索」。</p>
-        <p class="help-p">未填密钥时勾选联网搜索，会给出提示提醒补填。</p>
+          <section class="help-section" id="help-section-bocha">
+            <h4>博查 AI 密钥（联网搜索）</h4>
+            <p class="help-p">勾选 AI 面板底部的「联网搜索」后，AI 会搜索互联网获取实时信息（天气、新闻、股价等）。联网需要「博查AI 密钥」：</p>
+            <ol class="help-ol">
+              <li>打开 <a class="help-link" href="https://open.bochaai.com" target="_blank" rel="noopener">open.bochaai.com</a> 并注册 / 登录</li>
+              <li>进入「API 密钥」页面，创建并复制 Key（<span class="help-code">sk-</span> 开头）</li>
+              <li>回到本页 <span class="help-kbd">⚙</span> 配置，填入「博查AI 密钥」，再勾选「联网搜索」</li>
+            </ol>
+            <p class="help-note">未填密钥时勾选联网搜索，会给出提示提醒补填。</p>
+          </section>
 
-        <div class="help-h">键盘快捷键</div>
-        <ul class="help-ul">
-          <li><span class="help-kbd">Ctrl</span>+<span class="help-kbd">E</span> / <span class="help-kbd">⌘</span>+<span class="help-kbd">E</span>：切换专注模式并聚焦搜索框</li>
-          <li><span class="help-kbd">Ctrl</span>+<span class="help-kbd">K</span> / <span class="help-kbd">⌘</span>+<span class="help-kbd">K</span>：切换编辑页面（拖动排序 / 拖到底部删除）</li>
-          <li><span class="help-kbd">Ctrl</span>+<span class="help-kbd">A</span> / <span class="help-kbd">⌘</span>+<span class="help-kbd">A</span>：快速打开 AI 助手</li>
-          <li><span class="help-kbd">Esc</span>：关闭当前弹窗 / 菜单</li>
-          <li><span class="help-kbd">Ctrl</span>+<span class="help-kbd">V</span>：在「添加快捷方式」弹窗里粘贴图片作为图标</li>
-        </ul>
+          <section class="help-section" id="help-section-keys">
+            <h4>键盘快捷键</h4>
+            <ul class="help-ul">
+              <li><span class="help-kbd">Ctrl</span>+<span class="help-kbd">E</span> / <span class="help-kbd">⌘</span>+<span class="help-kbd">E</span>：切换专注模式并聚焦搜索框</li>
+              <li><span class="help-kbd">Ctrl</span>+<span class="help-kbd">K</span> / <span class="help-kbd">⌘</span>+<span class="help-kbd">K</span>：切换编辑页面（拖动排序 / 拖到底部删除）</li>
+              <li><span class="help-kbd">Ctrl</span>+<span class="help-kbd">A</span> / <span class="help-kbd">⌘</span>+<span class="help-kbd">A</span>：快速打开 AI 助手</li>
+              <li><span class="help-kbd">Esc</span>：关闭当前弹窗 / 菜单</li>
+              <li><span class="help-kbd">Ctrl</span>+<span class="help-kbd">V</span>：在「添加快捷方式」弹窗里粘贴图片作为图标</li>
+            </ul>
+          </section>
 
-        <div class="help-h">搜索直达 &amp; 使用技巧</div>
-        <ul class="help-ul">
-          <li>站内搜索直达：搜索框输入 <span class="help-code">bl</span> 关键词（B站）、<span class="help-code">zh</span>（知乎）、<span class="help-code">gh</span>（GitHub）、<span class="help-code">tb</span>（淘宝）、<span class="help-code">db</span>（豆瓣）</li>
-          <li>自定义搜索引擎：搜索框左侧图标下拉，底部可添加自己的搜索引擎</li>
-          <li>管理卡片：右键快捷方式可「新标签页打开 / 编辑 / 删除 / 复制链接」；编辑模式下可拖动排序</li>
-          <li>数据备份：菜单「通用配置」→ 导出备份，可迁移全部数据</li>
-        </ul>
+          <section class="help-section" id="help-section-tips">
+            <h4>搜索直达 &amp; 使用技巧</h4>
+            <ul class="help-ul">
+              <li><strong>站内搜索直达</strong>：搜索框输入 <span class="help-code">bl</span> 关键词（B站）、<span class="help-code">zh</span>（知乎）、<span class="help-code">gh</span>（GitHub）、<span class="help-code">tb</span>（淘宝）、<span class="help-code">db</span>（豆瓣）</li>
+              <li><strong>自定义搜索引擎</strong>：搜索框左侧图标下拉，底部可添加自己的搜索引擎</li>
+              <li><strong>管理卡片</strong>：右键快捷方式可「新标签页打开 / 编辑 / 删除 / 复制链接」；编辑模式下可拖动排序</li>
+              <li><strong>数据备份</strong>：菜单「通用配置」→ 导出备份，可迁移全部数据</li>
+            </ul>
+          </section>
+        </div>
       </div>
     </div>
   </div>

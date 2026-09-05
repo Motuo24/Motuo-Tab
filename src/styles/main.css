@@ -341,15 +341,21 @@
     position: fixed;
     right: 28px;
     bottom: 80px;
-    min-width: 160px;
-    background: #ffffff;
-    border: 1px solid rgba(31, 35, 41, 0.08);
+    width: 172px;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: 0 12px 32px rgba(31, 35, 41, 0.12);
+    box-shadow:
+      0 16px 40px rgba(31, 35, 41, 0.16),
+      0 2px 6px rgba(31, 35, 41, 0.06);
     padding: 6px;
     z-index: 12;
   }
-  .menu button {
+  .menu-group { display: flex; flex-direction: column; margin: 0 0 4px; }
+  .menu .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     width: 100%;
     text-align: left;
     background: transparent;
@@ -357,19 +363,27 @@
     padding: 10px 12px;
     border-radius: 8px;
     font-size: 13px;
-    color: #1f2329;
+    color: var(--text-1);
     cursor: pointer;
     font-family: inherit;
+    transition: background .15s ease;
   }
-  .menu button:hover { background: #f3f5f8; }
-  .menu button.danger { color: #d93b3b; }
-  .menu button.danger:hover { background: #fdecec; }
-
-  .menu hr {
-    border: none;
-    border-top: 1px solid rgba(31, 35, 41, 0.08);
-    margin: 4px 2px;
+  .menu .menu-item:hover { background: var(--surface-2); }
+  .menu .menu-item:active { background: var(--surface-3); }
+  .menu .menu-item .mi { width: 15px; height: 15px; flex: 0 0 auto; color: var(--text-4); }
+  .menu .menu-item:hover .mi { color: var(--text-1); }
+  .menu .menu-item .mi-label { flex: 1; min-width: 0; }
+  .menu .menu-item .arrow {
+    width: 13px; height: 13px;
+    color: var(--text-3);
+    opacity: 0;
+    flex: 0 0 auto;
+    transition: opacity .15s ease, transform .15s ease;
   }
+  .menu .menu-item:hover .arrow { opacity: 1; transform: translateX(2px); }
+  .menu .menu-item.danger { color: var(--danger); margin-top: 6px; }
+  .menu .menu-item.danger .mi { color: var(--danger); }
+  .menu .menu-item.danger:hover { background: rgba(255,107,107,0.10); }
   .menu input[type="file"] { display: none; }
 
   /* 站内搜索直达药丸（跟随菜单显隐） */
@@ -381,7 +395,7 @@
     display: none;
     flex-direction: column;
     align-items: flex-end;
-    gap: 8px;
+    gap: 12px;
     pointer-events: none;
     transition: opacity 0.2s ease;
   }
@@ -394,14 +408,16 @@
   .site-direct-pill {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
-    padding: 8px 16px;
-    background: #ffffff;
-    border: 1px solid rgba(31, 35, 41, 0.08);
-    border-radius: 20px;
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
     box-shadow: 0 4px 14px rgba(31, 35, 41, 0.08);
     font-size: 13px;
-    color: #1f2329;
+    color: var(--text-1);
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
@@ -411,10 +427,10 @@
   .site-direct-pill input[type="checkbox"] {
     -webkit-appearance: none;
     appearance: none;
-    width: 36px;
-    height: 20px;
+    width: 34px;
+    height: 18px;
     background: rgba(31,35,41,0.14);
-    border-radius: 10px;
+    border-radius: 9px;
     cursor: pointer;
     margin: 0;
     flex-shrink: 0;
@@ -427,8 +443,8 @@
     position: absolute;
     left: 2px;
     top: 2px;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: #fff;
     transition: transform .2s ease;
@@ -1789,12 +1805,16 @@
     display: flex;
     gap: 4px;
     padding: 4px;
+    margin: 2px 4px 6px;
     background: var(--surface-2);
     border-radius: 8px;
   }
   .theme-switch button {
     flex: 1;
     width: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     text-align: center;
     border: none;
     background: transparent;
@@ -1812,7 +1832,7 @@
     background: var(--surface);
     color: var(--accent);
     font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.16);
   }
   .theme-switch button.active:hover { background: var(--surface); color: var(--accent); }
 

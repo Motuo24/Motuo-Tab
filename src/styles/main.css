@@ -976,8 +976,8 @@
   .ai-header-logo {
     flex-shrink: 0;
     display: block;
-    width: 23px;
-    height: 21px;
+    width: 30px;
+    height: 28px;
   }
   html[data-theme="dark"] .ai-header-logo .ai-letter { fill: #e6e9ef; }
   .ai-header-model {

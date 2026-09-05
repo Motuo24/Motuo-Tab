@@ -257,8 +257,8 @@
           tile.style.color = colorLuminance(rgb) > 0.5 ? '#1f2329' : '#ffffff';
           tile.style.border = '1px solid rgba(31, 35, 41, 0.10)';
         } else {
-          tile.style.background = '#f5f7fb';
-          tile.style.color = '#1f2329';
+          tile.style.background = 'var(--tile-ltr-bg)';
+          tile.style.color = 'var(--text-1)';
         }
       }
 
@@ -269,7 +269,8 @@
         tile.className = 'tile';
 
         if (item.iconSrc === 'image' && item.icon) {
-          tile.style.background = 'rgba(255, 255, 255, var(--ui-img-alpha, 1))';
+          // 背景用主题变量：深色模式为深色，自动模式为透明（背景由 CSS 反色层提供）
+          tile.style.background = 'var(--tile-img-bg)';
           var img = document.createElement('img');
           img.src = item.icon;
           img.alt = item.name || '';
@@ -285,8 +286,8 @@
           if (item.color) {
             applyTileColor(tile, item.color);
           } else {
-            tile.style.background = '#f5f7fb';
-            tile.style.color = '#1f2329';
+            tile.style.background = 'var(--tile-ltr-bg)';
+            tile.style.color = 'var(--text-1)';
           }
           tile.textContent = ch;
         }
@@ -557,7 +558,7 @@
           img.style.width = '100%';
           img.style.height = '100%';
           img.style.objectFit = 'cover';
-          previewTile.style.background = 'rgba(255, 255, 255, var(--ui-img-alpha, 1))';
+          previewTile.style.background = 'var(--tile-img-bg)';
           previewTile.appendChild(img);
         } else {
           // 文字模式（color / auto 预览）：tile 显示带颜色的字母

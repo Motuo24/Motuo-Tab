@@ -1655,7 +1655,13 @@
       aiEndpoint.addEventListener('change', saveAIConfig);
       aiKey.addEventListener('change', saveAIConfig);
       aiModel.addEventListener('change', saveAIConfig);
-      aiWebSearch.addEventListener('change', saveAIConfig);
+      aiWebSearch.addEventListener('change', function () {
+        saveAIConfig();
+        // 开启联网搜索但没有博查密钥时给出提示，避免"开了却搜不了"的静默失效
+        if (this.checked && !aiBochaKey.value.trim()) {
+          showAIToast('联网搜索需要先在 ⚙ 配置中填写博查AI密钥');
+        }
+      });
       aiBochaKey.addEventListener('change', saveAIConfig);
       aiDeepSearch.addEventListener('change', saveAIConfig);
 

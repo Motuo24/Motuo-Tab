@@ -1465,6 +1465,9 @@
       var aiMessages = document.getElementById('aiMessages');
       var aiInput = document.getElementById('aiInput');
       var aiSend = document.getElementById('aiSend');
+      var aiModelBadge = document.getElementById('aiModelBadge');
+      var aiToastEl = document.getElementById('aiToast');
+      var aiScrollBottom = document.getElementById('aiScrollBottom');
 
       var aiEndpoint = document.getElementById('aiEndpoint');
       var aiKey = document.getElementById('aiKey');
@@ -1599,6 +1602,25 @@
         aiMessages.scrollTop = aiMessages.scrollHeight;
       }
 
+      // 面板内轻提示：操作成功等反馈用 Toast，不打断对话流
+      var aiToastTimer = null;
+      function showAIToast(msg) {
+        if (!aiToastEl) return;
+        aiToastEl.textContent = msg;
+        aiToastEl.classList.add('show');
+        if (aiToastTimer) clearTimeout(aiToastTimer);
+        aiToastTimer = setTimeout(function () { aiToastEl.classList.remove('show'); }, 2200);
+      }
+
+      // 头部模型徽标：让当前使用的模型在标题上可见（任务上下文指示）
+      function updateModelBadge() {
+        if (!aiModelBadge) return;
+        var m = aiModel.value.trim();
+        aiModelBadge.textContent = m;
+        aiModelBadge.style.display = m ? '' : 'none';
+        aiModelBadge.title = m ? '当前模型：' + m : '';
+      }
+
       // 加载已保存的配置
       (function loadAIConfig() {
         try {
@@ -1613,9 +1635,11 @@
             if (cfg.deepSearch) aiDeepSearch.checked = true;
           }
         } catch (e) {}
+        updateModelBadge();
       })();
 
       function saveAIConfig() {
+        updateModelBadge();
         try {
           localStorage.setItem(AI_CONFIG_KEY, JSON.stringify({
             endpoint: aiEndpoint.value.trim(),
@@ -2055,7 +2079,13 @@
       aiFab.addEventListener('click', function () { toggleAI(true); });
       aiClose.addEventListener('click', function () { toggleAI(false); });
       aiOverlay.addEventListener('click', function () { toggleAI(false); });
-      document.getElementById('aiClear').addEventListener('click', clearAIConversation);
+      document.getElementById('aiClear').addEventListener('click', function () {
+        if (aiSending) return;
+        // 破坏性操作：仅在有历史时二次确认，防止误触
+        if (aiHistory.length > 1 && !confirm('确定清空全部对话？清空后不可恢复。')) return;
+        clearAIConversation();
+        showAIToast('对话已清空');
+      });
 
       // AI 配置面板开关
       var aiConfigPanel = document.getElementById('aiConfigPanel');
@@ -2100,6 +2130,7 @@
           render(list);
           localStorage.removeItem(AI_SNAPSHOT_KEY);
           markUndone(undoBtn);
+          showAIToast('已撤销，卡片恢复到操作前');
           // 纯回滚语义：撤销只恢复列表，不自动把原指令重发回 agent（避免"撤了又做"）
         } catch (e) {
           undoBtn.textContent = '撤销失败';
@@ -2123,8 +2154,25 @@
 
       aiInput.addEventListener('input', function () {
         this.style.height = 'auto';
-        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        this.style.height = Math.min(this.scrollHeight, 140) + 'px';
       });
+
+      // 回到底部：消息区向上滚离底部一段距离时出现
+      function updateScrollBtn() {
+        if (!aiScrollBottom) return;
+        var far = aiMessages.scrollHeight - aiMessages.scrollTop - aiMessages.clientHeight > 160;
+        aiScrollBottom.classList.toggle('show', far);
+      }
+      if (aiScrollBottom) {
+        aiMessages.addEventListener('scroll', updateScrollBtn);
+        aiScrollBottom.addEventListener('click', function () {
+          try {
+            aiMessages.scrollTo({ top: aiMessages.scrollHeight, behavior: 'smooth' });
+          } catch (e) {
+            aiMessages.scrollTop = aiMessages.scrollHeight;
+          }
+        });
+      }
 
       function sendAI() {
         var text = aiInput.value.trim();
@@ -2639,14 +2687,8 @@
               }
             });
 
-            // 在气泡里显示保存状态
-            if (bubble) {
-              var statusLine = document.createElement('div');
-              statusLine.className = 'ai-save-status ' + (savedOk ? 'ok' : 'err');
-              statusLine.style.marginTop = '8px';
-              statusLine.textContent = savedOk ? '✓ 已保存到 localStorage' : '✗ 保存失败';
-              bubble.appendChild(statusLine);
-            }
+            // 保存结果用轻提示反馈，不再往气泡里插技术性状态行
+            showAIToast(savedOk ? '已应用 AI 的修改' : '修改已应用，但保存失败（存储空间不足？）');
 
             // 把流式时的 placeholder 换成实际的 tool call chips
             if (bubble) {

@@ -206,15 +206,6 @@ tests/                # jsdom regression tests
 dist/                 # build output (gitignored)
 ```
 
-## GitHub Actions
-
-| Workflow      | Trigger   | Purpose                                       |
-| ------------- | --------- | --------------------------------------------- |
-| `ci.yml`      | push / PR | build + test                                  |
-| `release.yml` | tag `v*`  | publish Release (newtab.html + extension zip) |
-
-Release: `git tag v0.8.2 && git push origin v0.8.2`.
-
 ## License
 
 [MIT](LICENSE) © 2026 Motuo24

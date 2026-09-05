@@ -18,6 +18,16 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 - **Scratchpad**: quick notes, auto-saved
 - **Export / Import**: full backup (shortcuts + wallpaper + AI config & history + personalization)
 
+## Screenshots
+
+Home (wallpaper + search + shortcuts):
+
+![Home](docs/images/screenshot-home.jpg)
+
+| Scratchpad | AI Assistant |
+|------------|--------------|
+| ![Scratchpad](docs/images/screenshot-scratchpad.jpg) | ![AI Assistant](docs/images/screenshot-ai.jpg) |
+
 ## Installation
 
 Currently supports Chromium-based browsers (Chrome / Edge, etc.). Firefox users can use the "Single-file HTML" method; to point the new tab directly at a local file, see the AutoConfig tutorial below.

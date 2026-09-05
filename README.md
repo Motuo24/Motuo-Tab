@@ -23,6 +23,16 @@
 
 - **导出 / 导入**：完整备份（快捷方式 + 壁纸 + AI 配置与历史 + 个性化配置）
 
+## 预览
+
+主页（壁纸 + 搜索 + 快捷方式）：
+
+![主页](docs/images/screenshot-home.jpg)
+
+| 速记本 | AI 助手 |
+|--------|---------|
+| ![速记本](docs/images/screenshot-scratchpad.jpg) | ![AI 助手](docs/images/screenshot-ai.jpg) |
+
 ## 安装
 
 目前仅支持 Chromium 内核浏览器（Chrome / Edge 等）。Firefox 用户请用「单文件 HTML」；如需把新标签页直接指向本地文件，见下方 AutoConfig 教程。

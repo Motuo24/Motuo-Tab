@@ -1,6 +1,20 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
-  :root { --ui-alpha: 1; --ui-img-alpha: 1; --ui-ltr-alpha: 1; --ui-slider-pct: 100%; --blur-slider-pct: 15%; }
+  :root {
+    --ui-alpha: 1; --ui-img-alpha: 1; --ui-ltr-alpha: 1; --ui-slider-pct: 100%; --blur-slider-pct: 15%;
+    --text-1: #1f2329; --text-2: #4b5158; --text-3: #9aa0a6; --text-4: #5b6470; --text-link: #2468f2;
+    --accent: #2468f2; --danger: #d93b3b;
+    --surface: #ffffff; --surface-2: #f3f5f8; --surface-3: #f7f8fc;
+    --border: rgba(31,35,41,0.08); --border-strong: rgba(31,35,41,0.12);
+    --overlay-bg: linear-gradient(rgba(255,255,255,0.78), rgba(255,255,255,0.78));
+  }
+  html[data-theme="dark"] {
+    --text-1: #e6e9ef; --text-2: #c2c7d1; --text-3: #8b93a1; --text-4: #a9b0bd; --text-link: #5a9bff;
+    --accent: #5a9bff; --danger: #ff6b6b;
+    --surface: #1c2027; --surface-2: #2a2f3a; --surface-3: #232833;
+    --border: rgba(255,255,255,0.10); --border-strong: rgba(255,255,255,0.18);
+    --overlay-bg: linear-gradient(rgba(12,14,18,0.72), rgba(12,14,18,0.72));
+  }
   #bgContainer {
     position: fixed;
     inset: 0;
@@ -1642,3 +1656,183 @@
     transition: background .15s ease;
   }
   .note-clear:hover { background: rgba(217,59,59,0.06); }
+
+  /* ========== 主题切换控件（分段按钮） ========== */
+  .theme-switch {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--surface-2);
+    border-radius: 8px;
+  }
+  .theme-switch button {
+    flex: 1;
+    width: auto;
+    text-align: center;
+    border: none;
+    background: transparent;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--text-2);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background .15s ease, color .15s ease;
+  }
+  .theme-switch button:not(.active):hover { color: var(--text-1); }
+  .theme-switch button.active {
+    background: var(--surface);
+    color: var(--accent);
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  .theme-switch button.active:hover { background: var(--surface); color: var(--accent); }
+
+  /* ========== 自动模式：文字按壁纸像素实时反色 ==========
+     用 mix-blend-mode:difference + 白色文字：黑色壁纸→白字、白色壁纸→黑字、
+     一半黑一半白→各自反色。注意 .shortcuts 默认带 transform 会形成堆叠上下文，
+     从而隔离混合效果，这里去掉它让文字能直接与壁纸混合。 */
+  html[data-theme="auto"] .shortcuts { transform: none; }
+  html[data-theme="auto"] .page-title,
+  html[data-theme="auto"] .shortcut .label {
+    color: #ffffff;
+    mix-blend-mode: difference;
+  }
+
+  /* ========== 深色模式覆盖层 ========== */
+  html[data-theme="dark"] body {
+    background:
+      radial-gradient(1200px 800px at 18% 25%, #1b1f27 0%, transparent 60%),
+      radial-gradient(900px 700px at 92% 85%, #14171d 0%, transparent 55%),
+      linear-gradient(180deg, #161920 0%, #10131a 100%);
+    color: var(--text-1);
+  }
+  html[data-theme="dark"] .page-title { color: var(--text-1); }
+
+  /* 搜索区 */
+  html[data-theme="dark"] .search-box {
+    background: rgba(28, 32, 39, calc(0.9 * var(--ui-alpha)));
+    border-color: rgba(255,255,255,0.08);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.05) inset,
+      0 18px 40px rgba(0,0,0,0.45),
+      0 4px 10px rgba(0,0,0,0.30);
+  }
+  html[data-theme="dark"] .search-box input { color: var(--text-1); }
+  html[data-theme="dark"] .search-box input::placeholder { color: var(--text-3); }
+  html[data-theme="dark"] .search-box .logo { color: var(--accent); }
+  html[data-theme="dark"] .search-box .logo:after { border-top-color: var(--accent); }
+  html[data-theme="dark"] .search-suggestions { background: var(--surface); border-color: var(--border); }
+  html[data-theme="dark"] .search-suggestions .sg-item { color: var(--text-1); }
+  html[data-theme="dark"] .search-suggestions .sg-item:hover { background: var(--surface-2); }
+  html[data-theme="dark"] .search-suggestions .sg-item .sg-icon { color: var(--text-3); }
+  html[data-theme="dark"] .search-suggestions .sg-item .sg-del { color: var(--text-3); }
+  html[data-theme="dark"] .search-suggestions .sg-item .sg-del:hover { color: var(--danger); background: rgba(255,107,107,0.12); }
+  html[data-theme="dark"] .search-suggestions .sg-clear { color: var(--text-3); }
+  html[data-theme="dark"] .search-suggestions .sg-clear:hover { background: var(--surface-2); color: var(--danger); }
+
+  /* 搜索引擎下拉 */
+  html[data-theme="dark"] .engine-selector { background: var(--surface); border-color: var(--border); }
+  html[data-theme="dark"] .engine-selector .opt { color: var(--text-1); }
+  html[data-theme="dark"] .engine-selector .opt:hover { background: var(--surface-2); }
+  html[data-theme="dark"] .engine-selector .opt.current { color: var(--accent); }
+  html[data-theme="dark"] .engine-selector .engine-divider { border-top-color: var(--border); }
+  html[data-theme="dark"] .engine-manage-btn { color: var(--accent); }
+  html[data-theme="dark"] .engine-manage-btn:hover { background: var(--surface-2); }
+
+  /* 卡片 */
+  html[data-theme="dark"] .shortcut { color: var(--text-1); }
+  html[data-theme="dark"] .shortcut .tile {
+    background: rgba(38, 43, 52, var(--ui-ltr-alpha));
+    border-color: var(--border);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 10px 22px rgba(0,0,0,0.35);
+  }
+  html[data-theme="dark"] .shortcut:hover .tile {
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 16px 28px rgba(0,0,0,0.50);
+  }
+  html[data-theme="dark"] .shortcut .label { color: var(--text-2); }
+  html[data-theme="dark"] .tile.white { background: rgba(38, 43, 52, var(--ui-ltr-alpha)); color: var(--text-1); border-color: var(--border); }
+  html[data-theme="dark"] .slot {
+    background: rgba(38, 43, 52, var(--ui-alpha));
+    border-color: rgba(255,255,255,0.18);
+    color: var(--text-3);
+  }
+  html[data-theme="dark"] .slot:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* FAB / 菜单 / 右键菜单 / 站内直达药丸 */
+  html[data-theme="dark"] .fab { background: var(--surface); border-color: var(--border); color: var(--text-4); }
+  html[data-theme="dark"] .menu { background: var(--surface); border-color: var(--border); }
+  html[data-theme="dark"] .menu button { color: var(--text-1); }
+  html[data-theme="dark"] .menu button:hover { background: var(--surface-2); }
+  html[data-theme="dark"] .menu button.danger { color: var(--danger); }
+  html[data-theme="dark"] .menu button.danger:hover { background: rgba(255,107,107,0.12); }
+  html[data-theme="dark"] .menu hr { border-top-color: var(--border); }
+  html[data-theme="dark"] .site-direct-pill { background: var(--surface); border-color: var(--border); color: var(--text-1); }
+  html[data-theme="dark"] .site-direct-pill input[type="checkbox"] { background: rgba(255,255,255,0.18); }
+  html[data-theme="dark"] .site-direct-pill input[type="checkbox"]::after { background: #fff; }
+  html[data-theme="dark"] .site-direct-pill input[type="checkbox"]:checked { background: var(--accent); }
+
+  html[data-theme="dark"] .ctx-menu { background: var(--surface); border-color: var(--border); }
+  html[data-theme="dark"] .ctx-menu button { color: var(--text-1); }
+  html[data-theme="dark"] .ctx-menu button:hover { background: var(--surface-2); }
+  html[data-theme="dark"] .ctx-menu button.danger { color: var(--danger); }
+  html[data-theme="dark"] .ctx-menu button.danger:hover { background: rgba(255,107,107,0.12); }
+  html[data-theme="dark"] .ctx-menu hr { border-top-color: var(--border); }
+
+  /* 编辑模式 / 删除区 */
+  html[data-theme="dark"] .dropzone.active { background: rgba(255,107,107,0.10); }
+
+  /* 弹窗 */
+  html[data-theme="dark"] .modal-mask { background: rgba(0,0,0,0.50); }
+  html[data-theme="dark"] .modal { background: var(--surface); color: var(--text-1); }
+  html[data-theme="dark"] .modal h3 .close { color: var(--text-3); }
+  html[data-theme="dark"] .modal h3 .close:hover { color: var(--text-1); }
+  html[data-theme="dark"] .field > span,
+  html[data-theme="dark"] .field-group legend { color: var(--text-2); }
+  html[data-theme="dark"] .field input[type="text"],
+  html[data-theme="dark"] .field input[type="url"],
+  html[data-theme="dark"] .ai-config input[type="text"],
+  html[data-theme="dark"] .ai-config input[type="url"] {
+    background: var(--surface-3);
+    color: var(--text-1);
+    border-color: var(--border-strong);
+  }
+  html[data-theme="dark"] .field input::placeholder { color: var(--text-3); }
+  html[data-theme="dark"] .field-group { border-color: var(--border); }
+  html[data-theme="dark"] .radio { color: var(--text-1); }
+  html[data-theme="dark"] .image-dropzone { background: var(--surface-3); border-color: var(--border-strong); color: var(--text-3); }
+  html[data-theme="dark"] .btn-secondary { background: var(--surface-2); color: var(--text-1); }
+  html[data-theme="dark"] .btn-secondary:hover { background: #333a46; }
+  html[data-theme="dark"] .btn-primary { background: var(--accent); color: #fff; }
+  html[data-theme="dark"] .btn-primary:hover { background: #6aa5ff; }
+  html[data-theme="dark"] .preview-label { color: var(--text-3); }
+  html[data-theme="dark"] .personalize-section { border-color: var(--border); }
+  html[data-theme="dark"] .personalize-section-title { color: var(--text-2); }
+  html[data-theme="dark"] .personalize-section .slider-val { color: var(--text-2); }
+  html[data-theme="dark"] .personalize-section input[type="color"] { background: var(--surface-3); border-color: var(--border-strong); }
+  html[data-theme="dark"] .personalize-section input[type="color"]:hover { border-color: rgba(255,255,255,0.30); }
+
+  /* AI 面板 / 速记 */
+  html[data-theme="dark"] .ai-fab,
+  html[data-theme="dark"] .note-fab { background: var(--surface); border-color: var(--border); color: var(--text-4); }
+  html[data-theme="dark"] .ai-panel { background: var(--surface); color: var(--text-1); }
+  html[data-theme="dark"] .ai-panel-header { border-bottom-color: var(--border); }
+  html[data-theme="dark"] .ai-header-title { color: var(--text-1); }
+  html[data-theme="dark"] .ai-input-row { border-top-color: var(--border); }
+  html[data-theme="dark"] .ai-input {
+    background: var(--surface-3);
+    color: var(--text-1);
+    border-color: var(--border-strong);
+  }
+  html[data-theme="dark"] .ai-input::placeholder { color: var(--text-3); }
+  html[data-theme="dark"] .ai-config { background: var(--surface-3); }
+  html[data-theme="dark"] .ai-config .field > span { color: var(--text-2); }
+  html[data-theme="dark"] .note-panel { background: var(--surface); color: var(--text-1); }
+  html[data-theme="dark"] .note-panel-header { border-bottom-color: var(--border); color: var(--text-1); }
+  html[data-theme="dark"] .note-input { color: var(--text-1); }
+  html[data-theme="dark"] .note-status { border-top-color: var(--border); color: var(--text-3); }

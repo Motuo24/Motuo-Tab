@@ -21,6 +21,7 @@
       var AI_HISTORY_KEY     = 'newtab.ai.history.v1';     // AI 对话历史
       var AI_SNAPSHOT_KEY    = 'newtab.ai.snapshot.v1';    // AI 操作前的快照（用于撤销）
       var SCRATCHPAD_KEY     = 'newtab.scratchpad.v1';     // 速记本内容
+      var THEME_KEY          = 'newtab.theme.v1';          // 主题模式：light / dark / auto
       // IndexedDB（壁纸 blob 存这里）
       var DB_NAME            = 'MotuoTabDB';
       var DB_VERSION         = 1;
@@ -1369,8 +1370,8 @@
           currentWallpaperUrl = URL.createObjectURL(blob);
           bgContainer.style.backgroundImage = 'url(' + currentWallpaperUrl + ')';
           bgContainer.style.filter = 'blur(' + (blurPx || 0) + 'px)';
-          document.body.style.background =
-            'linear-gradient(rgba(255,255,255,0.78), rgba(255,255,255,0.78))';
+          // 遮罩改用 CSS 变量，深色模式下自动切换为深色遮罩（主题切换即时生效）
+          document.body.style.background = 'var(--overlay-bg)';
         }
       }
 
@@ -1388,6 +1389,35 @@
       (function initWallpaper() {
         refreshBackground();
       })();
+
+      // ========== 主题模式：浅色 / 深色 / 自动 ==========
+      // 浅色=默认配色；深色=深色覆盖层；自动=文字按壁纸像素用 mix-blend-mode 反色
+      function getTheme() {
+        try { return localStorage.getItem(THEME_KEY) || 'light'; } catch (e) { return 'light'; }
+      }
+      function updateThemeButtons(mode) {
+        document.querySelectorAll('.theme-btn').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-theme') === mode);
+        });
+      }
+      function applyTheme(mode) {
+        // 用 <html data-theme="..."> 驱动 CSS（浅色/深色覆盖层 + 自动反色）
+        document.documentElement.setAttribute('data-theme', mode);
+        updateThemeButtons(mode);
+      }
+      function setTheme(mode, persist) {
+        applyTheme(mode);
+        if (persist !== false) {
+          try { localStorage.setItem(THEME_KEY, mode); } catch (e) {}
+        }
+      }
+      document.querySelectorAll('.theme-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          setTheme(btn.getAttribute('data-theme'));
+        });
+      });
+      // 初始化：应用已保存的主题（不重复写回）
+      setTheme(getTheme(), false);
 
       // 个性化按钮：打开弹窗
       personalizeBtn.addEventListener('click', function () {

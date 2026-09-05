@@ -32,6 +32,16 @@ Download the latest extension package from [Releases](../../releases), unzip it,
 
 New tabs will now show Motuo-Tab.
 
+> ⚠️ **Keep the unzipped `extension` folder safe — it IS the extension.**
+> "Load unpacked" does not copy files into the browser; the browser only references
+> this folder. Deleting, moving, or renaming it will break the extension.
+> Unzip it to a long-term, fixed location (e.g. `D:\Motuo-Tab\`).
+
+**Updating & data safety**:
+
+- To update: unzip the new version **over the same path** (keep the folder's absolute path unchanged), then click the reload icon on the extension card — no reinstall needed;
+- Your data (shortcuts, AI config & history, etc.) lives in the browser's local storage, bound to the extension ID. For unpacked extensions the ID is derived from the folder's **absolute path** — once the path changes, the browser treats it as a brand-new extension and old data becomes unreachable. So never move or delete the folder.
+
 ### Single-file HTML (no installation)
 
 Download the single-file `newtab.html` from [Releases](../../releases) and double-click to use it. You can also set it as your new tab page:

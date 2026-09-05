@@ -763,6 +763,14 @@
   }
   .help-link { color: var(--text-link); text-decoration: none; }
   .help-link:hover { text-decoration: underline; }
+  .help-footer {
+    margin-top: 24px;
+    padding-top: 16px;
+    padding-left: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .help-footer strong { display: block; color: var(--text-1); margin-bottom: 4px; }
+  .help-footer p { margin: 0; color: var(--text-2); }
   .modal h3 {
     font-size: 16px;
     color: #1f2329;

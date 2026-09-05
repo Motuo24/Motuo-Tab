@@ -1635,22 +1635,30 @@
       aiBochaKey.addEventListener('change', saveAIConfig);
       aiDeepSearch.addEventListener('change', saveAIConfig);
 
-      // 深度搜索：在气泡内部创建思考过程容器
+      // 深度搜索：在气泡内部创建思考过程容器（默认收起，点击头部展开/收起）
       function createThinkingEl() {
         var el = document.createElement('div');
         el.className = 'ai-thinking';
-        el.innerHTML = '<div class="ai-thinking-header"><span class="ai-thinking-arrow">▶</span> 深度思考</div><div class="ai-thinking-body"></div>';
-        el.querySelector('.ai-thinking-header').onclick = function () { el.classList.toggle('open'); };
+        el.innerHTML = '<div class="ai-thinking-header" role="button" tabindex="0" aria-expanded="false"><span class="ai-thinking-arrow">▶</span> 深度思考</div><div class="ai-thinking-body"></div>';
+        var header = el.querySelector('.ai-thinking-header');
+        function flip() {
+          var open = el.classList.toggle('open');
+          header.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        header.onclick = flip;
+        header.onkeydown = function (ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); flip(); }
+        };
         return el;
       }
-      // 思考步骤图标映射（语义化 SVG 圆点，按类型区分颜色）
+      // 思考步骤图标映射（语义化小圆点，按类型区分颜色；刻意做小以降低视觉比重）
       var _thinkingIconMap = {
-        depth:    '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#7a4df0"/></svg>',
-        reasoning:'<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#2468f2"/></svg>',
-        search:   '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#e88a2b"/></svg>',
-        result:   '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#1aa86b"/></svg>',
-        done:     '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#1aa86b"/></svg>',
-        error:    '<svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#d93b3b"/></svg>'
+        depth:    '<svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="#7a4df0"/></svg>',
+        reasoning:'<svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="#2468f2"/></svg>',
+        search:   '<svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="#e88a2b"/></svg>',
+        result:   '<svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="#1aa86b"/></svg>',
+        done:     '<svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="#1aa86b"/></svg>',
+        error:    '<svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="#d93b3b"/></svg>'
       };
       // 添加一步思考记录（返回步骤元素，便于缓存引用）
       function addThinkingStep(thinkingEl, iconType, text) {
@@ -1662,14 +1670,21 @@
         step.innerHTML = '<span class="step-icon">' + iconSvg + '</span><span class="step-text">' + text + '</span>';
         body.appendChild(step);
         thinkingEl.classList.add('open');
+        var _h = thinkingEl.querySelector('.ai-thinking-header');
+        if (_h) _h.setAttribute('aria-expanded', 'true');
         aiMessages.scrollTop = aiMessages.scrollHeight;
         return step;
       }
-      // 标记思考完成（仅移除 spinner，保留推理正文，不再追加"完成"提示）
+      // 标记思考完成：移除加载指示并收起，降低完成后的默认信息密度
       function finishThinking(thinkingEl) {
         if (!thinkingEl) return;
-        var spinner = thinkingEl.querySelector('.ai-thinking-spinner');
-        if (spinner) spinner.remove();
+        var spins = thinkingEl.querySelectorAll('.ai-spinner');
+        for (var i = 0; i < spins.length; i++) {
+          if (spins[i].parentNode) spins[i].parentNode.removeChild(spins[i]);
+        }
+        thinkingEl.classList.remove('open');
+        var _h = thinkingEl.querySelector('.ai-thinking-header');
+        if (_h) _h.setAttribute('aria-expanded', 'false');
       }
 
       function toggleAI(open) {
@@ -1717,41 +1732,53 @@
         var frag = document.createDocumentFragment();
         var rest = String(content || '');
 
-        // 1) 思考过程
+        // 0) 安全兜底：未闭合的标签（异常数据/中断的流式输出）一律不展示原文。
+        //    用 tempered dot 确保只剥离"确实没有闭合标签"的尾巴，不影响正常内容
+        rest = rest
+          .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '')
+          .replace(/<think>(?:(?!<\/think>)[\s\S])*$/i, '');
+
+        // 1) 思考过程（默认收起，点击展开；避免窄侧边栏默认信息密度过高）
         var thinkMatch = rest.match(/<think>([\s\S]*?)<\/think>/i);
         if (thinkMatch) {
-          var thinkEl = document.createElement('div');
-          thinkEl.className = 'ai-thinking open';
-          thinkEl.innerHTML = '<div class="ai-thinking-header"><span class="ai-thinking-arrow">▶</span> 深度思考</div><div class="ai-thinking-body"></div>';
-          var bodyEl = thinkEl.querySelector('.ai-thinking-body');
+          var thinkEl = createThinkingEl();
           var stepEl = document.createElement('div');
           stepEl.className = 'ai-thinking-step ai-reasoning-step';
-          stepEl.innerHTML = '<span class="step-icon"><svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="#2468f2"/></svg></span><span class="step-text"><span class="ai-reasoning-text"></span></span>';
+          stepEl.innerHTML = '<span class="step-icon">' + _thinkingIconMap.reasoning + '</span><span class="step-text"><span class="ai-reasoning-text"></span></span>';
           stepEl.querySelector('.ai-reasoning-text').textContent = thinkMatch[1];
-          bodyEl.appendChild(stepEl);
+          thinkEl.querySelector('.ai-thinking-body').appendChild(stepEl);
           frag.appendChild(thinkEl);
           rest = rest.slice(0, thinkMatch.index) + rest.slice(thinkMatch.index + thinkMatch[0].length);
         }
 
-        // 2) 工具调用（联网搜索）
-        var toolMatch = rest.match(/<tool_call>([\s\S]*?)<\/tool_call>/i);
-        if (toolMatch) {
-          var _tq = '';
+        // 2) 工具调用（联网搜索）：剥离全部 <tool_call> 原始标签（含文本标签形式），
+        //    只展示"已搜索"摘要 chip —— 原始代码绝不暴露给用户
+        var queries = [];
+        rest = rest.replace(/<tool_call>([\s\S]*?)<\/tool_call>/gi, function (_all, inner) {
+          var q = '';
           try {
-            var tc = JSON.parse(toolMatch[1].trim());
-            _tq = String(tc.query || '');
+            var tc = JSON.parse(inner.trim());
+            q = String((tc && tc.query) || '');
           } catch (e) {
             // 兼容旧历史里的"文本标签"形式：<function=web_search><parameter=query>…</parameter>
-            var _tf = parseTextToolCall(rest);
-            if (_tf) _tq = _tf.query;
+            var tf = parseTextToolCall('<tool_call>' + inner + '</tool_call>');
+            if (tf) q = tf.query;
           }
-          if (_tq) {
-            var searchEl = document.createElement('div');
-            searchEl.className = 'ai-ops-placeholder';
-            searchEl.innerHTML = '<span class="ai-ops-spin">🔍</span> 联网搜索: ' + _tq.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            frag.appendChild(searchEl);
-          }
-          rest = rest.slice(0, toolMatch.index) + rest.slice(toolMatch.index + toolMatch[0].length);
+          if (q) queries.push(q);
+          return '';
+        });
+        if (queries.length) {
+          var chipsWrap = document.createElement('div');
+          chipsWrap.className = 'ai-search-chips';
+          queries.forEach(function (q) {
+            var chip = document.createElement('span');
+            chip.className = 'ai-search-chip';
+            chip.title = '已联网搜索「' + q + '」';
+            chip.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.2"/><path d="M20.5 20.5l-4.3-4.3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span></span>';
+            chip.querySelector('span').textContent = q;
+            chipsWrap.appendChild(chip);
+          });
+          frag.appendChild(chipsWrap);
         }
 
         // 3) ops 工具操作
@@ -1883,9 +1910,39 @@
         var thinkingEls = el.querySelectorAll('.ai-thinking');
         el.innerHTML = '';
         for (var ti = 0; ti < thinkingEls.length; ti++) { el.appendChild(thinkingEls[ti]); }
-        // 剔除"文本标签"形式的工具调用（<tool_call>…</tool_call>），
-        // 避免流式期间把原始工具调用代码暴露给用户；搜索状态由后续流程展示。
-        text = String(text || '').replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '');
+
+        text = String(text || '');
+
+        // 部分模型（如 GLM 系列）把推理以 <think>…</think> 内联在正文里而非 reasoning_content：
+        // 注入到思考卡片展示，绝不把原始标签暴露给用户。若 reasoning_content 已在流入则跳过。
+        var inlineThink = text.match(/<think>([\s\S]*?)<\/think>/i);
+        if (inlineThink) {
+          text = text.replace(inlineThink[0], '');
+          var _th = el.querySelector('.ai-thinking');
+          var _rt = _th && _th.querySelector('.ai-reasoning-text');
+          if (!_rt || !_rt.textContent) {
+            if (!_th) { _th = createThinkingEl(); el.appendChild(_th); }
+            _rt = _th.querySelector('.ai-reasoning-text');
+            if (!_rt) {
+              var _body = _th.querySelector('.ai-thinking-body');
+              var _step = document.createElement('div');
+              _step.className = 'ai-thinking-step ai-reasoning-step';
+              _step.innerHTML = '<span class="step-icon">' + _thinkingIconMap.reasoning + '</span><span class="step-text"><span class="ai-spinner"></span> <span class="ai-reasoning-text"></span></span>';
+              _body.appendChild(_step);
+              _rt = _step.querySelector('.ai-reasoning-text');
+            }
+            _rt.textContent = inlineThink[1];
+            _th.classList.add('open');
+          }
+        }
+
+        // 剔除工具调用与思考标签（含流式中尚未闭合的半截标签），避免原始代码暴露；
+        // 搜索状态由后续流程以"正在搜索…"占位展示
+        text = text
+          .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+          .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '')
+          .replace(/<think>(?:(?!<\/think>)[\s\S])*$/i, '');
+
         var m = text.match(/<ops>([\s\S]*?)(<\/ops>|$)/i);
         if (!m) {
           // 有思考容器时，用 appendChild 不会覆盖；无思考容器时也安全
@@ -1906,7 +1963,7 @@
         if (streaming) {
           var placeholder = document.createElement('div');
           placeholder.className = 'ai-ops-placeholder';
-          placeholder.innerHTML = '<span class="ai-ops-spin">⚙</span> 准备执行操作…';
+          placeholder.innerHTML = '<span class="ai-spinner"></span> 准备执行操作…';
           el.appendChild(placeholder);
         }
         // <ops> 之后的内容
@@ -1927,10 +1984,10 @@
         function makeChip(type, items, detailFn) {
           if (!items || items.length === 0) return;
           var meta = {
-            add:     { icon: '+',  label: 'add' },
-            remove:  { icon: '−',  label: 'remove' },
-            update:  { icon: '↻',  label: 'update' },
-            reorder: { icon: '⇄', label: 'reorder' }
+            add:     { icon: '+',  label: '添加' },
+            remove:  { icon: '−',  label: '删除' },
+            update:  { icon: '↻',  label: '更新' },
+            reorder: { icon: '⇄', label: '排序' }
           }[type];
 
           var chip = document.createElement('span');
@@ -2237,7 +2294,7 @@
                         } else {
                           // 首次收到 reasoning_content，创建推理步骤并缓存引用
                           var _newStep = addThinkingStep(bubble.querySelector('.ai-thinking'), 'reasoning',
-                            '<span class="ai-thinking-spinner">⏳</span> <span class="ai-reasoning-text">' + reasoningAccum.replace(/</g, '&lt;') + '</span>');
+                            '<span class="ai-spinner"></span> <span class="ai-reasoning-text">' + reasoningAccum.replace(/</g, '&lt;') + '</span>');
                           if (_newStep) reasoningTextEl = _newStep.querySelector('.ai-reasoning-text');
                         }
                         aiMessages.scrollTop = aiMessages.scrollHeight;
@@ -2307,7 +2364,7 @@
               bubble.style.whiteSpace = 'normal';
               var searchStatusEl = document.createElement('div');
               searchStatusEl.className = 'ai-ops-placeholder';
-              searchStatusEl.innerHTML = '<span class="ai-ops-spin">⏳</span> 正在搜索: ' + searchQuery.replace(/</g, '&lt;') + '…';
+              searchStatusEl.innerHTML = '<span class="ai-spinner"></span> 正在搜索: ' + searchQuery.replace(/</g, '&lt;') + '…';
               bubble.appendChild(searchStatusEl);
               aiMessages.scrollTop = aiMessages.scrollHeight;
 
@@ -2344,7 +2401,7 @@
                 // 深度搜索：记录搜索结果
                 if (thinkingEl) {
                   addThinkingStep(thinkingEl, 'result', '搜索完成，找到 <strong>' + resultCount + '</strong> 条相关结果');
-                  addThinkingStep(thinkingEl, 'search', '<span class="ai-thinking-spinner">⏳</span> 正在阅读筛选，整理回答…');
+                  addThinkingStep(thinkingEl, 'search', '<span class="ai-spinner"></span> 正在阅读筛选，整理回答…');
                 }
 
                 // 将工具调用和结果加入历史（让模型知道搜索结果）
@@ -2364,6 +2421,12 @@
                 pendingToolCallArgs = '';
                 bubble.innerHTML = '';
                 if (savedThinking) bubble.appendChild(savedThinking);
+
+                // 后续请求生成前的过渡反馈，首字节到达后会被 renderStreamBubble 自动清除
+                var tidyEl = document.createElement('div');
+                tidyEl.className = 'ai-ops-placeholder';
+                tidyEl.innerHTML = '<span class="ai-spinner"></span> 正在整理回答…';
+                bubble.appendChild(tidyEl);
 
                 var followUpBody = { model: model, messages: aiHistory, temperature: 0.1, stream: true };
 
@@ -2408,12 +2471,16 @@
               }).then(function () {
                 // 后续请求完成，渲染最终结果
                 renderStreamBubble(bubble, accumulated, false);
-                if (thinkingEl) finishThinking(thinkingEl);
-                // 保存：思考过程 + 联网搜索调用 + 正文，全部以语义标签/纯文本存储
+                var _bt = bubble.querySelector('.ai-thinking');
+                if (_bt) finishThinking(_bt);
+                // 保存：思考过程 + 联网搜索调用 + 正文，全部以语义标签/纯文本存储。
+                // 正文里若混入模型自发输出的原始 <tool_call> 文本标签，保存前一并剥离
                 var finalContent = '';
                 if (reasoningAccum) finalContent += '<think>' + reasoningAccum + '</think>\n';
                 if (searchQuery) finalContent += '<tool_call>' + JSON.stringify({ type: 'web_search', query: searchQuery }) + '</tool_call>\n';
-                finalContent += accumulated;
+                finalContent += accumulated
+                  .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+                  .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
                 aiHistory.push({ role: 'assistant', content: finalContent });
                 saveAIHistory();
                 aiSending = false;
@@ -2441,13 +2508,10 @@
           }
 
           // 正常流程（无工具调用）
-          // 深度思考：仅结束 spinner（不追加"推理完成"提示）
-          if (deepThinkingOn && bubble) {
+          // 思考完成收起：同时覆盖 reasoning_content 与内联 <think> 两种来源
+          if (bubble) {
             var _dtDone = bubble.querySelector('.ai-thinking');
-            if (_dtDone) {
-              finishThinking(_dtDone);
-            }
-            // reasoningAccum 是局部变量，函数退出自动销毁
+            if (_dtDone) finishThinking(_dtDone);
           }
           if (!accumulated) {
             aiSending = false;
@@ -2609,14 +2673,30 @@
           }
 
           // 保存 AI 回复到历史：只存纯文本 + 语义标签，不存渲染后的 HTML 快照，
-          // 这样样式改动后旧消息也会用最新样式重新渲染
-          var finalContent = accumulated;
+          // 这样样式改动后旧消息也会用最新样式重新渲染。
+          // 模型若把 <tool_call> 以正文文本形式输出（结构化 tool_calls 之外），保存前剥离，
+          // 避免历史里存储并回显原始调用代码
+          var finalContent = String(accumulated)
+            .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+            .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
           if (reasoningAccum) {
             finalContent = '<think>' + reasoningAccum + '</think>\n' + finalContent;
           }
           aiHistory.push({ role: 'assistant', content: finalContent });
           saveAIHistory();
 
+          aiSending = false;
+          aiSend.disabled = false;
+          aiSend.textContent = '发送';
+        }).catch(function (lateErr) {
+          // 兜底：后段异常（如 ops JSON 解析失败）不应让发送按钮卡死在"处理中"
+          console.warn('[AI] 处理异常:', lateErr);
+          if (bubble && !bubble.querySelector('.ai-undo-btn')) {
+            var lateTag = document.createElement('div');
+            lateTag.className = 'ai-cancel-tag';
+            lateTag.textContent = '操作应用失败：' + lateErr.message;
+            bubble.appendChild(lateTag);
+          }
           aiSending = false;
           aiSend.disabled = false;
           aiSend.textContent = '发送';

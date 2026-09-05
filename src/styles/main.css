@@ -973,6 +973,13 @@
     font-weight: 600;
     color: #1f2329;
   }
+  .ai-header-logo {
+    flex-shrink: 0;
+    display: block;
+    width: 23px;
+    height: 21px;
+  }
+  html[data-theme="dark"] .ai-header-logo .ai-letter { fill: #e6e9ef; }
   .ai-header-model {
     flex-shrink: 1;
     max-width: 150px;

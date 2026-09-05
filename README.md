@@ -29,8 +29,8 @@
 
 ![主页](docs/images/screenshot-home.jpg)
 
-| 速记本 | AI 助手 |
-|--------|---------|
+| 速记本                                           | AI 助手                                   |
+| --------------------------------------------- | --------------------------------------- |
 | ![速记本](docs/images/screenshot-scratchpad.jpg) | ![AI 助手](docs/images/screenshot-ai.jpg) |
 
 ## 安装

@@ -1436,6 +1436,11 @@
         openModal(document.getElementById('shortcutModal'));
       });
 
+      document.getElementById('helpBtn').addEventListener('click', function () {
+        toggleMenu(false);
+        openModal(document.getElementById('helpModal'));
+      });
+
       document.getElementById('generalConfigBtn').addEventListener('click', function () {
         toggleMenu(false);
         openModal(document.getElementById('generalConfigModal'));

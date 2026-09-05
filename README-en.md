@@ -22,11 +22,13 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 Home (wallpaper + search + shortcuts):
 
-![Home](docs/images/screenshot-home.jpg)
+| Home                                               | Menu                                              |
+| -------------------------------------------------- | ------------------------------------------------- |
+| ![Home](docs/images/screenshot-home.webp)          | ![Menu](docs/images/screenshot-menu.webp)         |
 
-| Scratchpad | AI Assistant |
-|------------|--------------|
-| ![Scratchpad](docs/images/screenshot-scratchpad.jpg) | ![AI Assistant](docs/images/screenshot-ai.jpg) |
+| Scratchpad                                         | AI Assistant                                      |
+| -------------------------------------------------- | ------------------------------------------------- |
+| ![Scratchpad](docs/images/screenshot-scratchpad.webp) | ![AI Assistant](docs/images/screenshot-ai.webp) |
 
 ## Installation
 

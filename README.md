@@ -45,13 +45,13 @@
 
 主页（壁纸 + 搜索 + 快捷方式）：
 
-| 主页                                     | 菜单                                     |
-| -------------------------------------- | -------------------------------------- |
-| ![主页](docs/images/screenshot-home.png) | ![菜单](docs/images/screenshot-menu.png) |
+| 主页                                      | 菜单                                      |
+| --------------------------------------- | --------------------------------------- |
+| ![主页](docs/images/screenshot-home.webp) | ![菜单](docs/images/screenshot-menu.webp) |
 
-| 速记本                                           | AI 助手                                   |
-| --------------------------------------------- | --------------------------------------- |
-| ![速记本](docs/images/screenshot-scratchpad.png) | ![AI 助手](docs/images/screenshot-ai.png) |
+| 速记本                                            | AI 助手                                    |
+| ---------------------------------------------- | ---------------------------------------- |
+| ![速记本](docs/images/screenshot-scratchpad.webp) | ![AI 助手](docs/images/screenshot-ai.webp) |
 
 ## 安装
 

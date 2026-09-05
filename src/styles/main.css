@@ -719,7 +719,13 @@
   .help-item > strong { display: block; color: var(--text-1); margin-bottom: 4px; }
   .help-item > span { display: block; }
   .help-p { margin: 0 0 10px; }
-  .help-intro { text-indent: 2em; margin-bottom: 14px; }
+  .help-intro-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-1);
+    margin: 0 0 10px;
+  }
+  .help-intro { margin: 0 0 16px; }
   .help-note {
     margin: 14px 0 0;
     padding: 8px 10px;

@@ -713,7 +713,8 @@
     color: var(--text-2);
     counter-reset: help-sec;
   }
-  .help-section h4 { font-size: 15px; font-weight: 600; color: var(--text-1); margin: 0 0 10px; }
+  .help-section { padding-left: 16px; }
+  .help-section h4 { font-size: 15px; font-weight: 600; color: var(--text-1); margin: 0 0 10px -16px; }
   .help-section h4::before { counter-increment: help-sec; content: counter(help-sec) ". "; }
   .help-section + .help-section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
   .help-item { margin-bottom: 14px; }
@@ -727,7 +728,7 @@
     color: var(--text-1);
     margin: 0 0 10px;
   }
-  .help-intro { margin: 0 0 16px; }
+  .help-intro { margin: 0 0 16px; padding-left: 16px; }
   .help-note {
     margin: 14px 0 0;
     padding: 8px 10px;

@@ -339,14 +339,24 @@
   <!-- AI 聊天面板 -->
   <div class="ai-panel" id="aiPanel">
     <div class="ai-panel-header">
-      <span>AI 助手</span>
-      <div style="display:flex;gap:6px;">
-        <button class="ai-clear" id="aiClear" title="清空对话">🗑</button>
-        <button class="ai-config-btn" id="aiConfigToggle" title="AI 配置">⚙</button>
-        <button class="ai-close" id="aiClose">×</button>
+      <div class="ai-header-title">
+        <span>AI 助手</span>
+        <span class="ai-header-model" id="aiModelBadge" style="display:none;"></span>
+      </div>
+      <div class="ai-header-actions">
+        <button class="ai-icon-btn ai-clear" id="aiClear" title="清空对话" aria-label="清空对话">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m1 0v14a2 2 0 01-2 2H8a2 2 0 01-2-2V6h12z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span class="ai-header-divider" aria-hidden="true"></span>
+        <button class="ai-icon-btn ai-config-btn" id="aiConfigToggle" title="AI 配置" aria-label="AI 配置">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="ai-icon-btn ai-close" id="aiClose" title="关闭" aria-label="关闭">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
       </div>
     </div>
-    <div class="ai-messages" id="aiMessages">
+    <div class="ai-messages" id="aiMessages" role="log" aria-label="对话记录">
       <div class="ai-msg ai-msg-assistant ai-msg-persist" style="white-space:normal;">
         你好！我是 Motuo-Tab 小助手，可以帮你：<br>
         「把知乎移到 DeepSeek 后面」<br>
@@ -377,16 +387,20 @@
         <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
       </label>
     </div>
+    <button class="ai-scroll-bottom" id="aiScrollBottom" title="回到底部" aria-label="回到底部">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14m0 0l-6-6m6 6l6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="ai-toast" id="aiToast" role="status"></div>
     <div class="ai-input-row">
-      <textarea class="ai-input" id="aiInput" rows="1" placeholder="输入指令…" style="resize:none;"></textarea>
-      <button class="ai-send" id="aiSend">发送</button>
-    </div>
-    <div class="ai-deep-search-row">
-      <label class="ai-deep-search-toggle">
-        <input type="checkbox" id="aiDeepSearch" />
-        <span class="ai-deep-search-track"></span>
-        <span class="ai-deep-search-label">深度思考</span>
-      </label>
+      <textarea class="ai-input" id="aiInput" rows="1" placeholder="输入指令，如「把知乎移到最前面」" style="resize:none;"></textarea>
+      <div class="ai-footer-bar">
+        <label class="ai-deep-search-toggle" title="让模型先推理再回答，响应会稍慢">
+          <input type="checkbox" id="aiDeepSearch" />
+          <span class="ai-deep-search-track"></span>
+          <span class="ai-deep-search-label">深度思考</span>
+        </label>
+        <button class="ai-send" id="aiSend">发送</button>
+      </div>
     </div>
   </div>
 

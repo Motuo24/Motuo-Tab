@@ -334,7 +334,7 @@
     justify-content: center;
     cursor: pointer;
     color: #5b6470;
-    z-index: 11;
+    z-index: 900;
     transition: opacity 0.2s ease;
   }
   .menu {

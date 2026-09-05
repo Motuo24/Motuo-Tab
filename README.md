@@ -207,15 +207,6 @@ tests/                # jsdom 回归测试
 dist/                 # 构建产物（gitignore）
 ```
 
-## GitHub Actions
-
-| 工作流           | 触发        | 作用                               |
-| ------------- | --------- | -------------------------------- |
-| `ci.yml`      | push / PR | 构建 + 测试                          |
-| `release.yml` | tag `v*`  | 发布 Release（newtab.html + 扩展 zip） |
-
-发布版本：`git tag v0.8.2 && git push origin v0.8.2`。
-
 ## 许可证
 
 [MIT](LICENSE) © 2026 Motuo24

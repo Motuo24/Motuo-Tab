@@ -999,10 +999,9 @@
     outline: 2px solid rgba(36,104,242,0.45);
     outline-offset: 1px;
   }
-  .ai-deep-search-toggle:has(input:focus-visible) {
+  .ai-mode-btn:has(input:focus-visible) {
     outline: 2px solid rgba(36,104,242,0.45);
     outline-offset: 2px;
-    border-radius: 6px;
   }
 
   .ai-messages {
@@ -1277,39 +1276,37 @@
   }
   .ai-config-btn.active { color: #2468f2; }
 
-  /* ========== 深度搜索开关（位于底部输入区内） ========== */
-  .ai-deep-search-toggle {
-    display: flex;
+  /* ========== 模式按钮（深度思考 / 联网搜索）：整体按钮，点击开/关 ========== */
+  .ai-mode-btn {
+    position: relative;
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 999px;
     cursor: pointer;
     font-size: 12px;
-    color: #5f6368;
+    color: #1f2329;
     user-select: none;
-    transition: color .2s;
+    transition: background .15s ease, color .15s ease;
   }
-  .ai-deep-search-toggle input { display: none; }
-  .ai-deep-search-track {
-    width: 32px; height: 18px;
-    background: rgba(31,35,41,0.14);
-    border-radius: 9px;
-    position: relative;
-    transition: background .2s ease;
-    flex-shrink: 0;
-  }
-  .ai-deep-search-track::after {
-    content: '';
+  .ai-mode-btn:hover { background: rgba(31,35,41,0.06); }
+  .ai-mode-btn .ai-mode-icon { flex-shrink: 0; }
+  /* 隐藏原生 checkbox：保留状态与键盘可达性，样式交给按钮 */
+  .ai-mode-btn input {
     position: absolute;
-    left: 2px; top: 2px;
-    width: 14px; height: 14px;
-    border-radius: 50%;
-    background: #fff;
-    transition: transform .2s ease;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
   }
-  .ai-deep-search-toggle input:checked + .ai-deep-search-track { background: #2468f2; }
-  .ai-deep-search-toggle input:checked + .ai-deep-search-track::after { transform: translateX(14px); }
-  .ai-deep-search-toggle input:checked ~ .ai-deep-search-label { color: #2468f2; font-weight: 500; }
+  .ai-mode-btn:has(input:checked) {
+    background: rgba(36,104,242,0.10);
+    color: #1a5ad9;
+  }
+  .ai-mode-btn:has(input:checked):hover { background: rgba(36,104,242,0.16); }
 
   /* 深度搜索思考过程：轻量折叠区，弱化视觉比重（无边框卡片/无竖线） */
   .ai-thinking {
@@ -1531,7 +1528,7 @@
   .ai-scroll-bottom:hover { color: #1f2329; }
 
   @media (prefers-reduced-motion: reduce) {
-    .ai-panel, .ai-overlay, .ai-toast, .ai-scroll-bottom { transition: none; }
+    .ai-panel, .ai-overlay, .ai-toast, .ai-scroll-bottom, .ai-mode-btn { transition: none; }
     .ai-spinner { animation: none; }
     .ai-thinking-arrow { transition: none; }
     .ai-fab:hover { transform: none; }

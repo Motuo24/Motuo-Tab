@@ -7,7 +7,17 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 > All data is stored locally in your browser (LocalStorage / IndexedDB) — **no backend required**.
 > The extension, single-file, and online versions behave identically: moving the file or using it online works the same.
 
-***
+---
+
+## Changelog (v0.8.2)
+
+- **Theme modes**: new Light / Dark / Auto switching; Auto mode recolors text in real time based on the wallpaper pixels beneath it
+- **Help center**: new "Help" entry in the menu, Markdown-style layout (left chapter navigation + right content), covering AI key setup, Bocha search key guide, and shortcut tutorials
+- **Shortcut dialog**: rebuilt visuals (split keycaps, ordered from few keys to many, softer description text) and added Command-key equivalents
+- **Menu redesign**: iconified menu items, grouped sections, isolated dangerous actions, pill-shaped site-direct search card
+- **Interaction polish**: clicking the bottom-right menu button now closes a dialog opened from the menu; fixed the menu button being hidden behind the modal overlay
+- **Default shortcuts**: refreshed built-in defaults (including image icons)
+- **AI assistant**: sidebar title replaced with the brand icon
 
 ## Features
 

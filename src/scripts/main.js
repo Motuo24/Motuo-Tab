@@ -1687,7 +1687,8 @@
               '你：<web_search>北京今天天气</web_search>\n\n' +
               '收到搜索结果后，再基于结果用中文回答用户，并在引用处标注来源编号（如 [1]）。\n' +
               '常识性问题（如"1+1等于几"）不需要搜索，直接回答。\n' +
-              '**除 <web_search> 这一行外，不要输出任何其他内容**（包括思考、解释、<ops>）。\n\n'
+              '**需要搜索的那一轮，只输出 <web_search> 这一行，不要输出其他内容**；\n' +
+              '等客户端把搜索结果发回后，再按正常规则回答，需要改卡片时照常输出 <ops>。\n\n'
             : '') +
           '## 当前卡片\n' + cardsList + '\n\n' +
           '## 核心规则（违反就是 bug，必须遵守）\n' +
@@ -2049,6 +2050,8 @@
         // 先剥离模型"泄漏"到正文里的工具调用标记（DeepSeek DSML / <tool_calls> / <invoke>），
         // 保留本项目写入的语义标签 <tool_call>{json}</tool_call>（下方会渲染成搜索 chip）
         rest = stripToolMarkup(rest);
+        // 旧历史里可能存的是裸 JSON ops，规范成 <ops> 才能渲染成 chips
+        rest = normalizeOpsTags(rest);
 
         // 0) 安全兜底：未闭合的标签（异常数据/中断的流式输出）一律不展示原文。
         //    用 tempered dot 确保只剥离"确实没有闭合标签"的尾巴，不影响正常内容
@@ -2375,10 +2378,79 @@
       // 解析正文里的 <ops> 并应用到卡片列表（快照 / chips / 撤销按钮），
       // 正常对话与"联网搜索后的最终回答"都会调用它，避免两条链路行为不一致。
       // 返回 true 表示识别到 ops（无论是否真的应用）。
+      // 尝试把一段文本解析成 ops 对象（必须含 add/remove/update/reorder 之一）
+      function tryParseOps(str) {
+        var s = String(str || '').trim();
+        if (!s) return null;
+        var fence = s.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+        if (fence) s = fence[1].trim();
+        if (s.charAt(0) !== '{') return null;
+        var obj;
+        try { obj = JSON.parse(s); } catch (e) { return null; }
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+        if (!('add' in obj || 'remove' in obj || 'update' in obj || 'reorder' in obj)) return null;
+        return obj;
+      }
+
+      // 在文本里定位一个配平的 JSON 对象
+      function findJsonObject(text) {
+        var s = String(text || '');
+        for (var i = 0; i < s.length; i++) {
+          if (s.charAt(i) !== '{') continue;
+          var depth = 0, inStr = false, esc = false, end = -1;
+          for (var j = i; j < s.length; j++) {
+            var c = s.charAt(j);
+            if (inStr) {
+              if (esc) esc = false;
+              else if (c === '\\') esc = true;
+              else if (c === '"') inStr = false;
+            } else if (c === '"') {
+              inStr = true;
+            } else if (c === '{') {
+              depth++;
+            } else if (c === '}') {
+              depth--;
+              if (depth === 0) { end = j + 1; break; }
+            }
+          }
+          if (end > 0) {
+            var obj = tryParseOps(s.slice(i, end));
+            if (obj) return { start: i, end: end, text: s.slice(i, end), ops: obj };
+          }
+        }
+        return null;
+      }
+
+      // 从任意内容中提取 ops：<ops> 标签 / ```json 代码块 / 裸 JSON。
+      // 模型偶尔不按 <ops> 包裹、直接吐 JSON，这里统一兜住。
+      function extractOps(content) {
+        var s = String(content || '');
+        var m = s.match(/<ops>([\s\S]*?)<\/ops>/i);
+        if (m) {
+          var obj = tryParseOps(m[1]);
+          if (obj) return { ops: obj, start: m.index, end: m.index + m[0].length, text: m[0] };
+        }
+        var fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (fence) {
+          var obj2 = tryParseOps(fence[1]);
+          if (obj2) return { ops: obj2, start: fence.index, end: fence.index + fence[0].length, text: fence[0] };
+        }
+        return findJsonObject(s);
+      }
+
+      // 把裸 JSON / 代码块的 ops 规范成 <ops>…</ops>，便于统一渲染与保存
+      function normalizeOpsTags(content) {
+        var s = String(content || '');
+        if (/<ops>[\s\S]*?<\/ops>/i.test(s)) return s;
+        var ex = extractOps(s);
+        if (!ex) return s;
+        return s.slice(0, ex.start) + '<ops>' + JSON.stringify(ex.ops) + '</ops>' + s.slice(ex.end);
+      }
+
       function applyOpsFromContent(content, bubble) {
-        var opsMatch = String(content || '').match(/<ops>([\s\S]*?)<\/ops>/i);
-        if (!opsMatch) return false;
-        var ops = JSON.parse(opsMatch[1].trim());
+        var ex = extractOps(content);
+        if (!ex) return false;
+        var ops = ex.ops;
 
         // 防御性校验
         if (typeof ops !== 'object' || ops === null) throw new Error('ops 格式错误');
@@ -3024,6 +3096,8 @@
                 });
               }).then(function () {
                 // 后续请求完成，渲染最终结果
+                // 模型若没按 <ops> 包裹、直接吐 JSON，这里先规范化再渲染/应用
+                accumulated = normalizeOpsTags(accumulated);
                 renderStreamBubble(bubble, accumulated, false);
                 var _bt = bubble.querySelector('.ai-thinking');
                 if (_bt) finishThinking(_bt);
@@ -3077,6 +3151,9 @@
             aiSend.textContent = '发送';
             return;
           }
+
+          // 模型若没按 <ops> 包裹、直接吐 JSON，先规范成 <ops> 再渲染/应用
+          accumulated = normalizeOpsTags(accumulated);
 
           // 重新渲染气泡（流式结束，折叠区设为收起状态）
           renderStreamBubble(bubble, accumulated, false);

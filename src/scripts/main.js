@@ -1667,6 +1667,8 @@
         }
         var cardsList = lines.join('\n');
 
+        var webOn = aiWebSearch && aiWebSearch.checked && aiBochaKey && aiBochaKey.value.trim();
+
         return '你是 Motuo-Tab 的快捷方式管理助手。\n\n' +
           '## 工具说明\n' +
           '- 名称：Motuo-Tab（浏览器标签页）\n' +
@@ -1674,8 +1676,19 @@
           '- 站内搜索直达：搜索框输入 "bl 关键词"（B站）、"zh 关键词"（知乎）、"gh 关键词"（GitHub）、"tb 关键词"（淘宝）、"db 关键词"（豆瓣）\n' +
           '- 自定义搜索引擎：搜索框左侧图标下拉，底部可添加\n' +
           '- 搜索建议：搜索框输入时弹历史建议\n' +
-          '- 键盘快捷键：Ctrl+E 专注模式、Ctrl+K 编辑模式、Ctrl+A 打开 AI\n' +
-          '- 联网搜索：开启后你拥有 web_search 工具，可搜索互联网获取最新信息（天气、新闻、股价等）。由你判断是否需要搜索，搜索后基于结果回答并附引用来源。\n\n' +
+          '- 键盘快捷键：Ctrl+E 专注模式、Ctrl+K 编辑模式、Ctrl+A 打开 AI\n\n' +
+          (webOn
+            ? '## 联网搜索（重要规则）\n' +
+              '当用户的问题需要实时/最新信息（天气、新闻、股价、最新事件、你不确定的事实等）时，**不要直接回答**，也不要编造；\n' +
+              '只输出下面这一行，客户端会自动去搜索并把结果发给你：\n' +
+              '<web_search>简洁有效的搜索关键词</web_search>\n\n' +
+              '例如：\n' +
+              '用户：北京今天天气怎么样\n' +
+              '你：<web_search>北京今天天气</web_search>\n\n' +
+              '收到搜索结果后，再基于结果用中文回答用户，并在引用处标注来源编号（如 [1]）。\n' +
+              '常识性问题（如"1+1等于几"）不需要搜索，直接回答。\n' +
+              '**除 <web_search> 这一行外，不要输出任何其他内容**（包括思考、解释、<ops>）。\n\n'
+            : '') +
           '## 当前卡片\n' + cardsList + '\n\n' +
           '## 核心规则（违反就是 bug，必须遵守）\n' +
           '1. **绝不删减**：用户没说"删"或"移除"的卡片，必须原样保留\n' +
@@ -1774,21 +1787,32 @@
       // 不应回传给模型。否则模型会把它们当成自己的历史正文（尤其 <tool_call>），
       // 干扰它后续是否/如何真正发起工具调用的判断。
       function toApiMessages(history) {
-        return history.map(function (m) {
-          if (!m || m.role !== 'assistant' || typeof m.content !== 'string') return m;
-          var clean = m.content
-            .replace(/<think>[\s\S]*?<\/think>/gi, '')
-            .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
-            .replace(/<ops>[\s\S]*?<\/ops>/gi, '')
-            .trim();
-          if (clean === m.content) return m;
+        var out = [];
+        for (var i = 0; i < history.length; i++) {
+          var m = history[i];
+          if (!m || typeof m !== 'object') continue;
+          // 新协议不使用 native tools：丢弃旧的 tool 结果消息与 tool_calls 字段，
+          // 否则请求里没有 tools 却带着 tool 消息，部分 API（含 DeepSeek）会报 400。
+          if (m.role === 'tool') continue;
           var copy = {};
           for (var k in m) {
-            if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
+            // 既不带 native tool_calls，也不带 reasoning_content
+            // （后者只有 native tools 链路才需要，旧版 reasoner 收到会 400）
+            if (Object.prototype.hasOwnProperty.call(m, k) && k !== 'tool_calls' && k !== 'reasoning_content' && k !== 'hidden') copy[k] = m[k];
           }
-          copy.content = clean;
-          return copy;
-        });
+          if (typeof copy.content === 'string') {
+            copy.content = copy.content
+              .replace(/<think>[\s\S]*?<\/think>/gi, '')
+              .replace(/<web_search>[\s\S]*?<\/web_search>/gi, '')
+              .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+              .replace(/<ops>[\s\S]*?<\/ops>/gi, '')
+              .trim();
+          }
+          // 纯 tool_calls 帧（content 为空）在去掉 tool_calls 后没有意义，直接丢弃
+          if (m.tool_calls && (copy.content === null || copy.content === undefined || copy.content === '')) continue;
+          out.push(copy);
+        }
+        return out;
       }
 
       // 追加一条系统/错误提示气泡（sendAI 未配置时使用；此前调用处引用了未定义函数）
@@ -1945,6 +1969,9 @@
       function stripToolMarkup(text) {
         var s = normalizeDSML(text);
         s = s
+          // 自有文本协议：<web_search>…</web_search>（成对 / 未闭合）
+          .replace(/<web_search>[\s\S]*?<\/web_search>/gi, '')
+          .replace(/<web_search>[\s\S]*$/i, '')
           // 成对包裹的调用块（DSML tool_calls/function_calls、普通 <tool_calls>）
           .replace(/<(?:tool_calls|function_calls)>[\s\S]*?<\/(?:tool_calls|function_calls)>/gi, '')
           // 未闭合的调用块（流式中途）
@@ -1969,6 +1996,11 @@
       function parseTextToolCall(text) {
         if (!text || typeof text !== 'string') return null;
         var src = normalizeDSML(text);
+
+        // 0) 本项目自有的文本协议：<web_search>关键词</web_search>。
+        //    不依赖 OpenAI 原生 tools，避免 DeepSeek 思考模式下结构化/text 工具调用来回变的兼容问题。
+        var ws = src.match(/<web_search>\s*([\s\S]*?)\s*<\/web_search>/i);
+        if (ws && ws[1]) return { name: 'web_search', query: ws[1].trim(), raw: ws[0] };
 
         // A/B) invoke + parameter 语法
         var env = src.match(/<(?:tool_calls|function_calls)\b[^>]*>([\s\S]*?)<\/(?:tool_calls|function_calls)>/i);
@@ -2108,10 +2140,10 @@
           var msg = aiHistory[i];
 
           // 跳过内部协议消息（不向用户展示）：
-          //  - role === 'tool'：联网搜索原始结果，仅作为 API 上下文保留；
-          //    否则退出页面重进/重开面板时会残留展示上一次的搜索结果
-          //  - msg.tool_calls：assistant 的搜索工具调用帧（content 通常为 null）
-          if (msg.role === 'tool' || msg.tool_calls) continue;
+          //  - role === 'tool'：旧版 native tools 的搜索结果，仅作 API 上下文
+          //  - msg.tool_calls：旧版结构化工具调用帧（content 通常为 null）
+          //  - msg.hidden：新版文本协议注入的搜索结果（user 角色，但不该显示）
+          if (msg.role === 'tool' || msg.tool_calls || msg.hidden) continue;
 
           var div = document.createElement('div');
           div.className = 'ai-msg ai-msg-' + msg.role;
@@ -2652,25 +2684,11 @@
           reqBody.thinking = { type: 'enabled' };
           reqBody.reasoning_effort = 'high';
         }
-        // 联网搜索：添加 web_search 工具定义，让 AI 自行判断是否需要搜索
-        if (webSearchEnabled) {
-          reqBody.tools = [{
-            type: 'function',
-            function: {
-              name: 'web_search',
-              description: '搜索互联网获取最新信息。当用户询问天气、新闻、实时股价、最新事件、或任何需要当前/实时信息的问题时使用此工具。对于常识性问题（如"1+1等于几"）不需要使用。',
-              parameters: {
-                type: 'object',
-                properties: {
-                  query: { type: 'string', description: '简洁有效的搜索关键词' }
-                },
-                required: ['query']
-              }
-            }
-          }];
-          reqBody.tool_choice = 'auto';
-        }
-
+        // 联网搜索：刻意不使用 OpenAI 原生 tools。
+        // 原因：DeepSeek 在思考模式下时好时坏（有时返回结构化 tool_calls，有时把调用写成
+        // DSML/<tool_calls> 文本，还要求回传 reasoning_content，否则 400），极不稳定。
+        // 改为自有的文本协议 <web_search>关键词</web_search>（见 buildSystemPrompt），
+        // 由本地解析并执行搜索，前后端只认一种格式。
         // Debug：F12 控制台能看到实际发的请求
         if (window.console && console.log) {
           console.log('[AI] →', url);
@@ -2804,12 +2822,10 @@
           aiHistory.push({ role: 'assistant', content: errMsg });
           saveAIHistory();
         }).then(function () {
-          // 联网搜索：检测工具调用，执行搜索并发起后续请求
-          // 优先结构化 delta.tool_calls；若模型把工具调用写成正文里的文本标签
-          // （<tool_call><function=web_search><parameter=query>…），则解析标签兜底。
+          // 联网搜索：检测模型是否输出了 <web_search>关键词</web_search>，有则执行搜索。
+          // 兼容历史：若旧模型仍返回结构化 delta.tool_calls 或 DSML/<tool_calls> 文本，也一并识别。
           if (webSearchEnabled && !(pendingToolCallName === 'web_search' && pendingToolCallArgs)) {
-            // 文本标签兜底：DeepSeek DSML(<｜DSML｜tool_calls>)、<tool_calls><invoke>、旧 <tool_call><function>。
-            // 模型可能把调用写在 content，也可能写在 reasoning_content，两边都扫。
+            // 模型可能把标记写在 content，也可能写在 reasoning_content，两边都扫。
             var _textTc = parseTextToolCall(accumulated) || parseTextToolCall(reasoningAccum);
             if (_textTc && _textTc.name === 'web_search' && _textTc.query) {
               pendingToolCallName = 'web_search';
@@ -2891,23 +2907,15 @@
                   addThinkingStep(thinkingEl, 'result', '搜索完成，找到 <strong>' + resultCount + '</strong> 条相关结果');
                 }
 
-                // 文本兜底路径没有结构化 id：必须补一个，否则会发出
-                // tool_calls:[{id:null}] + tool_call_id:null，DeepSeek 直接 400
-                // （表现就是"搜索后回复失败"）
-                if (!pendingToolCallId) {
-                  pendingToolCallId = 'call_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-                }
-
-                // 将工具调用和结果加入历史（让模型知道搜索结果）。
-                // DeepSeek 思考模式 + tools 要求 assistant 的 reasoning_content 一并回传，
-                // 否则后续请求会返回 400。
-                var _toolAssistantMsg = {
-                  role: 'assistant', content: null,
-                  tool_calls: [{ id: pendingToolCallId, type: 'function', function: { name: 'web_search', arguments: pendingToolCallArgs } }]
-                };
-                if (reasoningAccum) _toolAssistantMsg.reasoning_content = reasoningAccum;
-                aiHistory.push(_toolAssistantMsg);
-                aiHistory.push({ role: 'tool', tool_call_id: pendingToolCallId, content: searchContext || '未找到相关搜索结果。' });
+                // 把搜索结果作为一条 user 消息回传（不使用 native tools，避免 DeepSeek
+                // 思考模式的 reasoning_content/tool_call 兼容问题）。
+                // hidden:true 表示只作为 API 上下文，界面上不渲染成气泡。
+                aiHistory.push({
+                  role: 'user',
+                  hidden: true,
+                  content: '【联网搜索结果】\n' + (searchContext || '未找到相关搜索结果。') +
+                    '\n请基于以上搜索结果回答用户的问题，并在引用处标注来源编号（如 [1]）；不要编造。'
+                });
                 saveAIHistory();
 
                 // 重置状态，发起后续请求（让模型基于搜索结果回答）
@@ -3007,10 +3015,8 @@
                 finalContent += stripToolMarkup(accumulated)
                   .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
                   .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
-                var _finalAssistantMsg = { role: 'assistant', content: finalContent };
-                // 思考模式下回传最终回答的 reasoning_content（工具链路上下文完整性）
-                if (deepThinkingOn && followReasoningAccum) _finalAssistantMsg.reasoning_content = followReasoningAccum;
-                aiHistory.push(_finalAssistantMsg);
+                // 不使用 native tools，也就不需要回传 reasoning_content（避免旧版 reasoner 400）
+                aiHistory.push({ role: 'assistant', content: finalContent });
                 saveAIHistory();
                 aiSending = false;
                 aiSend.disabled = false;

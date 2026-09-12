@@ -1911,24 +1911,77 @@
         }
       }
 
+      // 归一化 DeepSeek DSML 标记：V3.2 用 <｜DSML｜function_calls>、V4 用 <｜DSML｜tool_calls>，
+      // 分隔符是全角竖线 U+FF5C（也兼容半角 |），里面的 invoke/parameter 同样带前缀。
+      // 归一化后统一退化成普通 XML，便于解析与剥离。
+      function normalizeDSML(text) {
+        return String(text || '').replace(/<(\/)?[|\uFF5C]DSML[|\uFF5C]/g, '<$1');
+      }
+
+      // 剥离模型"泄漏"到正文里的工具调用标记（DeepSeek DSML、<tool_calls><invoke>、
+      // 旧式 <tool_call><function>），但保留本项目自己写入的语义标签
+      // <tool_call>{json}</tool_call>（用于渲染搜索 chip）。
+      function stripToolMarkup(text) {
+        var s = normalizeDSML(text);
+        s = s
+          // 成对包裹的调用块（DSML tool_calls/function_calls、普通 <tool_calls>）
+          .replace(/<(?:tool_calls|function_calls)>[\s\S]*?<\/(?:tool_calls|function_calls)>/gi, '')
+          // 未闭合的调用块（流式中途）
+          .replace(/<(?:tool_calls|function_calls)>[\s\S]*$/i, '')
+          // 单数 <tool_call> 且内部是 XML（泄漏的调用）；保留 <tool_call>{json}</tool_call>
+          .replace(/<tool_call>\s*<[\s\S]*?<\/tool_call>/gi, '')
+          .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '')
+          // 没有外层包裹时残留的 invoke/parameter
+          .replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke>/gi, '')
+          .replace(/<parameter\b[^>]*>[\s\S]*?<\/parameter>/gi, '')
+          .replace(/<parameter\b[^>]*\/>/gi, '');
+        return s;
+      }
+
       // 解析"文本标签"形式的工具调用：部分模型/API 不返回结构化 delta.tool_calls，
-      // 而是把 <tool_call><function=web_search><parameter=query>…</parameter></function></tool_call>
-      // 直接写进正文文本。命中则返回 {name, query, raw}，否则返回 null。
+      // 而是把调用直接写进正文/推理文本。支持：
+      //   A) DeepSeek DSML：<｜DSML｜tool_calls><｜DSML｜invoke name="web_search">
+      //        <｜DSML｜parameter name="query" string="true">…</｜DSML｜parameter>…
+      //   B) 普通 XML：<tool_calls><invoke name="web_search"><parameter name="query">…</parameter></invoke></tool_calls>
+      //   C) 旧式：<tool_call><function=web_search><parameter=query>…</parameter></function></tool_call>
+      // 命中则返回 {name, query, raw, params}，否则返回 null。
       function parseTextToolCall(text) {
         if (!text || typeof text !== 'string') return null;
-        var m = text.match(/<tool_call>([\s\S]*?)<\/tool_call>/i);
-        if (!m) return null;
-        var inner = m[1];
-        // function=web_search 或 function="web_search"
+        var src = normalizeDSML(text);
+
+        // A/B) invoke + parameter 语法
+        var env = src.match(/<(?:tool_calls|function_calls)\b[^>]*>([\s\S]*?)<\/(?:tool_calls|function_calls)>/i);
+        var scope = env ? env[1] : src;
+        var inv = scope.match(/<invoke\s+name\s*=\s*"([^"]+)"[^>]*>/i);
+        if (inv) {
+          var name = inv[1].trim();
+          var params = {};
+          var pRe = /<parameter\s+name\s*=\s*"([^"]+)"[^>]*>([\s\S]*?)<\/parameter>/gi;
+          var pm;
+          while ((pm = pRe.exec(scope)) !== null) { params[pm[1]] = pm[2].trim(); }
+          var query = params.query || params.q || params.keyword || params.search_query || '';
+          if (!query) {
+            // 没按约定命名时退回第一个参数值，尽量别让工具调用落空
+            var firstKey = Object.keys(params)[0];
+            if (firstKey) query = params[firstKey];
+          }
+          if (name === 'web_search' || /search/i.test(name)) {
+            return { name: 'web_search', query: query, raw: env ? env[0] : inv[0], params: params };
+          }
+          return null;
+        }
+
+        // C) 旧式 <function=web_search><parameter=query>
+        var m = src.match(/<tool_call>([\s\S]*?)<\/tool_call>/i);
+        var inner = m ? m[1] : src;
         var fn = inner.match(/<function\s*=\s*"?([^>\s"']+)"?>/i);
         if (!fn) return null;
-        var name = fn[1].trim();
-        var query = '';
-        // parameter=query … </parameter>（也兼容 parameter name="query"）
-        var pm = inner.match(/<parameter\s*=\s*"?query"?[^>]*>([\s\S]*?)<\/parameter>/i);
-        if (!pm) pm = inner.match(/<parameter\s+name\s*=\s*"?query"?[^>]*>([\s\S]*?)<\/parameter>/i);
-        if (pm) query = pm[1].trim();
-        return { name: name, query: query, raw: m[0] };
+        var name2 = fn[1].trim();
+        var query2 = '';
+        var pm2 = inner.match(/<parameter\s*=\s*"?query"?[^>]*>([\s\S]*?)<\/parameter>/i);
+        if (!pm2) pm2 = inner.match(/<parameter\s+name\s*=\s*"?query"?[^>]*>([\s\S]*?)<\/parameter>/i);
+        if (pm2) query2 = pm2[1].trim();
+        return { name: name2, query: query2, raw: m ? m[0] : fn[0] };
       }
 
       // 把"纯文本 + 语义标签"的 assistant 内容渲染成带样式的 DOM：
@@ -1939,6 +1992,10 @@
       function renderAIContent(content) {
         var frag = document.createDocumentFragment();
         var rest = String(content || '');
+
+        // 先剥离模型"泄漏"到正文里的工具调用标记（DeepSeek DSML / <tool_calls> / <invoke>），
+        // 保留本项目写入的语义标签 <tool_call>{json}</tool_call>（下方会渲染成搜索 chip）
+        rest = stripToolMarkup(rest);
 
         // 0) 安全兜底：未闭合的标签（异常数据/中断的流式输出）一律不展示原文。
         //    用 tempered dot 确保只剥离"确实没有闭合标签"的尾巴，不影响正常内容
@@ -2146,7 +2203,7 @@
 
         // 剔除工具调用与思考标签（含流式中尚未闭合的半截标签），避免原始代码暴露；
         // 搜索状态由后续流程以"正在搜索…"占位展示
-        text = text
+        text = stripToolMarkup(text)
           .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
           .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '')
           .replace(/<think>(?:(?!<\/think>)[\s\S])*$/i, '');
@@ -2258,6 +2315,152 @@
         }
 
         return container;
+      }
+
+      // 解析正文里的 <ops> 并应用到卡片列表（快照 / chips / 撤销按钮），
+      // 正常对话与"联网搜索后的最终回答"都会调用它，避免两条链路行为不一致。
+      // 返回 true 表示识别到 ops（无论是否真的应用）。
+      function applyOpsFromContent(content, bubble) {
+        var opsMatch = String(content || '').match(/<ops>([\s\S]*?)<\/ops>/i);
+        if (!opsMatch) return false;
+        var ops = JSON.parse(opsMatch[1].trim());
+
+        // 防御性校验
+        if (typeof ops !== 'object' || ops === null) throw new Error('ops 格式错误');
+        var addArr = Array.isArray(ops.add) ? ops.add : [];
+        var removeArr = Array.isArray(ops.remove) ? ops.remove : [];
+        var updateArr = Array.isArray(ops.update) ? ops.update : [];
+        var reorderArr = Array.isArray(ops.reorder) ? ops.reorder : null;
+
+        // 校验 add 项字段
+        for (var ai2 = 0; ai2 < addArr.length; ai2++) {
+          var a2 = addArr[ai2];
+          if (!a2.name || !a2.url) throw new Error('add[' + ai2 + '] 缺少 name 或 url');
+          // 默认使用 auto 模式，自动抓取网站图标
+          if (!a2.iconSrc) a2.iconSrc = 'auto';
+          // auto 模式需要 color 作为占位色
+          if (a2.iconSrc === 'auto' && !a2.color) a2.color = 'blue';
+        }
+
+        // 从当前 list 出发，按 ops 应用 diff（没提到的字段原样保留）
+        // 注意：必须逐项拷贝，浅拷贝 slice() 会让 update 原地改到 list 共享对象，
+        // 进而污染下方用于撤销的快照（update 类操作将无法正确撤销）。
+        var newList = list.map(function (it) { return Object.assign({}, it); });
+        var nameIndex = {};
+        newList.forEach(function (it, idx) { nameIndex[it.name] = idx; });
+
+        // remove: 按 name 删
+        removeArr.forEach(function (nm) {
+          if (nameIndex[nm] !== undefined) {
+            newList.splice(nameIndex[nm], 1);
+            // 索引重算
+            nameIndex = {};
+            newList.forEach(function (it, idx) { nameIndex[it.name] = idx; });
+          }
+        });
+
+        // update: 按 name 合并字段
+        updateArr.forEach(function (u) {
+          if (!u || !u.name) return;
+          var idx2 = nameIndex[u.name];
+          if (idx2 === undefined) return;
+          var keys = Object.keys(u);
+          for (var ki = 0; ki < keys.length; ki++) {
+            var k = keys[ki];
+            if (k === 'name') continue;
+            newList[idx2][k] = u[k];
+          }
+        });
+
+        // add: 追加到末尾
+        addArr.forEach(function (c) { newList.push(c); });
+
+        // reorder: 按给定名字顺序重排（不重命名，只重排现有项；新加的不在列表里时自动忽略）
+        if (reorderArr && reorderArr.length > 0) {
+          var orderMap = {};
+          reorderArr.forEach(function (nm, idx3) { orderMap[nm] = idx3; });
+          newList.sort(function (a, b) {
+            var ai = orderMap[a.name];
+            var bi = orderMap[b.name];
+            if (ai === undefined && bi === undefined) return 0;
+            if (ai === undefined) return 1; // 未列出的放后面
+            if (bi === undefined) return -1;
+            return ai - bi;
+          });
+        }
+
+        // 危险操作检测：删超过 3 个、或者几乎清空（剩不到 2 个）
+        var willDelete = removeArr.length;
+        if (willDelete > 3 || (newList.length < 2 && list.length > 0 && willDelete > 0)) {
+          var msg = 'AI 准备删除 ' + willDelete + ' 个卡片，剩余 ' + newList.length + ' 个。\n确定要执行吗？';
+          if (!confirm(msg)) {
+            if (bubble) {
+              bubble.classList.add('ai-msg-cancelled');
+              var cancelTag = document.createElement('div');
+              cancelTag.className = 'ai-cancel-tag';
+              cancelTag.textContent = '已取消应用';
+              bubble.appendChild(cancelTag);
+            }
+            return true;
+          }
+        }
+
+        // 应用前先存一份快照
+        try {
+          localStorage.setItem(AI_SNAPSHOT_KEY, JSON.stringify({
+            list: list,
+            time: Date.now()
+          }));
+        } catch (e) {}
+
+        list = newList;
+        var savedOk = save(list);
+        render(list);
+
+        // 对 AI 添加的 auto 图标卡片，触发自动抓取
+        addArr.forEach(function (c) {
+          if (c.iconSrc === 'auto') {
+            // 找新添加卡片的 DOM
+            var cards = nav.querySelectorAll('.shortcut');
+            for (var ci = 0; ci < cards.length; ci++) {
+              var card = cards[ci];
+              // 根据 name 和 url 匹配（render 后的 DOM 用 dataset 存了 iconSrc，但 name 在 .label 里）
+              var label = card.querySelector('.label');
+              if (label && label.textContent === c.name) {
+                var idx = Array.prototype.indexOf.call(cards, card);
+                applyAutoIcon(card, idx, c.color || 'blue');
+                break;
+              }
+            }
+          }
+        });
+
+        // 保存结果用轻提示反馈，不再往气泡里插技术性状态行
+        showAIToast(savedOk ? '已应用 AI 的修改' : '修改已应用，但保存失败（存储空间不足？）');
+
+        // 把流式时的 placeholder 换成实际的 tool call chips
+        if (bubble) {
+          var chips = renderOpsChips(ops);
+          var oldPlaceholder = bubble.querySelector('.ai-ops-placeholder');
+          if (oldPlaceholder) {
+            oldPlaceholder.replaceWith(chips);
+          } else {
+            bubble.appendChild(chips);
+          }
+        }
+
+        // 在气泡底部加"撤销"按钮
+        // 点击处理统一由 aiMessages 上的事件委托（applyAIUndo）负责：
+        // 若把 onclick 直接绑在按钮上，保存历史时 innerHTML 序列化会丢失该 handler，
+        // 重进页面/重开面板后按钮会变成"点了没反应"的僵尸按钮。
+        if (bubble) {
+          var undoBtn = document.createElement('button');
+          undoBtn.type = 'button';
+          undoBtn.className = 'ai-undo-btn';
+          undoBtn.textContent = '↶ 撤销这次操作';
+          bubble.appendChild(undoBtn);
+        }
+        return true;
       }
 
       aiFab.addEventListener('click', function () { toggleAI(true); });
@@ -2513,23 +2716,26 @@
                       aiMessages.scrollTop = aiMessages.scrollHeight;
                     }
 
-                    // 处理深度思考内容（reasoning_content）— 流式累积到同一个步骤
-                    if (deepThinkingOn && delta.reasoning_content) {
-                      if (!reasoningAccum) reasoningAccum = '';
+                    // 处理推理内容（reasoning_content）：无论是否勾选"深度思考"都要累积，
+                    // 因为 DeepSeek 思考模式 + tools 要求把 reasoning_content 回传给 API；
+                    // 但仅在开启"深度思考"时才渲染到思考容器（避免默认信息密度过高）
+                    if (delta.reasoning_content) {
                       reasoningAccum += delta.reasoning_content;
-                      // 在思考容器中实时展示：更新已有步骤 or 新建
-                      var _rcEl = bubble.querySelector('.ai-thinking-body');
-                      if (_rcEl) {
-                        if (reasoningTextEl) {
-                          // 已有推理文本元素，直接更新 textContent（高性能）
-                          reasoningTextEl.textContent = reasoningAccum;
-                        } else {
-                          // 首次收到 reasoning_content，创建推理步骤并缓存引用
-                          var _newStep = addThinkingStep(bubble.querySelector('.ai-thinking'), 'reasoning',
-                            '<span class="ai-spinner"></span> <span class="ai-reasoning-text">' + reasoningAccum.replace(/</g, '&lt;') + '</span>');
-                          if (_newStep) reasoningTextEl = _newStep.querySelector('.ai-reasoning-text');
+                      if (deepThinkingOn) {
+                        // 在思考容器中实时展示：更新已有步骤 or 新建
+                        var _rcEl = bubble.querySelector('.ai-thinking-body');
+                        if (_rcEl) {
+                          if (reasoningTextEl) {
+                            // 已有推理文本元素，直接更新 textContent（高性能）
+                            reasoningTextEl.textContent = reasoningAccum;
+                          } else {
+                            // 首次收到 reasoning_content，创建推理步骤并缓存引用
+                            var _newStep = addThinkingStep(bubble.querySelector('.ai-thinking'), 'reasoning',
+                              '<span class="ai-spinner"></span> <span class="ai-reasoning-text">' + reasoningAccum.replace(/</g, '&lt;') + '</span>');
+                            if (_newStep) reasoningTextEl = _newStep.querySelector('.ai-reasoning-text');
+                          }
+                          aiMessages.scrollTop = aiMessages.scrollHeight;
                         }
-                        aiMessages.scrollTop = aiMessages.scrollHeight;
                       }
                     }
 
@@ -2569,12 +2775,15 @@
           // 优先结构化 delta.tool_calls；若模型把工具调用写成正文里的文本标签
           // （<tool_call><function=web_search><parameter=query>…），则解析标签兜底。
           if (webSearchEnabled && !(pendingToolCallName === 'web_search' && pendingToolCallArgs)) {
-            var _textTc = parseTextToolCall(accumulated);
+            // 文本标签兜底：DeepSeek DSML(<｜DSML｜tool_calls>)、<tool_calls><invoke>、旧 <tool_call><function>。
+            // 模型可能把调用写在 content，也可能写在 reasoning_content，两边都扫。
+            var _textTc = parseTextToolCall(accumulated) || parseTextToolCall(reasoningAccum);
             if (_textTc && _textTc.name === 'web_search' && _textTc.query) {
               pendingToolCallName = 'web_search';
               pendingToolCallArgs = JSON.stringify({ query: _textTc.query });
-              // 从正文中剔除原始标签，避免展示/保存原始代码
-              accumulated = accumulated.replace(_textTc.raw, '');
+              // 从正文/思考中剔除原始标签，避免展示/保存原始代码
+              accumulated = stripToolMarkup(accumulated);
+              reasoningAccum = stripToolMarkup(reasoningAccum);
             }
           }
           if (webSearchEnabled && pendingToolCallName === 'web_search' && pendingToolCallArgs) {
@@ -2636,11 +2845,15 @@
                   addThinkingStep(thinkingEl, 'search', '<span class="ai-spinner"></span> 正在阅读筛选，整理回答…');
                 }
 
-                // 将工具调用和结果加入历史（让模型知道搜索结果）
-                aiHistory.push({
+                // 将工具调用和结果加入历史（让模型知道搜索结果）。
+                // DeepSeek 思考模式 + tools 要求 assistant 的 reasoning_content 一并回传，
+                // 否则后续请求会返回 400。
+                var _toolAssistantMsg = {
                   role: 'assistant', content: null,
                   tool_calls: [{ id: pendingToolCallId, type: 'function', function: { name: 'web_search', arguments: pendingToolCallArgs } }]
-                });
+                };
+                if (reasoningAccum) _toolAssistantMsg.reasoning_content = reasoningAccum;
+                aiHistory.push(_toolAssistantMsg);
                 aiHistory.push({ role: 'tool', tool_call_id: pendingToolCallId, content: searchContext || '未找到相关搜索结果。' });
                 saveAIHistory();
 
@@ -2661,6 +2874,12 @@
                 bubble.appendChild(tidyEl);
 
                 var followUpBody = { model: model, messages: aiHistory, temperature: 0.1, stream: true };
+                // 与首轮保持一致：思考模式下后续请求也开启 thinking
+                if (deepThinkingOn) {
+                  followUpBody.thinking = { type: 'enabled' };
+                  followUpBody.reasoning_effort = 'high';
+                }
+                var followReasoningAccum = '';
 
                 return fetch(url, {
                   method: 'POST',
@@ -2692,6 +2911,9 @@
                               renderStreamBubble(bubble, accumulated, true);
                               aiMessages.scrollTop = aiMessages.scrollHeight;
                             }
+                            if (fDelta && fDelta.reasoning_content) {
+                              followReasoningAccum += fDelta.reasoning_content;
+                            }
                           } catch (e) {}
                         }
                       }
@@ -2705,15 +2927,21 @@
                 renderStreamBubble(bubble, accumulated, false);
                 var _bt = bubble.querySelector('.ai-thinking');
                 if (_bt) finishThinking(_bt);
+                // 联网搜索后的最终回答里如果带 <ops>，同样要应用
+                // （否则"先搜索得到网址、再添加卡片"的指令不会真正生效）
+                applyOpsFromContent(accumulated, bubble);
                 // 保存：思考过程 + 联网搜索调用 + 正文，全部以语义标签/纯文本存储。
                 // 正文里若混入模型自发输出的原始 <tool_call> 文本标签，保存前一并剥离
                 var finalContent = '';
-                if (reasoningAccum) finalContent += '<think>' + reasoningAccum + '</think>\n';
+                if (reasoningAccum) finalContent += '<think>' + stripToolMarkup(reasoningAccum) + '</think>\n';
                 if (searchQuery) finalContent += '<tool_call>' + JSON.stringify({ type: 'web_search', query: searchQuery }) + '</tool_call>\n';
-                finalContent += accumulated
+                finalContent += stripToolMarkup(accumulated)
                   .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
                   .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
-                aiHistory.push({ role: 'assistant', content: finalContent });
+                var _finalAssistantMsg = { role: 'assistant', content: finalContent };
+                // 思考模式下回传最终回答的 reasoning_content（工具链路上下文完整性）
+                if (deepThinkingOn && followReasoningAccum) _finalAssistantMsg.reasoning_content = followReasoningAccum;
+                aiHistory.push(_finalAssistantMsg);
                 saveAIHistory();
                 aiSending = false;
                 aiSend.disabled = false;
@@ -2756,158 +2984,19 @@
           renderStreamBubble(bubble, accumulated, false);
 
           // 提取 <ops> 并应用 diff（不是重写整张列表，模型只描述"做了什么改动"）
-          var opsMatch = accumulated.match(/<ops>([\s\S]*?)<\/ops>/i);
-          if (opsMatch) {
-            var opsStr = opsMatch[1].trim();
-            var ops = JSON.parse(opsStr);
-
-            // 防御性校验
-            if (typeof ops !== 'object' || ops === null) throw new Error('ops 格式错误');
-            var addArr = Array.isArray(ops.add) ? ops.add : [];
-            var removeArr = Array.isArray(ops.remove) ? ops.remove : [];
-            var updateArr = Array.isArray(ops.update) ? ops.update : [];
-            var reorderArr = Array.isArray(ops.reorder) ? ops.reorder : null;
-
-            // 校验 add 项字段
-            for (var ai2 = 0; ai2 < addArr.length; ai2++) {
-              var a2 = addArr[ai2];
-              if (!a2.name || !a2.url) throw new Error('add[' + ai2 + '] 缺少 name 或 url');
-              // 默认使用 auto 模式，自动抓取网站图标
-              if (!a2.iconSrc) a2.iconSrc = 'auto';
-              // auto 模式需要 color 作为占位色
-              if (a2.iconSrc === 'auto' && !a2.color) a2.color = 'blue';
-            }
-
-            // 从当前 list 出发，按 ops 应用 diff（没提到的字段原样保留）
-            // 注意：必须逐项拷贝，浅拷贝 slice() 会让 update 原地改到 list 共享对象，
-            // 进而污染下方用于撤销的快照（update 类操作将无法正确撤销）。
-            var newList = list.map(function (it) { return Object.assign({}, it); });
-            var nameIndex = {};
-            newList.forEach(function (it, idx) { nameIndex[it.name] = idx; });
-
-            // remove: 按 name 删
-            removeArr.forEach(function (nm) {
-              if (nameIndex[nm] !== undefined) {
-                newList.splice(nameIndex[nm], 1);
-                // 索引重算
-                nameIndex = {};
-                newList.forEach(function (it, idx) { nameIndex[it.name] = idx; });
-              }
-            });
-
-            // update: 按 name 合并字段
-            updateArr.forEach(function (u) {
-              if (!u || !u.name) return;
-              var idx2 = nameIndex[u.name];
-              if (idx2 === undefined) return;
-              var keys = Object.keys(u);
-              for (var ki = 0; ki < keys.length; ki++) {
-                var k = keys[ki];
-                if (k === 'name') continue;
-                newList[idx2][k] = u[k];
-              }
-            });
-
-            // add: 追加到末尾
-            addArr.forEach(function (c) { newList.push(c); });
-
-            // reorder: 按给定名字顺序重排（不重命名，只重排现有项；新加的不在列表里时自动忽略）
-            if (reorderArr && reorderArr.length > 0) {
-              var orderMap = {};
-              reorderArr.forEach(function (nm, idx3) { orderMap[nm] = idx3; });
-              newList.sort(function (a, b) {
-                var ai = orderMap[a.name];
-                var bi = orderMap[b.name];
-                if (ai === undefined && bi === undefined) return 0;
-                if (ai === undefined) return 1; // 未列出的放后面
-                if (bi === undefined) return -1;
-                return ai - bi;
-              });
-            }
-
-            // 危险操作检测：删超过 3 个、或者几乎清空（剩不到 2 个）
-            var willDelete = removeArr.length;
-            if (willDelete > 3 || (newList.length < 2 && list.length > 0 && willDelete > 0)) {
-              var msg = 'AI 准备删除 ' + willDelete + ' 个卡片，剩余 ' + newList.length + ' 个。\n确定要执行吗？';
-              if (!confirm(msg)) {
-                if (bubble) {
-                  bubble.classList.add('ai-msg-cancelled');
-                  var cancelTag = document.createElement('div');
-                  cancelTag.className = 'ai-cancel-tag';
-                  cancelTag.textContent = '已取消应用';
-                  bubble.appendChild(cancelTag);
-                }
-                return;
-              }
-            }
-
-            // 应用前先存一份快照
-            try {
-              localStorage.setItem(AI_SNAPSHOT_KEY, JSON.stringify({
-                list: list,
-                time: Date.now()
-              }));
-            } catch (e) {}
-
-            list = newList;
-            var savedOk = save(list);
-            render(list);
-
-            // 对 AI 添加的 auto 图标卡片，触发自动抓取
-            addArr.forEach(function (c) {
-              if (c.iconSrc === 'auto') {
-                // 找新添加卡片的 DOM
-                var cards = nav.querySelectorAll('.shortcut');
-                for (var ci = 0; ci < cards.length; ci++) {
-                  var card = cards[ci];
-                  // 根据 name 和 url 匹配（render 后的 DOM 用 dataset 存了 iconSrc，但 name 在 .label 里）
-                  var label = card.querySelector('.label');
-                  if (label && label.textContent === c.name) {
-                    var idx = Array.prototype.indexOf.call(cards, card);
-                    applyAutoIcon(card, idx, c.color || 'blue');
-                    break;
-                  }
-                }
-              }
-            });
-
-            // 保存结果用轻提示反馈，不再往气泡里插技术性状态行
-            showAIToast(savedOk ? '已应用 AI 的修改' : '修改已应用，但保存失败（存储空间不足？）');
-
-            // 把流式时的 placeholder 换成实际的 tool call chips
-            if (bubble) {
-              var chips = renderOpsChips(ops);
-              var oldPlaceholder = bubble.querySelector('.ai-ops-placeholder');
-              if (oldPlaceholder) {
-                oldPlaceholder.replaceWith(chips);
-              } else {
-                bubble.appendChild(chips);
-              }
-            }
-
-            // 在气泡底部加"撤销"按钮
-            // 点击处理统一由 aiMessages 上的事件委托（applyAIUndo）负责：
-            // 若把 onclick 直接绑在按钮上，保存历史时 innerHTML 序列化会丢失该 handler，
-            // 重进页面/重开面板后按钮会变成"点了没反应"的僵尸按钮。
-            if (bubble) {
-              var undoBtn = document.createElement('button');
-              undoBtn.type = 'button';
-              undoBtn.className = 'ai-undo-btn';
-              undoBtn.textContent = '↶ 撤销这次操作';
-              bubble.appendChild(undoBtn);
-            }
-          }
+          applyOpsFromContent(accumulated, bubble);
 
           // 保存 AI 回复到历史：只存纯文本 + 语义标签，不存渲染后的 HTML 快照，
           // 这样样式改动后旧消息也会用最新样式重新渲染。
-          // 模型若把 <tool_call> 以正文文本形式输出（结构化 tool_calls 之外），保存前剥离，
-          // 避免历史里存储并回显原始调用代码
-          var finalContent = String(accumulated)
+          // 模型若把工具调用（DSML / <tool_calls> / 旧 <tool_call>）以正文文本形式输出，
+          // 保存前剥离，避免历史里存储并回显原始调用代码
+          var finalContent = stripToolMarkup(accumulated)
             .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
             .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
           if (reasoningAccum) {
-            finalContent = '<think>' + reasoningAccum + '</think>\n' + finalContent;
+            finalContent = '<think>' + stripToolMarkup(reasoningAccum) + '</think>\n' + finalContent;
           }
+          // 注意：普通（无工具调用）回复不回传 reasoning_content —— 旧版 reasoner 会因此 400
           aiHistory.push({ role: 'assistant', content: finalContent });
           saveAIHistory();
 

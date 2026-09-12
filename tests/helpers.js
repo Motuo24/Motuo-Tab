@@ -87,6 +87,7 @@ function configureAI(doc, cfg = {}) {
   doc.getElementById('aiModel').value = cfg.model || 'deepseek-chat';
   doc.getElementById('aiWebSearch').checked = !!cfg.webSearch;
   doc.getElementById('aiBochaKey').value = cfg.bochaKey || 'sk-bocha-test';
+  doc.getElementById('aiDeepSearch').checked = !!cfg.deepSearch;
 }
 
 function sendMessage(doc, text) {

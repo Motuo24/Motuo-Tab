@@ -1698,7 +1698,15 @@
               '- 常识性问题（如"1+1等于几"）不需要搜索，直接回答。\n\n'
             : '') +
           '## 当前卡片\n' + cardsList + '\n\n' +
-          '## 输出契约（最重要，违反即失败）\n' +
+          '## 总原则（先看这里）\n' +
+          '下列规则是为了更好地协助用户，**不是必须硬凑的模板**。只有当"确实需要、且信息足够"改动卡片时，才输出 <ops>。\n' +
+          '遇到下列情况**不要输出 <ops>**，只用文字回答即可：\n' +
+          '- 卡片已经存在（**绝不重复添加**）\n' +
+          '- 缺少必要信息（例如没有网址）且无法确定\n' +
+          '- 指令不清/有歧义（先反问确认）\n' +
+          '- 用户只是查询或闲聊\n' +
+          '宁可只回文字，也不要为了凑 <ops> 而做出错误或重复的操作。\n\n' +
+          '## 输出契约\n' +
           '多意图优先级：需要实时信息 → 先只输出搜索标签，拿到结果后再处理卡片；修改卡片 → 摘要 + <ops>；纯问答 → 普通文字。任何一轮只做一件事。\n\n' +
           '### A. 修改卡片时\n' +
           '回复必须且只能由两部分组成，除此之外不得有任何字符：\n' +
@@ -1710,7 +1718,7 @@
           '- 只写实际用到的键，不要输出空数组。\n' +
           '- 只输出**一个** <ops> 块，且必须在回复末尾。\n' +
           '- 禁止用 ```json 代码块包裹；禁止只输出裸 JSON 而省略 <ops> 标签；禁止在 JSON 外用文字复述 JSON。\n' +
-          '- add：数组，每项 {"name":"名称","url":"完整网址","iconSrc":"auto","color":"blue"}。\n' +
+          '- add：数组，每项 {"name":"名称","url":"完整网址","iconSrc":"auto","color":"blue"}；**不要添加当前卡片里已存在的同名卡片**。\n' +
           '  iconSrc：auto（自动抓图标，必须同时给 color 占位色）/ color（只用颜色）/ image（配 icon 图片URL）。\n' +
           '  color 取 blue/pink/orange/purple/sky/green/amber/white。\n' +
           '- remove：字符串数组，名称必须与当前卡片完全一致。\n' +
@@ -2595,6 +2603,17 @@
         return /(加|添加|新增|删|删除|移除|改|换|更新|设置|重命名|改名|移到|移动|置顶|排序|整理|颜色|图标|卡片|快捷方式|网址|url)/i.test(s);
       }
 
+      // 只有当模型"明显尝试输出 ops 却格式坏了"时才值得纠错重试；
+      // 纯文字回答（如"已存在，无需添加"）不能重试，否则会逼出重复 ops。
+      function looksLikeOpsAttempt(s) {
+        var t = String(s || '');
+        if (!t) return false;
+        if (/<ops\b/i.test(t)) return true;
+        if (t.indexOf('```') !== -1) return true;
+        if (/["']?(add|remove|update|reorder)["']?\s*[:：]/i.test(t)) return true;
+        return false;
+      }
+
       function applyOpsFromContent(content, bubble) {
         var ex = extractOps(content);
         if (!ex) return false;
@@ -2919,8 +2938,8 @@
             role: 'user', hidden: true,
             content: '【系统校验】你上一条回复没有包含可解析的 <ops> 操作块。' +
               (accumulated ? '你上一条的原文是：\n' + String(accumulated).slice(0, 1500) + '\n' : '') +
-              '如果用户确实要求修改卡片，请只输出一个可解析的 <ops>{"add":[],"remove":[],"update":[],"reorder":[]}</ops>，放在回复末尾；' +
-              '如果不需要改动卡片，只回复“无需改动”。不要解释、不要代码块、不要裸 JSON。'
+              '如果确实需要修改卡片，请只输出一个可解析的 <ops>{"add":[],"remove":[],"update":[],"reorder":[]}</ops>，放在回复末尾；' +
+              '如果不需要改动卡片（例如卡片已存在、缺少网址、指令不清），只回复“无需改动”，不要输出 <ops>。不要解释、不要代码块、不要裸 JSON。'
           };
           aiHistory.push(correctionMsg);
           saveAIHistory();
@@ -3413,7 +3432,7 @@
           };
 
           // P1：修改意图但第一次没解析到 ops → 自动纠错重试一轮（最多一次）
-          if (!opsApplied && !opsRetried && wantsCardChange(text)) {
+          if (!opsApplied && !opsRetried && wantsCardChange(text) && looksLikeOpsAttempt(accumulated)) {
             if (window.console && console.log) console.log('[AI] 未解析到 ops，触发一次纠错重试');
             return retryOpsOnce().then(finalizeNormal).catch(function (e) {
               console.warn('[AI] 纠错重试失败:', e);

@@ -385,12 +385,13 @@ test('多轮搜索：模型收到结果后仍要求搜索时会继续搜一轮',
   assert.ok(String(last.content).includes('蓝希云 官网') && String(last.content).includes('蓝希云 云服务'), '两轮搜索 chip 都应保留');
 });
 
-test('P1 纠错重试：修改意图但首轮没给 ops 时自动要一次格式并应用', async () => {
+test('P1 纠错重试：模型明显尝试输出 ops 但格式坏了才重试并应用', async () => {
   let chatSeq = 0;
   const fetchStub = (url) => {
     if (String(url).includes('/chat/completions')) {
       chatSeq++;
-      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '好的，我帮你加。' } }] }]);
+      // 首轮：有 add 迹象但 JSON 非法（url 值没加引号）→ 解析失败 → 触发纠错
+      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '好的\n{"add": [{"name":"Google", "url": https://www.google.com}]}' } }] }]);
       return sseResponse([{ choices: [{ delta: { content: '<ops>{"add":[{"name":"Google","url":"https://www.google.com","iconSrc":"color","color":"blue"}]}</ops>' } }] }]);
     }
     return Promise.reject(new Error('unexpected ' + url));
@@ -414,7 +415,7 @@ test('P1 纠错重试：模型判断无需改动时整个作废，内部消息�
   const fetchStub = (url) => {
     if (String(url).includes('/chat/completions')) {
       chatSeq++;
-      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '好的，我帮你加。' } }] }]);
+      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '好的\n{"add": [{"name":"Google","url": https://x}]}' } }] }]);
       return sseResponse([{ choices: [{ delta: { content: '无需改动' } }] }]);
     }
     return Promise.reject(new Error('unexpected ' + url));
@@ -428,8 +429,20 @@ test('P1 纠错重试：模型判断无需改动时整个作废，内部消息�
   const history = JSON.parse(window.localStorage.getItem('newtab.ai.history.v1'));
   assert.ok(!history.some((m) => String(m.content || '').includes('系统校验')), '内部纠错消息必须从历史移除');
   assert.ok(!history.some((m) => String(m.content || '').includes('无需改动')), '无需改动不应留在历史');
-  const lastAssistant = history.filter((m) => m.role === 'assistant').pop();
-  assert.ok(String(lastAssistant.content).includes('好的，我帮你加'), '应保留首轮回答');
+});
+
+test('卡片已存在时：模型纯文字回答（无 ops 迹象）不应触发重试，也不重复添加', async () => {
+  const seed = { 'newtab.shortcuts.v1': JSON.stringify([{ name: '蓝希云-青云互联', url: 'https://lanxi.example.com', iconSrc: 'color', color: 'blue' }]) };
+  const fetchStub = () => sseResponse([{ choices: [{ delta: { content: '当前已存在"蓝希云-青云互联"卡片，无需重复添加。' } }] }]);
+  const { window, document, calls } = boot({ seed, fetchStub });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '添加蓝希云-青云互联卡片');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  assert.strictEqual(calls.filter((c) => c.url.includes('/chat/completions')).length, 1, '纯文字回答不应触发纠错重试');
+  const list = readShortcuts(window);
+  assert.strictEqual(list.filter((s) => s.name === '蓝希云-青云互联').length, 1, '不应重复添加卡片');
 });
 
 test('P1 纠错重试：查询类意图即使没有 ops 也不触发重试', async () => {

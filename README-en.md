@@ -6,6 +6,8 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 > All data is stored locally in your browser (LocalStorage / IndexedDB) — **no backend required**.
 > The extension, single-file, and online versions behave identically: moving the file or using it online works the same.
+>
+> ⚠️ **Exception: the AI assistant (including web search) only works when installed as a browser extension.** When you open the single-file build directly via `file://`, the page has no extension host permissions, so cross-origin requests are blocked by the browser (they hang / time out / fail) and it cannot reach the model or search API. Use the **extension**, or an online / local `http(s)` server build.
 
 ***
 
@@ -172,6 +174,8 @@ Example: `bl Node.js` → search Node.js on Bilibili.
 3. Optional: enable "Web search" with a Bocha AI key; enable "Deep thinking" for model reasoning
 
 Manage cards in natural language, e.g. "make GitHub green" or "move Zhihu to the front"; every operation can be undone.
+
+> **Note**: the AI assistant needs to make cross-origin requests to the model endpoint and the Bocha search API, so it **only works in the browser extension build** (the extension declares `<all_urls>` host permissions). Opening `dist/newtab.html` via `file://` has no such permissions and the requests will be blocked, so AI features won't work; if you must use the single-file build, serve it over a local `http` server or an online host (`http/https`).
 
 ### Data
 

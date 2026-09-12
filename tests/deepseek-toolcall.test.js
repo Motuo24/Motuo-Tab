@@ -288,6 +288,41 @@ test('模型输出宽松 JSON（未加引号键 / 单引号）时也能应用', 
   assert.ok(readShortcuts(window).some((s) => s.name === '百度'), '宽松 JSON 也应被应用');
 });
 
+test('深度思考模式：ops 只出现在 reasoning_content 里也能应用', async () => {
+  const { window, document } = boot({
+    fetchStub: () => sseResponse([
+      { choices: [{ delta: { content: '' } }] },
+      { choices: [{ delta: { reasoning_content: '思考……\n<ops>{"add":[{"name":"Google","url":"https://www.google.com","iconSrc":"color","color":"blue"}]}</ops>' } }] }
+    ])
+  });
+  openAI(document);
+  configureAI(document, { deepSearch: true });
+  sendMessage(document, '加个 Google');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  assert.ok(readShortcuts(window).some((s) => s.name === 'Google'), 'reasoning 里的 <ops> 也应被应用');
+});
+
+test('ops 形状兜底：add 为对象 / update 为 map / JSON 带注释', async () => {
+  // add 对象
+  const s1 = boot({ fetchStub: () => sseResponse([{ choices: [{ delta: { content: '已添加 Google\n{"add":{"name":"Google","url":"https://www.google.com","iconSrc":"color","color":"blue"}}' } }] }]) });
+  openAI(s1.document); configureAI(s1.document); sendMessage(s1.document, '加个 Google');
+  await waitFor(() => s1.document.getElementById('aiSend').textContent === '发送');
+  assert.ok(readShortcuts(s1.window).some((s) => s.name === 'Google'), 'add 为对象也应应用');
+
+  // update 为 map
+  const s2 = boot({ seed: { 'newtab.shortcuts.v1': JSON.stringify([{ name: 'GitHub', url: 'https://github.com', iconSrc: 'color', color: 'blue' }]) },
+    fetchStub: () => sseResponse([{ choices: [{ delta: { content: '已改色\n{"update":{"GitHub":{"color":"green"}}}' } }] }]) });
+  openAI(s2.document); configureAI(s2.document); sendMessage(s2.document, '把 GitHub 改成绿色');
+  await waitFor(() => s2.document.getElementById('aiSend').textContent === '发送');
+  assert.strictEqual(readShortcuts(s2.window).find((s) => s.name === 'GitHub').color, 'green', 'update 为 map 也应应用');
+
+  // JSON 带注释
+  const s3 = boot({ fetchStub: () => sseResponse([{ choices: [{ delta: { content: '已添加百度\n{"add":[{"name":"百度","url":"https://www.baidu.com","iconSrc":"color","color":"blue"} /* 新卡片 */ ]}' } }] }]) });
+  openAI(s3.document); configureAI(s3.document); sendMessage(s3.document, '加个百度');
+  await waitFor(() => s3.document.getElementById('aiSend').textContent === '发送');
+  assert.ok(readShortcuts(s3.window).some((s) => s.name === '百度'), '带注释的 JSON 也应应用');
+});
+
 test('搜索失败时优雅降级：不报错、带上失败说明继续让模型作答', async () => {
   let chatSeq = 0;
   const fetchStub = (url) => {
@@ -319,4 +354,39 @@ test('搜索失败时优雅降级：不报错、带上失败说明继续让模�
 
   const steps = Array.from(document.querySelectorAll('.ai-thinking-step')).map((el) => el.textContent).join('|');
   assert.ok(steps.indexOf('失败') !== -1, '思考记录应标注搜索失败');
+});
+
+test('P1 纠错重试：修改意图但首轮没给 ops 时自动要一次格式并应用', async () => {
+  let chatSeq = 0;
+  const fetchStub = (url) => {
+    if (String(url).includes('/chat/completions')) {
+      chatSeq++;
+      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '好的，我帮你加。' } }] }]);
+      return sseResponse([{ choices: [{ delta: { content: '<ops>{"add":[{"name":"Google","url":"https://www.google.com","iconSrc":"color","color":"blue"}]}</ops>' } }] }]);
+    }
+    return Promise.reject(new Error('unexpected ' + url));
+  };
+
+  const { window, document, calls } = boot({ fetchStub });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '加个 Google');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  const chatCalls = calls.filter((c) => c.url.includes('/chat/completions'));
+  assert.strictEqual(chatCalls.length, 2, '应触发一次纠错重试');
+  const retryMsgs = JSON.parse(chatCalls[1].opts.body).messages;
+  assert.ok(retryMsgs.some((m) => m.role === 'user' && String(m.content).includes('系统校验')), '第二次请求应带纠错指令');
+  assert.ok(readShortcuts(window).some((s) => s.name === 'Google'), '重试结果应被应用');
+});
+
+test('P1 纠错重试：查询类意图即使没有 ops 也不触发重试', async () => {
+  const fetchStub = () => sseResponse([{ choices: [{ delta: { content: '当前有 3 个卡片：知乎、GitHub、百度。' } }] }]);
+  const { document, calls } = boot({ fetchStub });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '现在有哪些卡片？');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  assert.strictEqual(calls.filter((c) => c.url.includes('/chat/completions')).length, 1, '查询类不应触发重试');
 });

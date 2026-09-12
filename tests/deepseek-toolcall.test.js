@@ -409,6 +409,29 @@ test('P1 纠错重试：修改意图但首轮没给 ops 时自动要一次格式
   assert.ok(readShortcuts(window).some((s) => s.name === 'Google'), '重试结果应被应用');
 });
 
+test('P1 纠错重试：模型判断无需改动时整个作废，内部消息不留痕', async () => {
+  let chatSeq = 0;
+  const fetchStub = (url) => {
+    if (String(url).includes('/chat/completions')) {
+      chatSeq++;
+      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '好的，我帮你加。' } }] }]);
+      return sseResponse([{ choices: [{ delta: { content: '无需改动' } }] }]);
+    }
+    return Promise.reject(new Error('unexpected ' + url));
+  };
+  const { window, document } = boot({ fetchStub });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '加个 Google');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  const history = JSON.parse(window.localStorage.getItem('newtab.ai.history.v1'));
+  assert.ok(!history.some((m) => String(m.content || '').includes('系统校验')), '内部纠错消息必须从历史移除');
+  assert.ok(!history.some((m) => String(m.content || '').includes('无需改动')), '无需改动不应留在历史');
+  const lastAssistant = history.filter((m) => m.role === 'assistant').pop();
+  assert.ok(String(lastAssistant.content).includes('好的，我帮你加'), '应保留首轮回答');
+});
+
 test('P1 纠错重试：查询类意图即使没有 ops 也不触发重试', async () => {
   const fetchStub = () => sseResponse([{ choices: [{ delta: { content: '当前有 3 个卡片：知乎、GitHub、百度。' } }] }]);
   const { document, calls } = boot({ fetchStub });

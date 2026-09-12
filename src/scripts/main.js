@@ -1979,7 +1979,10 @@
       // 分隔符是全角竖线 U+FF5C（也兼容半角 |），里面的 invoke/parameter 同样带前缀。
       // 归一化后统一退化成普通 XML，便于解析与剥离。
       function normalizeDSML(text) {
-        return String(text || '').replace(/<(\/)?[|\uFF5C]DSML[|\uFF5C]/g, '<$1');
+        return String(text || '')
+          .replace(/<(\/)?[|\uFF5C]DSML[|\uFF5C]/g, '<$1')
+          // 联网搜索标签的别名统一成 <web_search>：模型有时写成 <search>/<websearch>/<search_web>/<web search>
+          .replace(/(<\/?)\s*(?:web\s*search|websearch|search_web|search)\b/gi, '$1web_search');
       }
 
       // 剥离模型"泄漏"到正文里的工具调用标记（DeepSeek DSML、<tool_calls><invoke>、
@@ -2903,15 +2906,17 @@
         var AI_MAX_SEARCH_ROUNDS = 3;     // 单轮对话最多搜索几次（防模型死循环）
 
         // P1：格式纠错——问模型要一次"只给 <ops> 块"。仅修改意图且首次没解析到 ops 时调用。
+        // 完全内部化：用完即从历史移除，绝不污染后续轮次；若模型判断无需改动则整个作废、保留首轮回答。
         function retryOpsOnce() {
           opsRetried = true;
-          aiHistory.push({
+          var correctionMsg = {
             role: 'user', hidden: true,
             content: '【系统校验】你上一条回复没有包含可解析的 <ops> 操作块。' +
               (accumulated ? '你上一条的原文是：\n' + String(accumulated).slice(0, 1500) + '\n' : '') +
-              '请只输出一个可解析的 <ops>{"add":[],"remove":[],"update":[],"reorder":[]}</ops>，放在回复末尾；' +
-              '如果确实不需要改动卡片，只回复 NO_OPS。不要解释、不要代码块、不要裸 JSON。'
-          });
+              '如果用户确实要求修改卡片，请只输出一个可解析的 <ops>{"add":[],"remove":[],"update":[],"reorder":[]}</ops>，放在回复末尾；' +
+              '如果不需要改动卡片，只回复“无需改动”。不要解释、不要代码块、不要裸 JSON。'
+          };
+          aiHistory.push(correctionMsg);
           saveAIHistory();
 
           var retryBody = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
@@ -2949,9 +2954,13 @@
               })();
             });
           }).then(function () {
-            var out = String(retryAccum).trim();
-            if (!out || out === 'NO_OPS') return;
-            var normalized = normalizeOpsTags(out);
+            // 关键：内部纠错消息用完即删，避免污染后续用户请求（否则下一轮会被"系统校验"带偏）
+            var idx = aiHistory.indexOf(correctionMsg);
+            if (idx !== -1) aiHistory.splice(idx, 1);
+            saveAIHistory();
+
+            // 只认 ops：没有 ops（含"无需改动"）就整个作废，保留首轮回答，不留下任何痕迹
+            var normalized = normalizeOpsTags(retryAccum);
             if (extractOps(normalized)) {
               accumulated = normalized;
               renderStreamBubble(bubble, accumulated, false);
@@ -3110,11 +3119,9 @@
             });
             saveAIHistory();
 
-            // 保留思考容器，清空气泡正文，准备接收回答
+            // 保留思考容器，清空气泡正文，准备接收回答（后续轮次思考沿用同一容器/步骤）
             var savedThinking = bubble.querySelector('.ai-thinking');
             accumulated = '';
-            followReasoningAccum = '';
-            followReasoningTextEl = null;
             pendingToolCallId = null;
             pendingToolCallName = null;
             pendingToolCallArgs = '';
@@ -3126,10 +3133,10 @@
             bubble.appendChild(tidy);
 
             return streamFollowUp().then(function () {
-              // 多轮：模型若继续要求搜索，且未超上限，则再来一轮
-              var more = accumulated.match(/<web_search>\s*([\s\S]*?)\s*<\/web_search>/i);
+              // 多轮：模型若继续要求搜索（含 <search> 等别名），且未超上限，则再来一轮
+              var more = normalizeDSML(accumulated).match(/<web_search>\s*([\s\S]*?)\s*<\/web_search>/i);
               if (more && more[1] && round < AI_MAX_SEARCH_ROUNDS) {
-                accumulated = accumulated.replace(more[0], '');
+                accumulated = stripToolMarkup(accumulated);
                 return runSearchRound(more[1].trim(), round + 1);
               }
             });
@@ -3309,8 +3316,28 @@
                 var _bt = bubble.querySelector('.ai-thinking');
                 if (_bt) finishThinking(_bt);
                 applyOpsFromContent(accumulated, bubble);
+
+                // 气泡里保留联网搜索记录（与重开面板时的 chip 一致）
+                if (bubble && searchChipParts.length) {
+                  var chipsWrap = document.createElement('div');
+                  chipsWrap.className = 'ai-search-chips';
+                  searchChipParts.forEach(function (p) {
+                    var obj = {};
+                    try { obj = JSON.parse(p); } catch (e) {}
+                    var chip = document.createElement('span');
+                    chip.className = 'ai-search-chip';
+                    chip.title = '已联网搜索「' + obj.query + '」' + (obj.count ? '，找到 ' + obj.count + ' 个结果' : '');
+                    chip.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.2"/><path d="M20.5 20.5l-4.3-4.3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span></span>';
+                    chip.querySelector('span').textContent = obj.query + (obj.count ? '（' + obj.count + ' 个结果）' : '');
+                    chipsWrap.appendChild(chip);
+                  });
+                  bubble.appendChild(chipsWrap);
+                }
+
+                // 思考记录：合并首轮推理与搜索后的推理，一起写入历史
+                var allReasoning = [reasoningAccum, followReasoningAccum].filter(Boolean).join('\n');
                 var finalContent = '';
-                if (reasoningAccum) finalContent += '<think>' + stripToolMarkup(reasoningAccum) + '</think>\n';
+                if (allReasoning) finalContent += '<think>' + stripToolMarkup(allReasoning) + '</think>\n';
                 searchChipParts.forEach(function (chip) { finalContent += '<tool_call>' + chip + '</tool_call>\n'; });
                 finalContent += stripToolMarkup(accumulated)
                   .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')

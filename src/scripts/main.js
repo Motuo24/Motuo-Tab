@@ -1770,6 +1770,27 @@
         try { localStorage.setItem(AI_HISTORY_KEY, JSON.stringify(aiHistory)); } catch (e) {}
       }
 
+      // 发送给模型前清洗历史：<think>/<tool_call>/<ops> 只是前端渲染用的语义标签，
+      // 不应回传给模型。否则模型会把它们当成自己的历史正文（尤其 <tool_call>），
+      // 干扰它后续是否/如何真正发起工具调用的判断。
+      function toApiMessages(history) {
+        return history.map(function (m) {
+          if (!m || m.role !== 'assistant' || typeof m.content !== 'string') return m;
+          var clean = m.content
+            .replace(/<think>[\s\S]*?<\/think>/gi, '')
+            .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+            .replace(/<ops>[\s\S]*?<\/ops>/gi, '')
+            .trim();
+          if (clean === m.content) return m;
+          var copy = {};
+          for (var k in m) {
+            if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
+          }
+          copy.content = clean;
+          return copy;
+        });
+      }
+
       // 追加一条系统/错误提示气泡（sendAI 未配置时使用；此前调用处引用了未定义函数）
       function addAIMessage(text, kind) {
         var div = document.createElement('div');
@@ -2625,7 +2646,7 @@
         var followReasoningTextEl = null; // 联网搜索后第二轮推理文本 DOM 引用
         var searchResultCount = 0;        // 本轮联网搜索命中的结果数（写入历史用于回显）
 
-        var reqBody = { model: model, messages: aiHistory, temperature: 0.1, stream: true };
+        var reqBody = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
         // 深度思考：启用模型推理能力（thinking 参数）
         if (deepThinkingOn) {
           reqBody.thinking = { type: 'enabled' };
@@ -2705,6 +2726,13 @@
                 if (line.startsWith('data: ')) {
                   try {
                     var chunk = JSON.parse(line.slice(6));
+                    // 流式错误帧必须往上抛，否则会被下面的 catch 静默吞掉，
+                    // 界面表现就是"思考了一下然后没反应"
+                    if (chunk && chunk.error) {
+                      var _apiErr = new Error('API 流式错误：' + (typeof chunk.error === 'string' ? chunk.error : JSON.stringify(chunk.error)));
+                      _apiErr.apiError = true;
+                      throw _apiErr;
+                    }
                     var delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
                     if (!delta) continue;
 
@@ -2755,7 +2783,7 @@
                         }
                       }
                     }
-                  } catch (e) {}
+                  } catch (e) { if (e && e.apiError) throw e; }
                 }
               }
               return readChunk();
@@ -2898,7 +2926,7 @@
                 tidyEl.innerHTML = '<span class="ai-spinner"></span> 正在整理回答…';
                 bubble.appendChild(tidyEl);
 
-                var followUpBody = { model: model, messages: aiHistory, temperature: 0.1, stream: true };
+                var followUpBody = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
                 // 与首轮保持一致：思考模式下后续请求也开启 thinking
                 if (deepThinkingOn) {
                   followUpBody.thinking = { type: 'enabled' };
@@ -2929,6 +2957,11 @@
                         if (fLine.startsWith('data: ')) {
                           try {
                             var fChunk = JSON.parse(fLine.slice(6));
+                            if (fChunk && fChunk.error) {
+                              var _fApiErr = new Error('API 流式错误：' + (typeof fChunk.error === 'string' ? fChunk.error : JSON.stringify(fChunk.error)));
+                              _fApiErr.apiError = true;
+                              throw _fApiErr;
+                            }
                             var fDelta = fChunk.choices && fChunk.choices[0] && fChunk.choices[0].delta;
                             if (fDelta && fDelta.content) {
                               accumulated += fDelta.content;
@@ -2950,7 +2983,7 @@
                                 }
                               }
                             }
-                          } catch (e) {}
+                          } catch (e) { if (e && e.apiError) throw e; }
                         }
                       }
                       return readFollowUp();

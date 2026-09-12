@@ -174,3 +174,47 @@ test('DeepSeek 思考模式 + 结构化工具调用：reasoning_content 需回�
   // 历史里保存结果数，供重开面板时 chip 回显
   assert.ok(String(lastAssistant.content).includes('"count":1'), '历史应保存搜索结果数');
 });
+
+test('回传给模型的历史不包含前端语义标签（<think>/<tool_call>/<ops>）', async () => {
+  // 模拟"上一轮联网搜索"后落盘的历史：带结构化 tool_calls + 带语义标签的最终回答
+  const seed = {
+    'newtab.ai.history.v1': JSON.stringify([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: '帮我加个蓝希云' },
+      {
+        role: 'assistant', content: null, reasoning_content: '第一轮思考',
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{"query":"蓝希云"}' } }]
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: '搜索结果……' },
+      {
+        role: 'assistant', reasoning_content: '第二轮思考',
+        content: '<think>第一轮思考</think>\n' +
+          '<tool_call>{"type":"web_search","query":"蓝希云","count":1}</tool_call>\n' +
+          '没搜到相关结果\n<ops>{"add":[{"name":"蓝希云","url":"https://x.com","iconSrc":"color","color":"blue"}]}</ops>'
+      }
+    ])
+  };
+
+  const { document, calls } = boot({
+    seed,
+    fetchStub: () => sseResponse([{ choices: [{ delta: { content: '好的，我再搜一次。' } }] }])
+  });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '再搜一遍');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  const chatCall = calls.find((c) => c.url.includes('/chat/completions'));
+  assert.ok(chatCall, '应发出对话请求');
+  const msgs = JSON.parse(chatCall.opts.body).messages;
+  // 只看 assistant 消息（system 提示词里本来就含 <ops> 格式示例）
+  const assistantRaw = JSON.stringify(msgs.filter((m) => m.role === 'assistant'));
+  assert.ok(!assistantRaw.includes('<tool_call>'), 'assistant 消息不应含 <tool_call> 标签');
+  assert.ok(!assistantRaw.includes('<think>'), 'assistant 消息不应含 <think> 标签');
+  assert.ok(!assistantRaw.includes('<ops>'), 'assistant 消息不应含 <ops> 标签');
+
+  const toolCallMsg = msgs.find((m) => m.role === 'assistant' && m.tool_calls);
+  assert.strictEqual(toolCallMsg.reasoning_content, '第一轮思考', '工具调用的 reasoning_content 必须保留（DeepSeek 要求）');
+  const finalAssistant = msgs.filter((m) => m.role === 'assistant').pop();
+  assert.ok(finalAssistant.content.includes('没搜到相关结果'), '清洗后应保留正常正文');
+});

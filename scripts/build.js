@@ -76,6 +76,9 @@ const manifest = {
   description: pkg.description,
   author: 'Motuo24',
   homepage_url: 'https://pod.xr24.cn',
+  // AI 助手需要跨域请求用户自填的模型接口，以及博查搜索 API。
+  // 缺少 host_permissions 时，扩展页面的 fetch 会被 CORS 拦截（表现为请求挂起/超时）。
+  host_permissions: ['<all_urls>'],
   chrome_url_overrides: { newtab: 'newtab.html' },
   icons: {
     16: 'icons/icon16.png',

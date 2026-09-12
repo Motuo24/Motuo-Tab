@@ -233,3 +233,36 @@ test('两轮联网搜索：用户第二次说"再搜一遍"仍会真正调用工
   assert.strictEqual(calls.filter((c) => c.url.includes('web-search')).length, 2, '两轮都应触发联网搜索');
   assert.strictEqual(calls.filter((c) => c.url.includes('/chat/completions')).length, 4, '两轮共 4 次对话请求');
 });
+
+test('搜索失败时优雅降级：不报错、带上失败说明继续让模型作答', async () => {
+  let chatSeq = 0;
+  const fetchStub = (url) => {
+    if (String(url).includes('/chat/completions')) {
+      chatSeq++;
+      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '<web_search>蓝希云 官网</web_search>' } }] }]);
+      return sseResponse([{ choices: [{ delta: { content: '暂时无法联网，我不确定蓝希云的网址。' } }] }]);
+    }
+    if (String(url).includes('web-search')) {
+      // 模拟网络/超时/CORS 失败
+      return Promise.reject(new Error('signal timed out'));
+    }
+    return Promise.reject(new Error('unexpected ' + url));
+  };
+
+  const { document, calls } = boot({ fetchStub });
+  openAI(document);
+  configureAI(document, { webSearch: true, deepSearch: true });
+
+  sendMessage(document, '帮我加个蓝希云');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  // 搜索失败不应中断，仍发出后续请求让模型作答
+  assert.strictEqual(calls.filter((c) => c.url.includes('/chat/completions')).length, 2, '搜索失败后仍应有后续回答请求');
+  assert.strictEqual(document.querySelectorAll('.ai-msg-error').length, 0, '不应出现错误气泡');
+
+  const followMsgs = JSON.parse(calls.filter((c) => c.url.includes('/chat/completions'))[1].opts.body).messages;
+  assert.ok(followMsgs.some((m) => m.role === 'user' && String(m.content).includes('联网搜索失败')), '应把失败说明回传给模型');
+
+  const steps = Array.from(document.querySelectorAll('.ai-thinking-step')).map((el) => el.textContent).join('|');
+  assert.ok(steps.indexOf('失败') !== -1, '思考记录应标注搜索失败');
+});

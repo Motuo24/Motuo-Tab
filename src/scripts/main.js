@@ -2876,35 +2876,56 @@
                 body: JSON.stringify({ query: searchQuery, freshness: 'noLimit', summary: true, count: 5 }),
                 signal: AbortSignal.timeout(30000)
               }).then(function (sRes) {
-                if (!sRes.ok) throw new Error('搜索API HTTP ' + sRes.status);
+                if (!sRes.ok) {
+                  return sRes.text().then(function (t) {
+                    throw new Error('搜索API HTTP ' + sRes.status + '：' + String(t).slice(0, 200));
+                  });
+                }
                 return sRes.json();
+              }).catch(function (sErr) {
+                // 搜索失败（网络 / CORS / 超时 / 配额）：不中断对话，降级为"无结果"继续回答
+                return { __error: sErr };
               }).then(function (sData) {
-                // 格式化搜索结果
                 var searchContext = '';
                 var resultCount = 0;
-                try {
-                  var webPages = sData.data && sData.data.webPages;
-                  if (webPages && webPages.value && webPages.value.length > 0) {
-                    var sItems = webPages.value.slice(0, 5);
-                    resultCount = sItems.length;
-                    for (var si = 0; si < sItems.length; si++) {
-                      var page = sItems[si];
-                      searchContext += '【' + (si + 1) + '】' + (page.name || '') + '\n';
-                      searchContext += '链接：' + (page.url || '') + '\n';
-                      searchContext += (page.snippet || page.summary || '') + '\n\n';
-                    }
-                  }
-                } catch (e) {}
+                var searchFailed = false;
+                var qEsc = searchQuery.replace(/</g, '&lt;');
 
-                // 搜索完成：把"搜索"步骤更新为 搜索：query（N 个结果），并保留在思考记录中
-                searchResultCount = resultCount;
-                if (searchStepEl) {
-                  var _stx = searchStepEl.querySelector('.step-text');
-                  if (_stx) {
-                    _stx.innerHTML = '搜索：<strong>' + searchQuery.replace(/</g, '&lt;') + '</strong>（<strong>' + resultCount + '</strong> 个结果）';
+                if (sData && sData.__error) {
+                  searchFailed = true;
+                  var _errText = String(sData.__error && sData.__error.message || sData.__error);
+                  if (searchStepEl) {
+                    var _stf = searchStepEl.querySelector('.step-text');
+                    if (_stf) _stf.innerHTML = '搜索：<strong>' + qEsc + '</strong>（失败）';
+                  } else if (thinkingEl) {
+                    addThinkingStep(thinkingEl, 'error', '联网搜索失败：' + _errText.replace(/</g, '&lt;'));
                   }
-                } else if (thinkingEl) {
-                  addThinkingStep(thinkingEl, 'result', '搜索完成，找到 <strong>' + resultCount + '</strong> 条相关结果');
+                } else {
+                  // 格式化搜索结果
+                  try {
+                    var webPages = sData.data && sData.data.webPages;
+                    if (webPages && webPages.value && webPages.value.length > 0) {
+                      var sItems = webPages.value.slice(0, 5);
+                      resultCount = sItems.length;
+                      for (var si = 0; si < sItems.length; si++) {
+                        var page = sItems[si];
+                        searchContext += '【' + (si + 1) + '】' + (page.name || '') + '\n';
+                        searchContext += '链接：' + (page.url || '') + '\n';
+                        searchContext += (page.snippet || page.summary || '') + '\n\n';
+                      }
+                    }
+                  } catch (e) {}
+
+                  // 搜索完成：把"搜索"步骤更新为 搜索：query（N 个结果），并保留在思考记录中
+                  searchResultCount = resultCount;
+                  if (searchStepEl) {
+                    var _stx = searchStepEl.querySelector('.step-text');
+                    if (_stx) {
+                      _stx.innerHTML = '搜索：<strong>' + qEsc + '</strong>（<strong>' + resultCount + '</strong> 个结果）';
+                    }
+                  } else if (thinkingEl) {
+                    addThinkingStep(thinkingEl, 'result', '搜索完成，找到 <strong>' + resultCount + '</strong> 条相关结果');
+                  }
                 }
 
                 // 把搜索结果作为一条 user 消息回传（不使用 native tools，避免 DeepSeek
@@ -2913,8 +2934,10 @@
                 aiHistory.push({
                   role: 'user',
                   hidden: true,
-                  content: '【联网搜索结果】\n' + (searchContext || '未找到相关搜索结果。') +
-                    '\n请基于以上搜索结果回答用户的问题，并在引用处标注来源编号（如 [1]）；不要编造。'
+                  content: searchFailed
+                    ? '【联网搜索失败】暂时无法联网获取实时结果。请基于你已有的知识回答，并明确说明该信息无法联网核实，不要编造网址。'
+                    : '【联网搜索结果】\n' + (searchContext || '未找到相关搜索结果。') +
+                      '\n请基于以上搜索结果回答用户的问题，并在引用处标注来源编号（如 [1]）；不要编造。'
                 });
                 saveAIHistory();
 

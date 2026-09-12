@@ -2899,6 +2899,8 @@
         var searchResultCount = 0;        // 本轮联网搜索命中的结果数（写入历史用于回显）
         var streamFailed = false;         // 首轮流式是否已失败（失败后不再走后续流程，避免错误气泡被覆盖）
         var opsRetried = false;           // 是否已做过一次"格式纠错重试"
+        var searchChipParts = [];         // 多轮搜索产生的 chip JSON（写入历史）
+        var AI_MAX_SEARCH_ROUNDS = 3;     // 单轮对话最多搜索几次（防模型死循环）
 
         // P1：格式纠错——问模型要一次"只给 <ops> 块"。仅修改意图且首次没解析到 ops 时调用。
         function retryOpsOnce() {
@@ -2958,6 +2960,183 @@
             }
           });
         }
+
+        // 博查搜索：返回 { searchContext, resultCount, failed, error }
+        function fetchBocha(query) {
+          return fetch('https://api.bochaai.com/v1/web-search', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + aiBochaKey.value.trim(),
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query: query, freshness: 'noLimit', summary: true, count: 5 }),
+            signal: AbortSignal.timeout(30000)
+          }).then(function (sRes) {
+            if (!sRes.ok) {
+              return sRes.text().then(function (t) {
+                throw new Error('搜索API HTTP ' + sRes.status + '：' + String(t).slice(0, 200));
+              });
+            }
+            return sRes.json();
+          }).then(function (sData) {
+            var searchContext = '', resultCount = 0;
+            try {
+              var webPages = sData.data && sData.data.webPages;
+              if (webPages && webPages.value && webPages.value.length > 0) {
+                var items = webPages.value.slice(0, 5);
+                resultCount = items.length;
+                for (var i = 0; i < items.length; i++) {
+                  var p = items[i];
+                  searchContext += '【' + (i + 1) + '】' + (p.name || '') + '\n';
+                  searchContext += '链接：' + (p.url || '') + '\n';
+                  searchContext += (p.snippet || p.summary || '') + '\n\n';
+                }
+              }
+            } catch (e) {}
+            return { searchContext: searchContext, resultCount: resultCount, failed: false };
+          }).catch(function (sErr) {
+            // 搜索失败（网络 / CORS / 超时 / 配额）：不中断对话，降级为"无结果"
+            return { searchContext: '', resultCount: 0, failed: true, error: sErr };
+          });
+        }
+
+        // 基于当前 aiHistory 发起后续请求并流式读入 accumulated（含第二轮思考展示）
+        function streamFollowUp() {
+          var body = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
+          if (deepThinkingOn) { body.thinking = { type: 'enabled' }; body.reasoning_effort = 'high'; }
+          return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(120000)
+          }).then(function (res) {
+            if (!res.ok) return res.text().then(function (t) { throw new Error('后续请求 HTTP ' + res.status + '：' + String(t).slice(0, 200)); });
+            return new Promise(function (resolve, reject) {
+              var reader = res.body.getReader();
+              var dec = new TextDecoder();
+              var buf = '';
+              (function read() {
+                reader.read().then(function (r) {
+                  if (r.done) return resolve();
+                  buf += dec.decode(r.value, { stream: true });
+                  var lines = buf.split('\n');
+                  buf = lines.pop() || '';
+                  lines.forEach(function (ln) {
+                    ln = ln.trim();
+                    if (ln.indexOf('data: ') !== 0 || ln === 'data: [DONE]') return;
+                    try {
+                      var ch = JSON.parse(ln.slice(6));
+                      if (ch && ch.error) {
+                        var e2 = new Error('API 流式错误：' + (typeof ch.error === 'string' ? ch.error : JSON.stringify(ch.error)));
+                        e2.apiError = true;
+                        throw e2;
+                      }
+                      var d = ch.choices && ch.choices[0] && ch.choices[0].delta;
+                      if (d && d.content) {
+                        accumulated += d.content;
+                        renderStreamBubble(bubble, accumulated, true);
+                        aiMessages.scrollTop = aiMessages.scrollHeight;
+                      }
+                      if (d && d.reasoning_content) {
+                        followReasoningAccum += d.reasoning_content;
+                        if (deepThinkingOn) {
+                          var th = bubble.querySelector('.ai-thinking');
+                          if (th) {
+                            if (!followReasoningTextEl) {
+                              var st = addThinkingStep(th, 'reasoning', '<span class="ai-spinner"></span> <span class="ai-reasoning-text"></span>');
+                              if (st) followReasoningTextEl = st.querySelector('.ai-reasoning-text');
+                            }
+                            if (followReasoningTextEl) followReasoningTextEl.textContent = followReasoningAccum;
+                            aiMessages.scrollTop = aiMessages.scrollHeight;
+                          }
+                        }
+                      }
+                    } catch (e) { if (e && e.apiError) throw e; }
+                  });
+                  read();
+                }, reject);
+              })();
+            });
+          });
+        }
+
+        // 执行一轮"搜索 + 让模型基于结果作答"，可递归支持多轮搜索
+        function runSearchRound(query, round) {
+          if (window.console && console.log) console.log('[AI] 搜索第 ' + round + ' 轮：', query);
+          var qEsc = String(query).replace(/</g, '&lt;');
+          var searchStepEl = null;
+          if (deepThinkingOn) {
+            var th = bubble.querySelector('.ai-thinking');
+            if (!th) { th = createThinkingEl(); bubble.appendChild(th); }
+            bubble.style.whiteSpace = 'normal';
+            searchStepEl = addThinkingStep(th, 'search', '<span class="ai-spinner"></span> 搜索：<strong>' + qEsc + '</strong>');
+          } else {
+            bubble.style.whiteSpace = 'normal';
+            var ss = document.createElement('div');
+            ss.className = 'ai-ops-placeholder';
+            ss.innerHTML = '<span class="ai-spinner"></span> 正在搜索: ' + qEsc + '…';
+            bubble.appendChild(ss);
+          }
+          aiMessages.scrollTop = aiMessages.scrollHeight;
+
+          return fetchBocha(query).then(function (r) {
+            if (r.failed) {
+              var errText = String((r.error && r.error.message) || r.error).replace(/</g, '&lt;');
+              if (searchStepEl) {
+                var t1 = searchStepEl.querySelector('.step-text');
+                if (t1) t1.innerHTML = '搜索：<strong>' + qEsc + '</strong>（失败）';
+              } else if (thinkingElForRound()) {
+                addThinkingStep(thinkingElForRound(), 'error', '联网搜索失败：' + errText);
+              }
+            } else {
+              searchResultCount = r.resultCount;
+              if (searchStepEl) {
+                var t2 = searchStepEl.querySelector('.step-text');
+                if (t2) t2.innerHTML = '搜索：<strong>' + qEsc + '</strong>（<strong>' + r.resultCount + '</strong> 个结果）';
+              } else if (thinkingElForRound()) {
+                addThinkingStep(thinkingElForRound(), 'result', '搜索完成，找到 <strong>' + r.resultCount + '</strong> 条相关结果');
+              }
+            }
+            // 记录搜索 chip（多轮时全部保留）
+            searchChipParts.push(JSON.stringify({ type: 'web_search', query: String(query), count: r.resultCount }));
+
+            aiHistory.push({
+              role: 'user',
+              hidden: true,
+              content: r.failed
+                ? '【联网搜索失败】暂时无法联网获取实时结果。请基于你已有的知识回答，并明确说明该信息无法联网核实，不要编造网址。'
+                : '【联网搜索结果】\n' + (r.searchContext || '未找到相关搜索结果。') +
+                  '\n请基于以上搜索结果回答用户的问题，并在引用处标注来源编号（如 [1]）；不要编造。'
+            });
+            saveAIHistory();
+
+            // 保留思考容器，清空气泡正文，准备接收回答
+            var savedThinking = bubble.querySelector('.ai-thinking');
+            accumulated = '';
+            followReasoningAccum = '';
+            followReasoningTextEl = null;
+            pendingToolCallId = null;
+            pendingToolCallName = null;
+            pendingToolCallArgs = '';
+            bubble.innerHTML = '';
+            if (savedThinking) bubble.appendChild(savedThinking);
+            var tidy = document.createElement('div');
+            tidy.className = 'ai-ops-placeholder';
+            tidy.innerHTML = '<span class="ai-spinner"></span> 正在整理回答…';
+            bubble.appendChild(tidy);
+
+            return streamFollowUp().then(function () {
+              // 多轮：模型若继续要求搜索，且未超上限，则再来一轮
+              var more = accumulated.match(/<web_search>\s*([\s\S]*?)\s*<\/web_search>/i);
+              if (more && more[1] && round < AI_MAX_SEARCH_ROUNDS) {
+                accumulated = accumulated.replace(more[0], '');
+                return runSearchRound(more[1].trim(), round + 1);
+              }
+            });
+          });
+        }
+
+        function thinkingElForRound() { return bubble ? bubble.querySelector('.ai-thinking') : null; }
 
         var reqBody = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
         // 深度思考：启用模型推理能力（thinking 参数）
@@ -3120,216 +3299,26 @@
             }
           }
           if (webSearchEnabled && pendingToolCallName === 'web_search' && pendingToolCallArgs) {
-            try {
-              var tcArgs = JSON.parse(pendingToolCallArgs);
-              var searchQuery = tcArgs.query || text;
-
-              // 深度思考：复用首轮 reasoning_content 用的那个思考容器，把"搜索"步骤追加进去。
-              // 这样搜索记录会一直留在思考过程里，而不是另起一个容器、稍后被清空。
-              var thinkingEl = null;
-              if (deepThinkingOn) {
-                thinkingEl = bubble.querySelector('.ai-thinking');
-                if (!thinkingEl) {
-                  thinkingEl = createThinkingEl();
-                  bubble.appendChild(thinkingEl);
-                }
-                bubble.style.whiteSpace = 'normal';
-              }
-              var searchStepEl = thinkingEl
-                ? addThinkingStep(thinkingEl, 'search', '<span class="ai-spinner"></span> 搜索：<strong>' + searchQuery.replace(/</g, '&lt;') + '</strong>')
-                : null;
-
-              // 无思考容器时，仍给出可见的搜索状态
-              if (!thinkingEl) {
-                bubble.className = 'ai-msg ai-msg-assistant';
-                bubble.style.whiteSpace = 'normal';
-                var searchStatusEl = document.createElement('div');
-                searchStatusEl.className = 'ai-ops-placeholder';
-                searchStatusEl.innerHTML = '<span class="ai-spinner"></span> 正在搜索: ' + searchQuery.replace(/</g, '&lt;') + '…';
-                bubble.appendChild(searchStatusEl);
-              }
-              aiMessages.scrollTop = aiMessages.scrollHeight;
-
-              // 调用博查AI搜索API
-              return fetch('https://api.bochaai.com/v1/web-search', {
-                method: 'POST',
-                headers: {
-                  'Authorization': 'Bearer ' + aiBochaKey.value.trim(),
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ query: searchQuery, freshness: 'noLimit', summary: true, count: 5 }),
-                signal: AbortSignal.timeout(30000)
-              }).then(function (sRes) {
-                if (!sRes.ok) {
-                  return sRes.text().then(function (t) {
-                    throw new Error('搜索API HTTP ' + sRes.status + '：' + String(t).slice(0, 200));
-                  });
-                }
-                return sRes.json();
-              }).catch(function (sErr) {
-                // 搜索失败（网络 / CORS / 超时 / 配额）：不中断对话，降级为"无结果"继续回答
-                return { __error: sErr };
-              }).then(function (sData) {
-                var searchContext = '';
-                var resultCount = 0;
-                var searchFailed = false;
-                var qEsc = searchQuery.replace(/</g, '&lt;');
-
-                if (sData && sData.__error) {
-                  searchFailed = true;
-                  var _errText = String(sData.__error && sData.__error.message || sData.__error);
-                  if (searchStepEl) {
-                    var _stf = searchStepEl.querySelector('.step-text');
-                    if (_stf) _stf.innerHTML = '搜索：<strong>' + qEsc + '</strong>（失败）';
-                  } else if (thinkingEl) {
-                    addThinkingStep(thinkingEl, 'error', '联网搜索失败：' + _errText.replace(/</g, '&lt;'));
-                  }
-                } else {
-                  // 格式化搜索结果
-                  try {
-                    var webPages = sData.data && sData.data.webPages;
-                    if (webPages && webPages.value && webPages.value.length > 0) {
-                      var sItems = webPages.value.slice(0, 5);
-                      resultCount = sItems.length;
-                      for (var si = 0; si < sItems.length; si++) {
-                        var page = sItems[si];
-                        searchContext += '【' + (si + 1) + '】' + (page.name || '') + '\n';
-                        searchContext += '链接：' + (page.url || '') + '\n';
-                        searchContext += (page.snippet || page.summary || '') + '\n\n';
-                      }
-                    }
-                  } catch (e) {}
-
-                  // 搜索完成：把"搜索"步骤更新为 搜索：query（N 个结果），并保留在思考记录中
-                  searchResultCount = resultCount;
-                  if (searchStepEl) {
-                    var _stx = searchStepEl.querySelector('.step-text');
-                    if (_stx) {
-                      _stx.innerHTML = '搜索：<strong>' + qEsc + '</strong>（<strong>' + resultCount + '</strong> 个结果）';
-                    }
-                  } else if (thinkingEl) {
-                    addThinkingStep(thinkingEl, 'result', '搜索完成，找到 <strong>' + resultCount + '</strong> 条相关结果');
-                  }
-                }
-
-                // 把搜索结果作为一条 user 消息回传（不使用 native tools，避免 DeepSeek
-                // 思考模式的 reasoning_content/tool_call 兼容问题）。
-                // hidden:true 表示只作为 API 上下文，界面上不渲染成气泡。
-                aiHistory.push({
-                  role: 'user',
-                  hidden: true,
-                  content: searchFailed
-                    ? '【联网搜索失败】暂时无法联网获取实时结果。请基于你已有的知识回答，并明确说明该信息无法联网核实，不要编造网址。'
-                    : '【联网搜索结果】\n' + (searchContext || '未找到相关搜索结果。') +
-                      '\n请基于以上搜索结果回答用户的问题，并在引用处标注来源编号（如 [1]）；不要编造。'
-                });
-                saveAIHistory();
-
-                // 重置状态，发起后续请求（让模型基于搜索结果回答）
-                // 保留思考容器，避免被 innerHTML 清空
-                var savedThinking = bubble.querySelector('.ai-thinking');
-                accumulated = '';
-                pendingToolCallId = null;
-                pendingToolCallName = null;
-                pendingToolCallArgs = '';
-                bubble.innerHTML = '';
-                if (savedThinking) bubble.appendChild(savedThinking);
-
-                // 后续请求生成前的过渡反馈，首字节到达后会被 renderStreamBubble 自动清除
-                var tidyEl = document.createElement('div');
-                tidyEl.className = 'ai-ops-placeholder';
-                tidyEl.innerHTML = '<span class="ai-spinner"></span> 正在整理回答…';
-                bubble.appendChild(tidyEl);
-
-                var followUpBody = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
-                // 与首轮保持一致：思考模式下后续请求也开启 thinking
-                if (deepThinkingOn) {
-                  followUpBody.thinking = { type: 'enabled' };
-                  followUpBody.reasoning_effort = 'high';
-                }
-
-                return fetch(url, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
-                  body: JSON.stringify(followUpBody),
-                  signal: AbortSignal.timeout(120000)
-                }).then(function (fRes) {
-                  if (!fRes.ok) return fRes.text().then(function (t) { throw new Error('后续请求 HTTP ' + fRes.status + ': ' + t); });
-                  var fReader = fRes.body.getReader();
-                  var fDecoder = new TextDecoder();
-                  var fBuffer = '';
-
-                  function readFollowUp() {
-                    return fReader.read().then(function (fResult) {
-                      if (fResult.done) return;
-                      fBuffer += fDecoder.decode(fResult.value, { stream: true });
-                      var fLines = fBuffer.split('\n');
-                      fBuffer = fLines.pop() || '';
-                      for (var fi = 0; fi < fLines.length; fi++) {
-                        var fLine = fLines[fi].trim();
-                        if (fLine === '' || fLine.startsWith(':')) continue;
-                        if (fLine === 'data: [DONE]') continue;
-                        if (fLine.startsWith('data: ')) {
-                          try {
-                            var fChunk = JSON.parse(fLine.slice(6));
-                            if (fChunk && fChunk.error) {
-                              var _fApiErr = new Error('API 流式错误：' + (typeof fChunk.error === 'string' ? fChunk.error : JSON.stringify(fChunk.error)));
-                              _fApiErr.apiError = true;
-                              throw _fApiErr;
-                            }
-                            var fDelta = fChunk.choices && fChunk.choices[0] && fChunk.choices[0].delta;
-                            if (fDelta && fDelta.content) {
-                              accumulated += fDelta.content;
-                              renderStreamBubble(bubble, accumulated, true);
-                              aiMessages.scrollTop = aiMessages.scrollHeight;
-                            }
-                            if (fDelta && fDelta.reasoning_content) {
-                              followReasoningAccum += fDelta.reasoning_content;
-                              // 搜索后的第二轮思考同样实时显示在同一个思考容器里
-                              if (deepThinkingOn) {
-                                var _fth = bubble.querySelector('.ai-thinking');
-                                if (_fth) {
-                                  if (!followReasoningTextEl) {
-                                    var _fs = addThinkingStep(_fth, 'reasoning', '<span class="ai-spinner"></span> <span class="ai-reasoning-text"></span>');
-                                    if (_fs) followReasoningTextEl = _fs.querySelector('.ai-reasoning-text');
-                                  }
-                                  if (followReasoningTextEl) followReasoningTextEl.textContent = followReasoningAccum;
-                                  aiMessages.scrollTop = aiMessages.scrollHeight;
-                                }
-                              }
-                            }
-                          } catch (e) { if (e && e.apiError) throw e; }
-                        }
-                      }
-                      return readFollowUp();
-                    });
-                  }
-                  return readFollowUp();
-                });
-              }).then(function () {
-                // 后续请求完成，渲染最终结果
-                // 深度思考兜底 + 模型若没按 <ops> 包裹、直接吐 JSON，先规范化再渲染/应用
+            var _tcArgs = null;
+            try { _tcArgs = JSON.parse(pendingToolCallArgs); } catch (e) { console.warn('[AI] 工具参数解析失败:', e); }
+            if (_tcArgs) {
+              return runSearchRound(_tcArgs.query || text, 1).then(function () {
+                // 收尾：规范化 ops、渲染、应用、落盘
                 accumulated = normalizeOpsTags(mergeReasoningOps(accumulated, reasoningAccum));
                 renderStreamBubble(bubble, accumulated, false);
                 var _bt = bubble.querySelector('.ai-thinking');
                 if (_bt) finishThinking(_bt);
-                // 联网搜索后的最终回答里如果带 <ops>，同样要应用
-                // （否则"先搜索得到网址、再添加卡片"的指令不会真正生效）
                 applyOpsFromContent(accumulated, bubble);
-                // 保存：思考过程 + 联网搜索调用 + 正文，全部以语义标签/纯文本存储。
-                // 正文里若混入模型自发输出的原始 <tool_call> 文本标签，保存前一并剥离
                 var finalContent = '';
                 if (reasoningAccum) finalContent += '<think>' + stripToolMarkup(reasoningAccum) + '</think>\n';
-                if (searchQuery) finalContent += '<tool_call>' + JSON.stringify({ type: 'web_search', query: searchQuery, count: searchResultCount }) + '</tool_call>\n';
+                searchChipParts.forEach(function (chip) { finalContent += '<tool_call>' + chip + '</tool_call>\n'; });
                 finalContent += stripToolMarkup(accumulated)
                   .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
                   .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
-                // 不使用 native tools，也就不需要回传 reasoning_content（避免旧版 reasoner 400）
                 aiHistory.push({ role: 'assistant', content: finalContent });
                 saveAIHistory();
                 endAISend();
               }).catch(function (fErr) {
-                // 注意：搜索 API 的失败已在上面被降级处理，这里只可能是"搜索后的回答请求"失败
                 var fErrMsg = '联网搜索后回答失败：' + (fErr && fErr.message ? fErr.message : fErr);
                 if (bubble) {
                   bubble.innerHTML = renderMarkdown(fErrMsg);
@@ -3337,14 +3326,12 @@
                   bubble.className = 'ai-msg ai-msg-error';
                 }
                 reasoningTextEl = null;
-                if (thinkingEl) finishThinking(thinkingEl);
+                var _et = bubble.querySelector('.ai-thinking');
+                if (_et) finishThinking(_et);
                 aiHistory.push({ role: 'assistant', content: fErrMsg });
                 saveAIHistory();
                 endAISend();
               });
-            } catch (e) {
-              // 工具调用处理失败，降级为正常流程
-              console.warn('[AI] 工具调用处理失败:', e);
             }
           }
 

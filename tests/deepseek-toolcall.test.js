@@ -356,6 +356,35 @@ test('搜索失败时优雅降级：不报错、带上失败说明继续让模�
   assert.ok(steps.indexOf('失败') !== -1, '思考记录应标注搜索失败');
 });
 
+test('多轮搜索：模型收到结果后仍要求搜索时会继续搜一轮', async () => {
+  let chatSeq = 0;
+  const fetchStub = (url) => {
+    if (String(url).includes('/chat/completions')) {
+      chatSeq++;
+      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '<web_search>蓝希云 官网</web_search>' } }] }]);
+      if (chatSeq === 2) return sseResponse([{ choices: [{ delta: { content: '<web_search>蓝希云 云服务</web_search>' } }] }]);
+      return sseResponse([{ choices: [{ delta: { content: '找到了：蓝希云官网。' } }] }]);
+    }
+    if (String(url).includes('web-search')) {
+      return jsonResponse({ data: { webPages: { value: [{ name: 'x', url: 'https://x.com', snippet: 's' }] } } });
+    }
+    return Promise.reject(new Error('unexpected ' + url));
+  };
+
+  const { document, calls } = boot({ fetchStub });
+  openAI(document);
+  configureAI(document, { webSearch: true, deepSearch: true });
+  sendMessage(document, '搜一下蓝希云再帮我加');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  assert.strictEqual(calls.filter((c) => c.url.includes('web-search')).length, 2, '应连续搜索两次');
+  assert.strictEqual(calls.filter((c) => c.url.includes('/chat/completions')).length, 3, '两轮搜索 + 一次回答');
+  // 两轮的搜索 chip 都要写入历史
+  const history = JSON.parse(document.defaultView.localStorage.getItem('newtab.ai.history.v1'));
+  const last = history.filter((m) => m.role === 'assistant').pop();
+  assert.ok(String(last.content).includes('蓝希云 官网') && String(last.content).includes('蓝希云 云服务'), '两轮搜索 chip 都应保留');
+});
+
 test('P1 纠错重试：修改意图但首轮没给 ops 时自动要一次格式并应用', async () => {
   let chatSeq = 0;
   const fetchStub = (url) => {

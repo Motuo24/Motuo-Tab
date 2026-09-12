@@ -147,4 +147,12 @@ test('DeepSeek 思考模式 + 结构化工具调用：reasoning_content 需回�
   const toolCallMsg = followMsgs.find((m) => m.role === 'assistant' && m.tool_calls);
   assert.ok(toolCallMsg, '后续请求应包含带 tool_calls 的 assistant 消息');
   assert.strictEqual(toolCallMsg.reasoning_content, REASONING, 'DeepSeek 要求回传 reasoning_content');
+
+  // 收尾流程必须成功：不能出现错误气泡，且最终回答要落盘
+  // （曾因 followReasoningAccum 作用域错误抛出 "is not defined"）
+  assert.strictEqual(document.querySelectorAll('.ai-msg-error').length, 0, '不应出现错误气泡');
+  const history = JSON.parse(document.defaultView.localStorage.getItem('newtab.ai.history.v1'));
+  const lastAssistant = history.filter((m) => m.role === 'assistant').pop();
+  assert.ok(lastAssistant && String(lastAssistant.content).includes('已添加蓝希云'), '最终回答应已保存');
+  assert.ok(!String(lastAssistant.content).includes('is not defined'), '历史不应含异常信息');
 });

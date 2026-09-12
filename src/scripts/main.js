@@ -2618,6 +2618,7 @@
         var pendingToolCallName = null;
         var pendingToolCallArgs = '';
         var reasoningAccum = '';          // 深度思考：推理内容累积（局部变量，避免竞态）
+        var followReasoningAccum = '';    // 联网搜索后续请求的推理内容（需在外层作用域，供收尾 .then 使用）
         var reasoningTextEl = null;       // 深度思考：缓存推理文本 DOM 引用
 
         var reqBody = { model: model, messages: aiHistory, temperature: 0.1, stream: true };
@@ -2879,7 +2880,6 @@
                   followUpBody.thinking = { type: 'enabled' };
                   followUpBody.reasoning_effort = 'high';
                 }
-                var followReasoningAccum = '';
 
                 return fetch(url, {
                   method: 'POST',

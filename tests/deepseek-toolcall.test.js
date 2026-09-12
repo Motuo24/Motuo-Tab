@@ -162,4 +162,15 @@ test('DeepSeek 思考模式 + 结构化工具调用：reasoning_content 需回�
   const lastAssistant = history.filter((m) => m.role === 'assistant').pop();
   assert.ok(lastAssistant && String(lastAssistant.content).includes('已添加蓝希云'), '最终回答应已保存');
   assert.ok(!String(lastAssistant.content).includes('is not defined'), '历史不应含异常信息');
+
+  // 思考记录里应保留搜索步骤（搜索完毕后也不消失）：搜索：query（N 个结果）
+  assert.strictEqual(document.querySelectorAll('.ai-thinking').length, 1, '不应出现多个思考容器');
+  const stepTexts = Array.from(document.querySelectorAll('.ai-thinking-step')).map((el) => el.textContent);
+  const searchStep = stepTexts.find((t) => t.indexOf('搜索') !== -1);
+  assert.ok(searchStep, '思考记录里应有搜索步骤');
+  assert.ok(searchStep.indexOf('北京今天天气') !== -1, '搜索步骤应包含查询词');
+  assert.ok(searchStep.indexOf('个结果') !== -1, '搜索步骤应包含结果数量');
+
+  // 历史里保存结果数，供重开面板时 chip 回显
+  assert.ok(String(lastAssistant.content).includes('"count":1'), '历史应保存搜索结果数');
 });

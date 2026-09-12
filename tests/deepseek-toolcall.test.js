@@ -218,3 +218,56 @@ test('回传给模型的历史不包含前端语义标签（<think>/<tool_call>/
   const finalAssistant = msgs.filter((m) => m.role === 'assistant').pop();
   assert.ok(finalAssistant.content.includes('没搜到相关结果'), '清洗后应保留正常正文');
 });
+
+// 两轮连续搜索：chat1=工具调用 / chat2=没搜到 / chat3=再次工具调用 / chat4=最终回答
+function twoTurnStub() {
+  let chatSeq = 0;
+  return (url) => {
+    if (String(url).includes('/chat/completions')) {
+      chatSeq++;
+      if (chatSeq === 1) {
+        return sseResponse([
+          { choices: [{ delta: { reasoning_content: '第一轮：先搜索。' } }] },
+          { choices: [{ delta: { tool_calls: [{ id: 'call_1', type: 'function', index: 0, function: { name: 'web_search', arguments: '{"query":"蓝希云 官网"}' } }] } }] }
+        ]);
+      }
+      if (chatSeq === 2) return sseResponse([{ choices: [{ delta: { content: '没搜到相关结果。' } }] }]);
+      if (chatSeq === 3) {
+        return sseResponse([
+          { choices: [{ delta: { reasoning_content: '第二轮：换个关键词再搜。' } }] },
+          { choices: [{ delta: { tool_calls: [{ id: 'call_2', type: 'function', index: 0, function: { name: 'web_search', arguments: '{"query":"蓝希云 云服务"}' } }] } }] }
+        ]);
+      }
+      return sseResponse([{ choices: [{ delta: { content: '找到了：蓝希云官网。' } }] }]);
+    }
+    if (String(url).includes('web-search')) {
+      return jsonResponse({ data: { webPages: { value: [{ name: 'x', url: 'https://x.com', snippet: 's' }] } } });
+    }
+    return Promise.reject(new Error('unexpected ' + url));
+  };
+}
+
+test('两轮联网搜索：用户第二次说"再搜一遍"仍会真正调用工具', async () => {
+  const { document, calls } = boot({ fetchStub: twoTurnStub() });
+  openAI(document);
+  configureAI(document, { webSearch: true, deepSearch: true });
+
+  sendMessage(document, '帮我加个蓝希云');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  sendMessage(document, '再搜一遍');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  assert.strictEqual(calls.filter((c) => c.url.includes('web-search')).length, 2, '两轮都应触发联网搜索');
+  const chatCalls = calls.filter((c) => c.url.includes('/chat/completions'));
+  assert.strictEqual(chatCalls.length, 4, '两轮共 4 次对话请求');
+
+  // 第二轮请求里上一轮工具调用的 reasoning_content 必须保留（DeepSeek 要求）
+  const turn2Msgs = JSON.parse(chatCalls[2].opts.body).messages;
+  const prevTool = turn2Msgs.find((m) => m.role === 'assistant' && m.tool_calls);
+  assert.ok(prevTool && prevTool.reasoning_content, '第二轮请求应带上上一轮工具调用的 reasoning_content');
+
+  // 第二轮请求不应把前端语义标签回传给模型
+  const assistantRaw = JSON.stringify(turn2Msgs.filter((m) => m.role === 'assistant'));
+  assert.ok(!assistantRaw.includes('<think>'), '第二轮请求不应含 <think>');
+  assert.ok(!assistantRaw.includes('<tool_call>'), '第二轮请求不应含 <tool_call>');
+});

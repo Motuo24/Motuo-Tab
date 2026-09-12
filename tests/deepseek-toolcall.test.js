@@ -264,6 +264,30 @@ test('模型用 ```json 代码块输出时也能应用创建卡片', async () =>
   assert.ok(!document.getElementById('aiMessages').textContent.includes('"add"'), 'JSON 不应原样显示');
 });
 
+test('模型输出 JSON 数组（卡片列表）时也能识别为 add', async () => {
+  const arr = '已添加 Google\n[{"name":"Google","url":"https://www.google.com","iconSrc":"color","color":"blue"}]';
+  const { window, document } = boot({
+    fetchStub: () => sseResponse([{ choices: [{ delta: { content: arr } }] }])
+  });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '加个 Google');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  assert.ok(readShortcuts(window).some((s) => s.name === 'Google'), 'JSON 数组也应被识别为 add');
+});
+
+test('模型输出宽松 JSON（未加引号键 / 单引号）时也能应用', async () => {
+  const loose = "已添加百度\n{add:[{name:'百度', url:'https://www.baidu.com', iconSrc:'color', color:'blue'}]}";
+  const { window, document } = boot({
+    fetchStub: () => sseResponse([{ choices: [{ delta: { content: loose } }] }])
+  });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '加个百度');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  assert.ok(readShortcuts(window).some((s) => s.name === '百度'), '宽松 JSON 也应被应用');
+});
+
 test('搜索失败时优雅降级：不报错、带上失败说明继续让模型作答', async () => {
   let chatSeq = 0;
   const fetchStub = (url) => {

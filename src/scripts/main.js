@@ -2378,25 +2378,46 @@
       // 解析正文里的 <ops> 并应用到卡片列表（快照 / chips / 撤销按钮），
       // 正常对话与"联网搜索后的最终回答"都会调用它，避免两条链路行为不一致。
       // 返回 true 表示识别到 ops（无论是否真的应用）。
-      // 尝试把一段文本解析成 ops 对象（必须含 add/remove/update/reorder 之一）
+      // 宽松 JSON 解析：先标准 parse，失败再修常见问题（尾逗号 / 单引号 / 未加引号的键）
+      function parseLooseJson(str) {
+        var s = String(str || '').trim();
+        if (!s) return undefined;
+        try { return JSON.parse(s); } catch (e) {}
+        var t = s
+          .replace(/,\s*([}\]])/g, '$1')
+          .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":')
+          .replace(/'/g, '"');
+        try { return JSON.parse(t); } catch (e) { return undefined; }
+      }
+
+      // 把任意解析结果强制成 ops 对象（兼容数组/单卡片/{ops:...} 包裹）
+      function coerceOps(obj) {
+        if (Array.isArray(obj)) {
+          if (obj.length && obj.every(function (x) { return x && typeof x === 'object' && x.name; })) return { add: obj };
+          return null;
+        }
+        if (!obj || typeof obj !== 'object') return null;
+        if ('add' in obj || 'remove' in obj || 'update' in obj || 'reorder' in obj) return obj;
+        if (obj.ops && typeof obj.ops === 'object') return coerceOps(obj.ops);
+        if (obj.actions && typeof obj.actions === 'object') return coerceOps(obj.actions);
+        if (obj.name && (obj.url || obj.icon || obj.iconSrc || obj.letter)) return { add: [obj] };
+        return null;
+      }
+
+      // 尝试把一段文本解析成 ops 对象
       function tryParseOps(str) {
         var s = String(str || '').trim();
         if (!s) return null;
         var fence = s.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
         if (fence) s = fence[1].trim();
-        if (s.charAt(0) !== '{') return null;
-        var obj;
-        try { obj = JSON.parse(s); } catch (e) { return null; }
-        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
-        if (!('add' in obj || 'remove' in obj || 'update' in obj || 'reorder' in obj)) return null;
-        return obj;
+        return coerceOps(parseLooseJson(s));
       }
 
-      // 在文本里定位一个配平的 JSON 对象
-      function findJsonObject(text) {
+      // 在文本里定位配平的 JSON 对象/数组
+      function findBalanced(text, open, close) {
         var s = String(text || '');
         for (var i = 0; i < s.length; i++) {
-          if (s.charAt(i) !== '{') continue;
+          if (s.charAt(i) !== open) continue;
           var depth = 0, inStr = false, esc = false, end = -1;
           for (var j = i; j < s.length; j++) {
             var c = s.charAt(j);
@@ -2406,9 +2427,9 @@
               else if (c === '"') inStr = false;
             } else if (c === '"') {
               inStr = true;
-            } else if (c === '{') {
+            } else if (c === open) {
               depth++;
-            } else if (c === '}') {
+            } else if (c === close) {
               depth--;
               if (depth === 0) { end = j + 1; break; }
             }
@@ -2421,7 +2442,7 @@
         return null;
       }
 
-      // 从任意内容中提取 ops：<ops> 标签 / ```json 代码块 / 裸 JSON。
+      // 从任意内容中提取 ops：<ops> 标签 / ```json 代码块 / 裸 JSON / JSON 数组 / 单卡片对象。
       // 模型偶尔不按 <ops> 包裹、直接吐 JSON，这里统一兜住。
       function extractOps(content) {
         var s = String(content || '');
@@ -2435,7 +2456,10 @@
           var obj2 = tryParseOps(fence[1]);
           if (obj2) return { ops: obj2, start: fence.index, end: fence.index + fence[0].length, text: fence[0] };
         }
-        return findJsonObject(s);
+        // 整段就是一个 JSON
+        var whole = tryParseOps(s);
+        if (whole) return { ops: whole, start: 0, end: s.length, text: s };
+        return findBalanced(s, '{', '}') || findBalanced(s, '[', ']');
       }
 
       // 把裸 JSON / 代码块的 ops 规范成 <ops>…</ops>，便于统一渲染与保存
@@ -3151,6 +3175,9 @@
             aiSend.textContent = '发送';
             return;
           }
+
+          // Debug：原始输出（排查格式问题时看这一行）
+          if (window.console && console.log) console.log('[AI] ← final content:', accumulated);
 
           // 模型若没按 <ops> 包裹、直接吐 JSON，先规范成 <ops> 再渲染/应用
           accumulated = normalizeOpsTags(accumulated);

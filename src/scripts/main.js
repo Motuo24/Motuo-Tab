@@ -2846,6 +2846,13 @@
                   addThinkingStep(thinkingEl, 'search', '<span class="ai-spinner"></span> 正在阅读筛选，整理回答…');
                 }
 
+                // 文本兜底路径没有结构化 id：必须补一个，否则会发出
+                // tool_calls:[{id:null}] + tool_call_id:null，DeepSeek 直接 400
+                // （表现就是"搜索后回复失败"）
+                if (!pendingToolCallId) {
+                  pendingToolCallId = 'call_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                }
+
                 // 将工具调用和结果加入历史（让模型知道搜索结果）。
                 // DeepSeek 思考模式 + tools 要求 assistant 的 reasoning_content 一并回传，
                 // 否则后续请求会返回 400。

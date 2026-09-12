@@ -90,6 +90,13 @@ test('DeepSeek DSML：正文里泄漏的 <｜DSML｜tool_calls> 也能触发联�
   });
   // ops 正常应用
   assert.ok(readShortcuts(window).some((s) => s.name === '蓝希云'), '卡片应被添加');
+
+  // 文本兜底路径必须补上合法的 tool_call_id，否则 DeepSeek 会 400
+  const toolCallMsg = history.find((m) => m.role === 'assistant' && m.tool_calls);
+  const toolMsg = history.find((m) => m.role === 'tool');
+  assert.ok(toolCallMsg, '历史应含带 tool_calls 的 assistant 消息');
+  assert.ok(toolCallMsg.tool_calls[0].id, 'tool_calls[].id 不能为空');
+  assert.strictEqual(toolMsg.tool_call_id, toolCallMsg.tool_calls[0].id, 'tool_call_id 必须与调用 id 一致');
 });
 
 test('DeepSeek：普通 <tool_calls><invoke> 文本调用也能触发联网搜索', async () => {

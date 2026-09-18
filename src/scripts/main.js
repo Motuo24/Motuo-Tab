@@ -1660,10 +1660,10 @@
 
       function buildSystemPrompt() {
         // 简明卡片清单：只列 name + url，节省 token，避免模型注意力稀释
-        var lines = ['当前卡片（共 ' + list.length + ' 个）：'];
+        var lines = ['当前卡片（共 ' + list.length + ' 个；下面已经给出每张卡片的名称和网址，你可以直接使用，不要声称看不到）：'];
         for (var i = 0; i < list.length; i++) {
           var it = list[i];
-          lines.push('- ' + it.name + ' (' + it.url + ')');
+          lines.push('- 名称：' + it.name + ' ｜ 网址：' + (it.url ? it.url : '（未设置）'));
         }
         var cardsList = lines.join('\n');
 

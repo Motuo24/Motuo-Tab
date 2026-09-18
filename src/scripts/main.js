@@ -1833,7 +1833,10 @@
             // （后者只有 native tools 链路才需要，旧版 reasoner 收到会 400）
             if (Object.prototype.hasOwnProperty.call(m, k) && k !== 'tool_calls' && k !== 'reasoning_content' && k !== 'hidden') copy[k] = m[k];
           }
-          if (typeof copy.content === 'string') {
+          // 只清洗 assistant 的历史正文，剥离前端渲染用的语义标签。
+          // 关键：system 提示词里本来就包含 <ops>/<web_search> 的格式示例，
+          // 绝不能一起删掉，否则模型收不到格式规范（曾导致裸 JSON、标签丢尖括号等）。
+          if (m.role === 'assistant' && typeof copy.content === 'string') {
             copy.content = copy.content
               .replace(/<think>[\s\S]*?<\/think>/gi, '')
               .replace(/<web_search>[\s\S]*?<\/web_search>/gi, '')

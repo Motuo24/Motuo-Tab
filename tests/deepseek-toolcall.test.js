@@ -438,7 +438,7 @@ test('系统提示词会把每张卡片的名称与网址都发给模型', async
   ]) };
   const { document, calls } = boot({ seed, fetchStub: () => sseResponse([{ choices: [{ delta: { content: '好的' } }] }]) });
   openAI(document);
-  configureAI(document);
+  configureAI(document, { webSearch: true });
   sendMessage(document, '随便问问');
   await waitFor(() => document.getElementById('aiSend').textContent === '发送');
 
@@ -446,6 +446,9 @@ test('系统提示词会把每张卡片的名称与网址都发给模型', async
   const sys = msgs.find((m) => m.role === 'system').content;
   assert.ok(sys.indexOf('1Panel') !== -1, '系统提示词应包含卡片名');
   assert.ok(sys.indexOf('http://192.168.1.9:10086') !== -1, '系统提示词应包含卡片完整网址');
+  // 关键回归：system 里的格式示例不能被 toApiMessages 当语义标签删掉
+  assert.ok(sys.indexOf('<ops>') !== -1, '系统提示词必须保留 <ops> 格式示例');
+  assert.ok(sys.indexOf('<web_search>') !== -1, '系统提示词必须保留 <web_search> 标签示例');
 });
 
 test('卡片已存在时：模型纯文字回答（无 ops 迹象）不应触发重试，也不重复添加', async () => {

@@ -383,6 +383,8 @@
 
       var list = load();
       render(list);
+      // 后台把远程图标缓存到本地（首次以后进页面无需再联网加载图标）
+      cacheExistingIcons();
 
       // 离开页面前最后再存一次（关 tab/刷新/navigate 都触发）
       window.addEventListener('beforeunload', function () {
@@ -657,26 +659,66 @@
         });
       }
 
-      // 异步抓取并替换：抓到就把 list 对应项改成 image+iconUrl 并持久化；失败用 fallback 颜色
+      // 把图标转成 data URL 缓存到本地，避免每次进页面都重新联网加载。
+      // 扩展环境有 host_permissions，fetch 可跨域；失败返回 null（调用方退回用远程 URL）。
+      function cacheImageAsDataUrl(url) {
+        if (!url || /^data:/i.test(url)) return Promise.resolve(url || null);
+        return fetch(url, { mode: 'cors', signal: AbortSignal.timeout(8000) })
+          .then(function (r) {
+            if (!r.ok) throw new Error('http ' + r.status);
+            return r.blob();
+          })
+          .then(function (blob) {
+            if (blob.size > 80 * 1024) return null; // 太大不缓存，避免撑爆 localStorage
+            return new Promise(function (resolve) {
+              var fr = new FileReader();
+              fr.onload = function () { resolve(typeof fr.result === 'string' ? fr.result : null); };
+              fr.onerror = function () { resolve(null); };
+              fr.readAsDataURL(blob);
+            });
+          })
+          .catch(function () { return null; });
+      }
+
+      // 异步抓取并替换：抓到就把 list 对应项改成 image + 本地缓存(data URL) 并持久化；失败用 fallback 颜色
       function applyAutoIcon(cardEl, itemIndex, fallbackColor) {
          var item = list[itemIndex];
          if (!item) return;
          fetchFavicon(item.url).then(function (iconUrl) {
            if (iconUrl) {
-             // 把这条数据改成"图片链接"模式并持久化
-             item.iconSrc = 'image';
-             item.icon = iconUrl;
-             save(list);
-           } else {
-             // 抓不到，保持 color 模式 + 随机色
-             item.iconSrc = 'color';
-             item.color = fallbackColor;
-             save(list);
+             // 尽量转成 data URL 本地缓存（下次进页面秒开）；转不了就退回存远程 URL
+             return cacheImageAsDataUrl(iconUrl).then(function (dataUrl) {
+               item.iconSrc = 'image';
+               item.icon = dataUrl || iconUrl;
+               save(list);
+               updateCardContent(cardEl, item);
+             });
            }
+           // 抓不到，保持 color 模式 + 随机色
+           item.iconSrc = 'color';
+           item.color = fallbackColor;
+           save(list);
            // 就地更新卡片，不重绘避免已有卡片闪烁
            updateCardContent(cardEl, item);
          });
        }
+
+      // 启动时后台把仍是远程 URL 的图标缓存成本地 data URL（一次性；之后每次进页面秒开）
+      function cacheExistingIcons() {
+        var changed = false;
+        var tasks = [];
+        list.forEach(function (item) {
+          if (item && item.iconSrc === 'image' && typeof item.icon === 'string' && /^https?:/i.test(item.icon)) {
+            tasks.push(cacheImageAsDataUrl(item.icon).then(function (dataUrl) {
+              if (dataUrl) { item.icon = dataUrl; changed = true; }
+            }));
+          }
+        });
+        if (!tasks.length) return;
+        Promise.all(tasks).then(function () {
+          if (changed) save(list);
+        });
+      }
 
       // 打开添加弹窗
       var editingIndex = -1; // ≥0 表示编辑模式

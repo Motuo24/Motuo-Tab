@@ -1577,9 +1577,9 @@
         var file = wallpaperFile.files && wallpaperFile.files[0];
         if (!file) return;
         var isVideo = /^video\//i.test(file.type || '');
-        var limit = isVideo ? 60 * 1024 * 1024 : 15 * 1024 * 1024;
+        var limit = isVideo ? 200 * 1024 * 1024 : 15 * 1024 * 1024;
         if (file.size > limit) {
-          alert((isVideo ? '视频' : '图片') + '太大，请选择 ' + (isVideo ? '60MB' : '15MB') + ' 以内的文件');
+          alert((isVideo ? '视频' : '图片') + '太大，请选择 ' + (isVideo ? '200MB' : '15MB') + ' 以内的文件');
           return;
         }
         var blur = getBlur();

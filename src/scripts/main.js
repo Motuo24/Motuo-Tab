@@ -1167,8 +1167,15 @@
 
       // 导出：打包快捷方式 + 壁纸图片 + AI 配置/历史 + 个性化配置
       exportBtn.addEventListener('click', function () {
-        // 先读取壁纸（可能为 null），再组包下载
-        loadWallpaperFromDB().then(blobToDataURL).then(function (wallpaperDataUrl) {
+        // 先读取壁纸（可能为 null），再组包下载；视频/超大壁纸不塞进备份（会让 JSON 巨大甚至失败）
+        var skippedWallpaper = false;
+        loadWallpaperFromDB().then(function (wpBlob) {
+          if (wpBlob && (wpBlob.size > 10 * 1024 * 1024 || /^video\//i.test(wpBlob.type || ''))) {
+            skippedWallpaper = true;
+            return null;
+          }
+          return blobToDataURL(wpBlob);
+        }).then(function (wallpaperDataUrl) {
           var payload = {
             app: 'Motuo-Tab',
             version: 2,
@@ -1203,6 +1210,7 @@
           a.click();
           a.remove();
           URL.revokeObjectURL(url);
+          if (skippedWallpaper) alert('当前是动态/超大壁纸，备份已跳过壁纸文件（卡片与配置已照常导出）。');
         }).catch(function (err) {
           console.error('导出失败', err);
           alert('导出失败：' + (err && err.message ? err.message : '未知错误'));
@@ -1403,6 +1411,15 @@
       }
 
       var bgContainer = document.getElementById('bgContainer');
+      var bgVideo = document.getElementById('bgVideo');
+
+      function stopBgVideo() {
+        if (!bgVideo) return;
+        try { bgVideo.pause(); } catch (e) {}
+        bgVideo.style.display = 'none';
+        if (bgVideo.getAttribute('src')) bgVideo.removeAttribute('src');
+        try { bgVideo.load(); } catch (e) {}
+      }
 
       function applyBackground(blob, solidColor, blurPx) {
         if (currentWallpaperUrl) {
@@ -1412,9 +1429,21 @@
         bgContainer.style.backgroundImage = 'none';
         bgContainer.style.filter = 'none';
         document.body.style.background = '';
+        stopBgVideo();
 
         if (solidColor) {
           document.body.style.background = solidColor;
+        } else if (blob && /^video\//i.test(blob.type || '')) {
+          // 动态壁纸（视频）：铺满容器的 <video>，静音循环自动播放
+          currentWallpaperUrl = URL.createObjectURL(blob);
+          if (bgVideo) {
+            bgVideo.src = currentWallpaperUrl;
+            bgVideo.style.display = 'block';
+            bgContainer.style.filter = 'blur(' + (blurPx || 0) + 'px)';
+            document.body.style.background = 'var(--overlay-bg)';
+            var p = bgVideo.play();
+            if (p && p.catch) p.catch(function () {});
+          }
         } else if (blob) {
           currentWallpaperUrl = URL.createObjectURL(blob);
           bgContainer.style.backgroundImage = 'url(' + currentWallpaperUrl + ')';
@@ -1547,8 +1576,10 @@
       wallpaperFile.addEventListener('change', function () {
         var file = wallpaperFile.files && wallpaperFile.files[0];
         if (!file) return;
-        if (file.size > 8 * 1024 * 1024) {
-          alert('图片太大，请选择 8MB 以内的图片');
+        var isVideo = /^video\//i.test(file.type || '');
+        var limit = isVideo ? 60 * 1024 * 1024 : 15 * 1024 * 1024;
+        if (file.size > limit) {
+          alert((isVideo ? '视频' : '图片') + '太大，请选择 ' + (isVideo ? '60MB' : '15MB') + ' 以内的文件');
           return;
         }
         var blur = getBlur();
@@ -1556,6 +1587,7 @@
         applyBackground(file, null, blur);
         saveWallpaperToDB(file).catch(function (err) {
           console.error('壁纸保存失败', err);
+          alert('壁纸保存失败（可能超出浏览器存储配额）：' + (err && err.message ? err.message : ''));
         });
       });
 

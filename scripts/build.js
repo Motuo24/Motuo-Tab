@@ -22,6 +22,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
+const pkg = JSON.parse(read(path.join(ROOT, 'package.json')));
 
 function read(p) { return fs.readFileSync(p, 'utf8'); }
 function write(p, content) {
@@ -48,6 +49,9 @@ html = html.replace(
   (m, name) => '<script>\n' + read(path.join(SRC, 'scripts', name)) + '\n</script>'
 );
 
+// 注入版本号（关于弹窗显示 v__APP_VERSION__）
+html = html.replace(/__APP_VERSION__/g, pkg.version);
+
 // 单文件产物中，favicon 链接指向同目录 favicon.ico，保持不变
 write(path.join(DIST, 'newtab.html'), html);
 copy(path.join(SRC, 'favicon.ico'), path.join(DIST, 'favicon.ico'));
@@ -59,7 +63,8 @@ console.log('✓ dist/newtab.html（单文件，' + html.split('\n').length + ' 
 const EXT = path.join(DIST, 'extension');
 const extHtml = read(path.join(SRC, 'index.html'))
   // 扩展页重命名为 newtab.html；favicon 用 ico（扩展内相对路径）
-  .replace('href="favicon.ico"', 'href="favicon.ico"');
+  .replace('href="favicon.ico"', 'href="favicon.ico"')
+  .replace(/__APP_VERSION__/g, pkg.version);
 
 write(path.join(EXT, 'newtab.html'), extHtml);
 copy(path.join(SRC, 'styles', 'main.css'), path.join(EXT, 'styles', 'main.css'));
@@ -68,7 +73,6 @@ copy(path.join(SRC, 'styles', 'main.css'), path.join(EXT, 'styles', 'main.css'))
 );
 copy(path.join(SRC, 'favicon.ico'), path.join(EXT, 'favicon.ico'));
 
-const pkg = JSON.parse(read(path.join(ROOT, 'package.json')));
 const manifest = {
   manifest_version: 3,
   name: 'Motuo-Tab',

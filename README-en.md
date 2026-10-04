@@ -11,6 +11,18 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 ***
 
+## Changelog (v0.8.3)
+
+- **Dynamic wallpapers**: video (MP4 / WebM, compatible with Wallpaper Engine video wallpapers) and animated images (GIF / WebP) as the background; muted, looped, autoplaying, blur still works
+
+- **AI assistant overhaul**: web search now uses our own text protocol `<web_search>`, avoiding the flakiness of DeepSeek native tool calling in thinking mode; fixed "search never triggers / reply fails after search / tags leak / raw JSON only / card rules missing"
+
+- **More robust card operations**: accepts `<ops>`, raw JSON, code blocks, arrays, and loose JSON; no longer forces an operation when a card already exists or info is missing
+
+- **Multi-round search**: up to 3 consecutive searches per turn; the thinking log keeps "search: query (N results)"
+
+- **Faster icons**: fetched icons are cached locally as data URLs, so pages no longer re-fetch them on every visit
+
 ## Changelog (v0.8.2)
 
 - **Theme modes**: new Light / Dark / Auto switching; Auto mode recolors text in real time based on the wallpaper pixels beneath it
@@ -33,9 +45,9 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 - **Shortcuts**: add / edit / delete, drag-to-sort, drag-to-bottom-to-delete, context menu, automatic favicon fetching
 
-- **Personalization**: image / solid-color wallpaper, blur amount, card opacity (image / text toggles independently)
+- **Personalization**: image / video (dynamic) / animated / solid-color wallpaper, blur amount, card opacity (image / text toggles independently)
 
-- **AI assistant**: OpenAI-compatible streaming chat, deep thinking, web search (Bocha AI), manage cards in natural language with one-click undo
+- **AI assistant**: OpenAI-compatible streaming chat, deep thinking, web search (Bocha AI) with multi-round search, manage cards in natural language with one-click undo
 
 - **Scratchpad**: quick notes, auto-saved
 

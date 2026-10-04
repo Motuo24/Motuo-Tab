@@ -13,7 +13,7 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 ## Changelog (v0.8.3)
 
-- **Dynamic wallpapers**: video (MP4 / WebM, compatible with Wallpaper Engine video wallpapers) and animated images (GIF / WebP) as the background; muted, looped, autoplaying, blur still works
+- **Dynamic wallpapers**: video (MP4 / WebM) and animated images (GIF / WebP) as the background; muted, looped, autoplaying, blur still works
 
 - **AI assistant overhaul**: web search now uses our own text protocol `<web_search>`, avoiding the flakiness of DeepSeek native tool calling in thinking mode; fixed "search never triggers / reply fails after search / tags leak / raw JSON only / card rules missing"
 

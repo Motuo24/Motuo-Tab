@@ -2330,10 +2330,15 @@
         html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
         // 引用
         html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
-        // 无序列表
-        html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
-        // 有序列表
-        html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+        // 列表项必须放进列表容器，否则孤立的 <li> 会把标记画到气泡内容区外。
+        html = html.replace(/^[-*] (.+)$/gm, '<li class="md-ul-item">$1</li>');
+        html = html.replace(/^\d+\. (.+)$/gm, '<li class="md-ol-item">$1</li>');
+        html = html.replace(/((?:<li class="md-ul-item">[\s\S]*?<\/li>\n?)+)/g, function (items) {
+          return '<ul>' + items.replace(/\n/g, '') + '</ul>';
+        });
+        html = html.replace(/((?:<li class="md-ol-item">[\s\S]*?<\/li>\n?)+)/g, function (items) {
+          return '<ol>' + items.replace(/\n/g, '') + '</ol>';
+        });
         // 换行
         html = html.replace(/\n/g, '<br>');
         return html;

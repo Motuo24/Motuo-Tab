@@ -2,6 +2,12 @@
 
 本项目的版本历史。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.4] - 2026-10-07
+
+### 修复
+
+- 修复 AI 助手 Markdown 列表标记超出消息气泡：为连续列表项生成正确的 `<ul>` / `<ol>` 容器，让圆点和编号显示在气泡内
+
 ## [0.8.3] - 2026-10-04
 
 ### 新增

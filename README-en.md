@@ -11,6 +11,10 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 ***
 
+## Changelog (v0.8.4)
+
+- **AI assistant Markdown list fix**: list bullets and numbers now stay inside the message bubble
+
 ## Changelog (v0.8.3)
 
 - **Dynamic wallpapers**: video (MP4 / WebM) and animated images (GIF / WebP) as the background; muted, looped, autoplaying, blur still works

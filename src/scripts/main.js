@@ -1187,6 +1187,7 @@
                 customEngines: readLS('newtab.customEngines.v1'),
                 searchHistory: readLS('newtab.searchHistory.v1'),
                 sitedirect: readLS('newtab.sitedirect.v1'),
+                suggestOnline: readLS('newtab.suggestOnline.v1'),
                 solidColor: readLS('newtab.solidColor.v1'),
                 blur: readLS('newtab.blur.v1'),
                 alpha: readLS('newtab.alpha.v1'),
@@ -1266,6 +1267,7 @@
               writeLS('newtab.customEngines.v1', s.customEngines);
               writeLS('newtab.searchHistory.v1', s.searchHistory);
               writeLS('newtab.sitedirect.v1', s.sitedirect);
+              writeLS('newtab.suggestOnline.v1', s.suggestOnline);
               writeLS('newtab.solidColor.v1', s.solidColor);
               writeLS('newtab.blur.v1', s.blur);
               writeLS('newtab.alpha.v1', s.alpha);
@@ -1564,6 +1566,17 @@
         } catch (e) {}
         siteDirectToggle.addEventListener('change', function () {
           localStorage.setItem('newtab.sitedirect.v1', this.checked ? '1' : '0');
+        });
+      }
+
+      // 联网搜索建议开关（百度公开接口；关闭后建议仅来自本地历史）
+      var suggestOnlineToggle = document.getElementById('toggleSuggestOnline');
+      if (suggestOnlineToggle) {
+        try {
+          suggestOnlineToggle.checked = localStorage.getItem('newtab.suggestOnline.v1') !== '0';
+        } catch (e) {}
+        suggestOnlineToggle.addEventListener('change', function () {
+          localStorage.setItem('newtab.suggestOnline.v1', this.checked ? '1' : '0');
         });
       }
 
@@ -3633,5 +3646,5 @@
       }, true);
 
       // 调试钩子
-      window.__debug = { fabBtn: fabBtn, menu: menu, toggle: toggleMenu, note: { open: openNote, close: closeNote } };
+      window.__debug = Object.assign(window.__debug || {}, { fabBtn: fabBtn, menu: menu, toggle: toggleMenu, note: { open: openNote, close: closeNote } });
     })();

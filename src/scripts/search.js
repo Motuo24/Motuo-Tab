@@ -13,6 +13,10 @@
       var CUSTOM_ENGINES_KEY = 'newtab.customEngines.v1';
       var HISTORY_KEY = 'newtab.searchHistory.v1';
       var SITEDIRECT_KEY = 'newtab.sitedirect.v1';
+      var SUGGEST_ONLINE_KEY = 'newtab.suggestOnline.v1'; // 联网搜索建议开关（默认开，'0'=关）
+      var ONLINE_MAX = 8;          // 联网建议最多展示条数
+      var SUGGEST_DEBOUNCE = 200;  // 联网建议防抖（ms）
+      var SUGGEST_TIMEOUT = 2500;  // 单源 JSONP 超时（ms）
       var MAX_HISTORY = 20;
       var BUILTIN_ENGINES = {
         baidu:  { name: '百度', url: 'https://www.baidu.com/s?wd=',       placeholder: '使用百度搜索，或者输入网址', icon: 'https://www.baidu.com/favicon.ico' },
@@ -335,10 +339,19 @@
         addSearchHistory(q);
       });
 
-      // ========== 搜索建议 ==========
+      // ========== 搜索建议（本地历史 + 百度联网 + 键盘导航） ==========
+      // 历史永远在前；联网建议在后，且与历史去重。
+      // 来源区分「分得清但不直白」：历史=时钟图标、联网=放大镜图标，
+      // 来源小字仅在 hover/选中时浮现，两组之间以发丝级分隔线过渡。
       // （HISTORY_KEY / MAX_HISTORY 已在顶部 CONFIG 声明）
       var suggestionsEl = document.getElementById('searchSuggestions');
       var searchHistory = [];
+      var onlineItems = [];     // 当前查询的联网建议（字符串数组）
+      var mergedItems = [];     // [{text, source:'history'|'online'}]，顺序即展示顺序
+      var activeIndex = -1;     // 键盘选中项（-1 表示未选中）
+      var sugReqSeq = 0;        // 请求序号：过期回调丢弃（竞态守卫）
+      var sugDebounceTimer = null;
+      var jsonpSeq = 0;
 
       function loadSearchHistory() {
         try {
@@ -361,35 +374,149 @@
         saveSearchHistory();
       }
 
-      // 保存搜索历史（在主 submit 里已调用 addSearchHistory）
+      function escapeAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+      function onlineEnabled() {
+        try { return localStorage.getItem(SUGGEST_ONLINE_KEY) !== '0'; } catch (e) { return true; }
+      }
+
+      // 是否「站内直达」查询（如 "zh Node.js"）：用户意图是站内搜索，不用百度建议打扰
+      function isSiteDirectQuery(q) {
+        var m = q.match(/^(\S+)\s+(.+)/);
+        if (!m) return false;
+        try { if (localStorage.getItem(SITEDIRECT_KEY) === '0') return false; } catch (e) {}
+        return !!SITE_DIRECT[m[1].toLowerCase()];
+      }
+
+      // ---- 联网建议传输层：JSONP（file:// 单文件版亦可用，无 CORS 问题） ----
+      // su 加 ie=utf-8 后请求/响应均为 UTF-8（实测）；主源失败自动备源 sugrec；
+      // 全部失败 → null，静默降级为仅历史，不打断输入。
+      function jsonp(baseUrl, extract, done) {
+        var cbName = '__mtSugCb' + (++jsonpSeq);
+        var script = document.createElement('script');
+        var settled = false;
+        var timer = setTimeout(function () { finish(null); }, SUGGEST_TIMEOUT);
+        function cleanup() {
+          clearTimeout(timer);
+          try { delete window[cbName]; } catch (e) { window[cbName] = undefined; }
+          if (script.parentNode) script.parentNode.removeChild(script);
+        }
+        function finish(list) {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          done(list);
+        }
+        window[cbName] = function (obj) {
+          var list = null;
+          try { list = extract(obj); } catch (e) { /* 解析失败视为无结果 */ }
+          finish(list);
+        };
+        script.onerror = function () { finish(null); };
+        script.src = baseUrl + cbName;
+        document.head.appendChild(script);
+      }
+
+      var onlineTransport = function (query, done) {
+        var wd = encodeURIComponent(query);
+        jsonp('https://suggestion.baidu.com/su?ie=utf-8&wd=' + wd + '&cb=', function (obj) {
+          return obj && Array.isArray(obj.s)
+            ? obj.s.filter(function (s) { return typeof s === 'string' && s; })
+            : null;
+        }, function (list) {
+          if (list) { done(list); return; }
+          jsonp('https://www.baidu.com/sugrec?prod=pc&ie=utf-8&json=1&wd=' + wd + '&cb=', function (obj) {
+            return obj && Array.isArray(obj.g)
+              ? obj.g.map(function (g) { return g && g.q; }).filter(function (s) { return typeof s === 'string' && s; })
+              : null;
+          }, done);
+        });
+      };
+
+      function scheduleOnlineFetch(q) {
+        clearTimeout(sugDebounceTimer);
+        var seq = ++sugReqSeq; // 使此前所有请求的回调失效
+        if (!q || !onlineEnabled() || isUrlLike(q) || isSiteDirectQuery(q)) return;
+        sugDebounceTimer = setTimeout(function () {
+          onlineTransport(q, function (list) {
+            if (seq !== sugReqSeq) return; // 过期响应：查询已变化，丢弃
+            onlineItems = (list || []).slice(0, ONLINE_MAX);
+            renderSuggestions(input.value.trim());
+          });
+        }, SUGGEST_DEBOUNCE);
+      }
+
+      // 历史=时钟（搜过的），联网=放大镜（新建议）；图标语义差异即来源区分的第一层
+      var SG_CLOCK = '<svg class="sg-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.6V8l2.3 1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      var SG_MAG = '<svg class="sg-icon" viewBox="0 0 16 16" fill="none"><path d="M7 1a6 6 0 100 12A6 6 0 007 1zM13 13l-3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+
+      function sgRow(idx, text, source) {
+        var icon = source === 'history' ? SG_CLOCK : SG_MAG;
+        var tag = source === 'history' ? '历史' : '百度';
+        var del = source === 'history'
+          ? '<button class="sg-del" data-q="' + escapeAttr(text) + '" aria-label="删除此历史记录">×</button>'
+          : '';
+        return '<div class="sg-item" id="sg-opt-' + idx + '" role="option" aria-selected="false" data-idx="' + idx + '" data-source="' + source + '" data-q="' + escapeAttr(text) + '">' +
+          icon + '<span class="sg-text">' + escapeHtml(text) + '</span>' +
+          '<span class="sg-src" aria-hidden="true">' + tag + '</span>' + del + '</div>';
+      }
 
       function renderSuggestions(filter) {
         if (!suggestionsEl) return;
         loadSearchHistory();
-        var items = searchHistory;
-        if (filter) {
-          var f = filter.toLowerCase();
-          items = items.filter(function (s) { return s.toLowerCase().indexOf(f) !== -1; });
+        var f = (filter || '').toLowerCase();
+        var hist = searchHistory.filter(function (s) { return !f || s.toLowerCase().indexOf(f) !== -1; });
+        var histSet = {};
+        hist.forEach(function (s) { histSet[s.toLowerCase()] = true; });
+        var online = [];
+        if (f && onlineEnabled()) {
+          online = onlineItems.filter(function (s) { return !histSet[s.toLowerCase()]; });
         }
-        if (items.length === 0) { suggestionsEl.classList.remove('open'); suggestionsEl.innerHTML = ''; return; }
-
+        mergedItems = hist.map(function (s) { return { text: s, source: 'history' }; })
+          .concat(online.map(function (s) { return { text: s, source: 'online' }; }));
+        activeIndex = -1;
+        if (!mergedItems.length) {
+          suggestionsEl.classList.remove('open');
+          suggestionsEl.innerHTML = '';
+          input.removeAttribute('aria-activedescendant');
+          input.setAttribute('aria-expanded', 'false');
+          return;
+        }
         var html = '';
-        items.forEach(function (s) {
-          html += '<div class="sg-item" data-q="' + escapeAttr(s) + '">' +
-            '<svg class="sg-icon" viewBox="0 0 16 16" fill="none"><path d="M7 1a6 6 0 100 12A6 6 0 007 1zM13 13l-3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' +
-            '<span class="sg-text">' + escapeHtml(s) + '</span>' +
-            '<button class="sg-del" data-q="' + escapeAttr(s) + '">×</button></div>';
-        });
-        if (items.length > 0) {
-          html += '<div class="sg-clear" id="sgClearAll">清空搜索历史</div>';
-        }
+        var idx = 0;
+        hist.forEach(function (s) { html += sgRow(idx++, s, 'history'); });
+        if (hist.length && online.length) html += '<div class="sg-divider" role="separator"></div>';
+        online.forEach(function (s) { html += sgRow(idx++, s, 'online'); });
+        if (hist.length) html += '<div class="sg-clear" id="sgClearAll">清空搜索历史</div>';
         suggestionsEl.innerHTML = html;
         suggestionsEl.classList.add('open');
+        input.setAttribute('aria-expanded', 'true');
+        input.removeAttribute('aria-activedescendant');
       }
 
-      function escapeAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+      // 键盘选中态同步（含 aria 与滚动跟随）
+      function updateActive() {
+        var rows = suggestionsEl.querySelectorAll('.sg-item');
+        rows.forEach(function (row, i) {
+          var on = i === activeIndex;
+          row.classList.toggle('active', on);
+          row.setAttribute('aria-selected', on ? 'true' : 'false');
+          if (on) {
+            input.setAttribute('aria-activedescendant', row.id);
+            if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+          }
+        });
+        if (activeIndex < 0) input.removeAttribute('aria-activedescendant');
+      }
 
-      // 建议点击委托
+      function closeSuggestions() {
+        suggestionsEl.classList.remove('open');
+        activeIndex = -1;
+        input.removeAttribute('aria-activedescendant');
+        input.setAttribute('aria-expanded', 'false');
+      }
+
+      // 建议点击委托（历史可单条删除；联网建议点击即搜）
       suggestionsEl.addEventListener('click', function (e) {
         var item = e.target.closest('.sg-item');
         if (item) {
@@ -402,38 +529,78 @@
             return;
           }
           var q = item.dataset.q;
-          if (q) { input.value = q; suggestionsEl.classList.remove('open'); form.requestSubmit(); }
+          if (q) { input.value = q; closeSuggestions(); form.requestSubmit(); }
           return;
         }
         var clear = e.target.closest('#sgClearAll');
         if (clear) {
           searchHistory = [];
           saveSearchHistory();
-          renderSuggestions('');
+          renderSuggestions(input.value.trim());
         }
+      });
+
+      // 鼠标 hover 同步键盘选中态（鼠标/键盘体验一致）
+      suggestionsEl.addEventListener('mouseover', function (e) {
+        var item = e.target.closest('.sg-item');
+        if (!item) return;
+        var idx = parseInt(item.dataset.idx, 10);
+        if (!isNaN(idx) && idx !== activeIndex) { activeIndex = idx; updateActive(); }
       });
 
       // 聚焦/输入显示建议
       input.addEventListener('focus', function () {
         loadSearchHistory();
-        if (searchHistory.length > 0) renderSuggestions(input.value.trim());
+        var v = input.value.trim();
+        renderSuggestions(v);
+        if (v) scheduleOnlineFetch(v);
       });
 
       input.addEventListener('input', function () {
         var v = this.value.trim();
-        if (v) renderSuggestions(v);
-        else { loadSearchHistory(); if (searchHistory.length > 0) renderSuggestions(''); else suggestionsEl.classList.remove('open'); }
+        onlineItems = []; // 查询已变：先清旧联网结果，避免张冠李戴
+        renderSuggestions(v);
+        scheduleOnlineFetch(v);
       });
 
       // 失活关闭建议（延迟以允许点击）
       input.addEventListener('blur', function () {
-        setTimeout(function () { suggestionsEl.classList.remove('open'); }, 180);
+        setTimeout(function () { closeSuggestions(); }, 180);
       });
 
-      // 回车关闭建议（提交由 form submit 处理）
+      // 键盘导航：↑↓ 循环选择（跨历史/联网两组）、Enter 执行选中项、Esc 关闭
       input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') suggestionsEl.classList.remove('open');
+        var open = suggestionsEl.classList.contains('open');
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          if (!open || !mergedItems.length) return;
+          e.preventDefault();
+          var n = mergedItems.length;
+          activeIndex = e.key === 'ArrowDown'
+            ? (activeIndex + 1) % n
+            : (activeIndex <= 0 ? n - 1 : activeIndex - 1); // 未选中/首项按 ↑ 都循环到末项
+          updateActive();
+        } else if (e.key === 'Enter') {
+          if (open && activeIndex >= 0 && mergedItems[activeIndex]) {
+            input.value = mergedItems[activeIndex].text; // 提交选中项（form submit 读取 input）
+          }
+          closeSuggestions();
+        } else if (e.key === 'Escape') {
+          if (open) { e.stopPropagation(); closeSuggestions(); }
+        }
       });
 
       loadSearchHistory();
+      input.setAttribute('aria-autocomplete', 'list');
+      input.setAttribute('aria-controls', 'searchSuggestions');
+      input.setAttribute('aria-expanded', 'false');
+      suggestionsEl.setAttribute('role', 'listbox');
+
+      // 调试/测试钩子（传输层可注入：jsdom 无法发真实 JSONP）
+      window.__debug = window.__debug || {};
+      window.__debug.search = {
+        setTransport: function (fn) { onlineTransport = fn; },
+        getMerged: function () { return mergedItems.slice(); },
+        getActive: function () { return activeIndex; },
+        render: function () { renderSuggestions(input.value.trim()); }
+      };
     })();

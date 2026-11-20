@@ -21,6 +21,7 @@
      newtab.searchHistory.v1  搜索历史（最多 20 条）
      newtab.shortcuts.v1      快捷方式数据
      newtab.sitedirect.v1     站内搜索直达开关
+     newtab.suggestOnline.v1  联网搜索建议开关（百度，默认开）
      newtab.solidColor.v1     纯色壁纸
      newtab.blur.v1           壁纸模糊度
      newtab.alpha.v1          卡片透明度
@@ -61,7 +62,7 @@
           <div class="opt" data-engine="google"><img class="opt-icon" src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEX7J5qZdq2yzDGnGSV3J4cFDztxbAnNQACtyAAAj4IKVfVoyYBqFTwvT0E.jpeg" alt="" /><span>谷歌</span></div>
         </div>
       </span>
-      <input type="text" id="searchInput" placeholder="使用百度搜索，或者输入网址" aria-label="搜索" />
+      <input type="text" id="searchInput" placeholder="使用百度搜索，或者输入网址" aria-label="搜索" aria-autocomplete="list" aria-controls="searchSuggestions" aria-expanded="false" />
       <div class="search-suggestions" id="searchSuggestions"></div>
     </form>
   </div>
@@ -435,6 +436,11 @@
     <label class="site-direct-pill" id="siteDirectPill">
       <span>站内搜索直达</span>
       <input type="checkbox" id="toggleSiteDirect" checked aria-label="站内搜索直达" />
+    </label>
+    <!-- 联网搜索建议药丸（百度公开接口，输入词会发送至百度；关闭后仅本地历史） -->
+    <label class="site-direct-pill" id="suggestOnlinePill">
+      <span>联网搜索建议</span>
+      <input type="checkbox" id="toggleSuggestOnline" checked aria-label="联网搜索建议（百度）" />
     </label>
   </div>
 

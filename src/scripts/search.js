@@ -556,6 +556,11 @@
         if (v) scheduleOnlineFetch(v);
       });
 
+      // 其他窗口/面板改了搜索历史（如通用配置里的历史管理）→ 重载并重绘
+      window.addEventListener('storage', function (e) {
+        if (e.key === HISTORY_KEY) { loadSearchHistory(); renderSuggestions(input.value.trim()); }
+      });
+
       input.addEventListener('input', function () {
         var v = this.value.trim();
         onlineItems = []; // 查询已变：先清旧联网结果，避免张冠李戴
@@ -601,6 +606,20 @@
         setTransport: function (fn) { onlineTransport = fn; },
         getMerged: function () { return mergedItems.slice(); },
         getActive: function () { return activeIndex; },
-        render: function () { renderSuggestions(input.value.trim()); }
+        render: function () { renderSuggestions(input.value.trim()); },
+        // 历史管理：按文本删除或清空（通用配置弹窗调用），返回未存入的前 N 条
+        removeItems: function (texts) {
+          if (!Array.isArray(texts)) return;
+          var removeSet = {};
+          texts.forEach(function (t) { removeSet[String(t)] = true; });
+          searchHistory = searchHistory.filter(function (s) { return !removeSet[s]; });
+          saveSearchHistory();
+          renderSuggestions(input.value.trim());
+        },
+        clearAll: function () {
+          searchHistory = [];
+          saveSearchHistory();
+          renderSuggestions(input.value.trim());
+        }
       };
     })();

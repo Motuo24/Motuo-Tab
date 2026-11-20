@@ -1580,6 +1580,97 @@
         });
       }
 
+      // ---- 搜索历史管理（通用配置弹窗）：逐条删除 / 多选删除 / 一键清空 ----
+      (function initHistoryManager() {
+        var listEl = document.getElementById('histList');
+        var countEl = document.getElementById('histCount');
+        var delSelBtn = document.getElementById('histDeleteSelected');
+        var clearBtn = document.getElementById('histClearAll');
+        var selectAll = document.getElementById('histSelectAll');
+        if (!listEl || !delSelBtn || !clearBtn || !selectAll) return;
+        var HISTORY_KEY = 'newtab.searchHistory.v1';
+
+        function readHistory() {
+          try {
+            var raw = localStorage.getItem(HISTORY_KEY);
+            if (!raw) return [];
+            var arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch (e) { return []; }
+        }
+        function writeHistory(arr) {
+          try { localStorage.setItem(HISTORY_KEY, JSON.stringify(arr)); } catch (e) {}
+        }
+        function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+        function render() {
+          var hist = readHistory();
+          listEl.innerHTML = '';
+          countEl.textContent = hist.length ? hist.length + ' 条' : '';
+          selectAll.checked = false;
+          delSelBtn.disabled = true;
+          clearBtn.disabled = hist.length === 0;
+
+          if (!hist.length) {
+            var em = document.createElement('div');
+            em.className = 'hist-empty';
+            em.textContent = '暂无搜索历史';
+            listEl.appendChild(em);
+            return;
+          }
+          hist.forEach(function (q) {
+            var row = document.createElement('div');
+            row.className = 'hist-row';
+            row.innerHTML =
+              '<input type="checkbox" class="hist-check" data-q="' + esc(q) + '" aria-label="选中该条" />' +
+              '<span class="hist-text" title="' + esc(q) + '">' + esc(q) + '</span>' +
+              '<button type="button" class="hist-del" data-q="' + esc(q) + '" title="删除该条" aria-label="删除该条">×</button>';
+            listEl.appendChild(row);
+          });
+        }
+
+        function selectedTexts() {
+          var out = [];
+          listEl.querySelectorAll('.hist-check:checked').forEach(function (c) { out.push(c.getAttribute('data-q')); });
+          return out;
+        }
+        function refreshDeleteBtn() {
+          delSelBtn.disabled = selectedTexts().length === 0;
+        }
+        function removeTexts(texts) {
+          if (!texts.length) return;
+          var removeSet = {};
+          texts.forEach(function (t) { removeSet[t] = true; });
+          writeHistory(readHistory().filter(function (s) { return !removeSet[s]; }));
+          if (window.__debug && window.__debug.search && window.__debug.search.removeItems) {
+            window.__debug.search.removeItems(texts); // 同步搜索下拉（处理内部状态）
+          }
+          render();
+        }
+
+        // 逐条删除 / 多选删除
+        listEl.addEventListener('click', function (e) {
+          var del = e.target.closest('.hist-del');
+          if (del) { removeTexts([del.getAttribute('data-q')]); return; }
+          if (e.target.classList && e.target.classList.contains('hist-check')) refreshDeleteBtn();
+        });
+
+        // 全选 / 清空 / 删除所选
+        selectAll.addEventListener('change', function () {
+          var on = this.checked;
+          listEl.querySelectorAll('.hist-check').forEach(function (c) { c.checked = on; });
+          refreshDeleteBtn();
+        });
+        delSelBtn.addEventListener('click', function () { removeTexts(selectedTexts()); });
+        clearBtn.addEventListener('click', function () {
+          writeHistory([]);
+          if (window.__debug && window.__debug.search && window.__debug.search.clearAll) window.__debug.search.clearAll();
+          render();
+        });
+
+        render();
+      })();
+
       // 设置壁纸
       wallpaperBtn.addEventListener('click', function () {
         wallpaperFile.value = '';

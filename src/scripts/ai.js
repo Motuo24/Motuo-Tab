@@ -299,7 +299,7 @@
         saveAIConfig();
         // 开启联网搜索但没有博查密钥时给出提示，避免"开了却搜不了"的静默失效
         if (this.checked && !aiBochaKey.value.trim()) {
-          showAIToast('联网搜索需要先在 ⚙ 配置中填写博查AI密钥');
+          showAIToast('联网搜索需要先在配置窗口里填写博查 AI 密钥');
         }
       });
       aiBochaKey.addEventListener('change', saveAIConfig);
@@ -1157,12 +1157,25 @@
         showAIToast('对话已清空');
       });
 
-      // AI 配置面板开关
-      var aiConfigPanel = document.getElementById('aiConfigPanel');
-      document.getElementById('aiConfigToggle').addEventListener('click', function () {
-        aiConfigPanel.classList.toggle('open');
-        this.classList.toggle('active');
-      });
+      // AI 配置：独立弹窗（Esc / 遮罩 / 关闭按钮由主模块的 modal-mask 逻辑处理）
+      var aiConfigModal = document.getElementById('aiConfigModal');
+      var aiConfigToggle = document.getElementById('aiConfigToggle');
+      function syncConfigBtn() {
+        if (!aiConfigToggle || !aiConfigModal) return;
+        aiConfigToggle.classList.toggle('active', aiConfigModal.classList.contains('open'));
+      }
+      if (aiConfigToggle && aiConfigModal) {
+        aiConfigToggle.addEventListener('click', function () {
+          aiConfigModal.classList.add('open');
+          aiConfigModal.setAttribute('aria-hidden', 'false');
+          syncConfigBtn();
+          if (aiEndpoint) setTimeout(function () { aiEndpoint.focus(); }, 30);
+        });
+        aiConfigModal.addEventListener('click', function () { setTimeout(syncConfigBtn, 0); });
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') setTimeout(syncConfigBtn, 0);
+        });
+      }
 
       // 清空对话
       function clearAIConversation() {
@@ -1262,7 +1275,7 @@
         var model = aiModel.value.trim() || 'deepseek-chat';
 
         if (!endpoint || !key) {
-          addAIMessage('请先点击右上角 ⚙ 配置 API 地址和密钥。', 'error');
+          addAIMessage('请先点击右上角 ⚙ 打开配置窗口，填写 API 地址和密钥。', 'error');
           return;
         }
 
@@ -1384,6 +1397,65 @@
           });
         }
 
+        // 从错误对象里抽出能给人看的原因：状态码 + message/error 字段，并保留一段原文
+        function pickErrorMessage(obj, depth) {
+          if (obj == null || depth > 4) return '';
+          if (typeof obj === 'string') return obj.trim();
+          if (typeof obj !== 'object') return '';
+          var keys = ['message', 'msg', 'error_message', 'detail', 'error'];
+          for (var i = 0; i < keys.length; i++) {
+            if (obj[keys[i]] != null) {
+              var got = pickErrorMessage(obj[keys[i]], (depth || 0) + 1);
+              if (got) return got;
+            }
+          }
+          if (obj.data) return pickErrorMessage(obj.data, (depth || 0) + 1);
+          return '';
+        }
+        function readableSearchBody(text) {
+          var raw = String(text || '').trim();
+          if (!raw) return '';
+          var parsed = null;
+          try { parsed = JSON.parse(raw); } catch (e) {
+            var start = raw.indexOf('{');
+            var end = raw.lastIndexOf('}');
+            if (start !== -1 && end > start) {
+              try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch (e2) {}
+            }
+          }
+          var friendly = parsed ? pickErrorMessage(parsed, 0) : '';
+          var snippet = raw.replace(/\s+/g, ' ');
+          if (snippet.length > 500) snippet = snippet.slice(0, 500);
+          if (friendly && snippet && snippet !== friendly) return friendly + '（原文：' + snippet + '）';
+          return friendly || snippet;
+        }
+        function describeSearchError(err) {
+          var status = err && err.httpStatus;
+          var body = err && err.body;
+          var msg = String((err && err.message) || err || '');
+          if (!body) {
+            var matched = msg.match(/^搜索API HTTP (\d+)：([\s\S]*)$/);
+            if (matched) {
+              status = status || matched[1];
+              body = matched[2];
+            } else {
+              body = msg;
+            }
+          }
+          var detail = readableSearchBody(body);
+          if (status) return 'HTTP ' + status + '：' + (detail || '无响应正文');
+          return detail || '未知错误';
+        }
+        function searchFailurePrompt(detail) {
+          return '【联网搜索失败】\n'
+            + '原因：' + detail + '\n'
+            + '请用中文把上述原因告诉用户，不要只说「调用失败」或「无法核实」。'
+            + '不要编造网址或搜索结果。如果原因和密钥、余额或额度有关，请提醒用户打开 AI 配置窗口检查博查密钥。';
+        }
+        function escapeSearchHtml(s) {
+          return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
         // 博查搜索：返回 { searchContext, resultCount, failed, error }
         function fetchBocha(query) {
           return fetch('https://api.bochaai.com/v1/web-search', {
@@ -1397,7 +1469,10 @@
           }).then(function (sRes) {
             if (!sRes.ok) {
               return sRes.text().then(function (t) {
-                throw new Error('搜索API HTTP ' + sRes.status + '：' + String(t).slice(0, 200));
+                var err = new Error('搜索API HTTP ' + sRes.status);
+                err.httpStatus = sRes.status;
+                err.body = String(t || '').slice(0, 500);
+                throw err;
               });
             }
             return sRes.json();
@@ -1504,14 +1579,24 @@
 
           return fetchBocha(query).then(function (r) {
             if (r.failed) {
-              var errText = String((r.error && r.error.message) || r.error).replace(/</g, '&lt;');
+              var detail = describeSearchError(r.error);
+              var safe = escapeSearchHtml(detail);
               if (searchStepEl) {
                 var t1 = searchStepEl.querySelector('.step-text');
-                if (t1) t1.innerHTML = '搜索：<strong>' + qEsc + '</strong>（失败）';
-              } else if (thinkingElForRound()) {
-                addThinkingStep(thinkingElForRound(), 'error', '联网搜索失败：' + errText);
+                if (t1) t1.innerHTML = '搜索失败：' + safe;
               }
+              var searching = bubble.querySelector('.ai-ops-placeholder');
+              if (searching) searching.innerHTML = '搜索失败：' + safe;
+              var failNote = bubble.querySelector('.ai-search-fail');
+              if (!failNote) {
+                failNote = document.createElement('div');
+                failNote.className = 'ai-search-fail ai-thinking-step';
+                bubble.appendChild(failNote);
+              }
+              failNote.textContent = '搜索失败：' + detail;
             } else {
+              var oldFail = bubble.querySelector('.ai-search-fail');
+              if (oldFail) oldFail.remove();
               searchResultCount = r.resultCount;
               if (searchStepEl) {
                 var t2 = searchStepEl.querySelector('.step-text');
@@ -1527,7 +1612,7 @@
               role: 'user',
               hidden: true,
               content: r.failed
-                ? '【联网搜索失败】暂时无法联网获取实时结果。请基于你已有的知识回答，并明确说明该信息无法联网核实，不要编造网址。'
+                ? searchFailurePrompt(describeSearchError(r.error))
                 : '【联网搜索结果】\n' + (r.searchContext || '未找到相关搜索结果。') +
                   '\n请基于以上搜索结果回答用户的问题，并在引用处标注来源编号（如 [1]）；不要编造。'
             });
@@ -1535,12 +1620,14 @@
 
             // 保留思考容器，清空气泡正文，准备接收回答（后续轮次思考沿用同一容器/步骤）
             var savedThinking = bubble.querySelector('.ai-thinking');
+            var savedFail = bubble.querySelector('.ai-search-fail');
             accumulated = '';
             pendingToolCallId = null;
             pendingToolCallName = null;
             pendingToolCallArgs = '';
             bubble.innerHTML = '';
             if (savedThinking) bubble.appendChild(savedThinking);
+            if (savedFail) bubble.appendChild(savedFail);
             var tidy = document.createElement('div');
             tidy.className = 'ai-ops-placeholder';
             tidy.innerHTML = '<span class="ai-spinner"></span> 正在整理回答…';

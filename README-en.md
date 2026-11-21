@@ -11,6 +11,11 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 ***
 
+## Changelog (v0.8.6)
+
+- **Search failures are specific**: the provider's reason (quota, invalid key, timeout) is given to the assistant, which is asked to tell you
+- **AI settings window**: the gear opens a separate window instead of a strip inside the sidebar
+
 ## Changelog (v0.8.5)
 
 - **Search suggestions note**: Help explains that online suggestions send the current query to Baidu and can be turned off; search history can be managed in General settings
@@ -192,7 +197,7 @@ Example: `bl Node.js` → search Node.js on Bilibili.
 ### AI assistant
 
 1. Click the `AI` button in the bottom-left corner to open the panel
-2. Click `⚙` in the top-right to configure: API endpoint, key, model (OpenAI-compatible, e.g. DeepSeek)
+2. Click `⚙` in the top-right to open the settings window: API endpoint, key, model (OpenAI-compatible, e.g. DeepSeek), and the Bocha search key
 3. Optional: enable "Web search" with a Bocha AI key; enable "Deep thinking" for model reasoning
 
 Manage cards in natural language, e.g. "make GitHub green" or "move Zhihu to the front"; every operation can be undone.

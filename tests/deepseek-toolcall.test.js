@@ -350,10 +350,76 @@ test('搜索失败时优雅降级：不报错、带上失败说明继续让模�
   assert.strictEqual(document.querySelectorAll('.ai-msg-error').length, 0, '不应出现错误气泡');
 
   const followMsgs = JSON.parse(calls.filter((c) => c.url.includes('/chat/completions'))[1].opts.body).messages;
-  assert.ok(followMsgs.some((m) => m.role === 'user' && String(m.content).includes('联网搜索失败')), '应把失败说明回传给模型');
+  const failMsg = followMsgs.find((m) => m.role === 'user' && String(m.content).includes('联网搜索失败'));
+  assert.ok(failMsg, '应把失败说明回传给模型');
+  assert.ok(String(failMsg.content).includes('signal timed out'), '失败原因应包含真实错误');
+  assert.ok(String(failMsg.content).includes('告诉用户'), '应要求模型把原因告诉用户');
 
   const steps = Array.from(document.querySelectorAll('.ai-thinking-step')).map((el) => el.textContent).join('|');
-  assert.ok(steps.indexOf('失败') !== -1, '思考记录应标注搜索失败');
+  assert.ok(steps.indexOf('搜索失败') !== -1, '界面应写出搜索失败');
+  assert.ok(steps.indexOf('signal timed out') !== -1, '界面应写出真实错误');
+});
+
+test('搜索接口返回余额不足时，原因交给模型并出现在界面上', async () => {
+  let chatSeq = 0;
+  const fetchStub = (url) => {
+    if (String(url).includes('/chat/completions')) {
+      chatSeq++;
+      if (chatSeq === 1) return sseResponse([{ choices: [{ delta: { content: '<web_search>蓝希云 官网</web_search>' } }] }]);
+      return sseResponse([{ choices: [{ delta: { content: '博查返回余额不足，请到配置窗口检查密钥和额度。' } }] }]);
+    }
+    if (String(url).includes('web-search')) {
+      return Promise.resolve({
+        ok: false,
+        status: 402,
+        text: () => Promise.resolve(JSON.stringify({ message: '余额不足', code: 402 }))
+      });
+    }
+    return Promise.reject(new Error('unexpected ' + url));
+  };
+
+  const { document, calls } = boot({ fetchStub });
+  openAI(document);
+  configureAI(document, { webSearch: true, deepSearch: true });
+  sendMessage(document, '今天的新闻');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  assert.strictEqual(document.querySelectorAll('.ai-msg-error').length, 0, '不应出现错误气泡');
+  const follow = JSON.parse(calls.filter((c) => c.url.includes('/chat/completions'))[1].opts.body).messages
+    .find((m) => m.role === 'user' && String(m.content).includes('联网搜索失败'));
+  assert.ok(follow, '应有失败回传');
+  assert.ok(String(follow.content).includes('余额不足'), '回传应含余额不足');
+  assert.ok(String(follow.content).includes('HTTP 402'), '回传应含状态码');
+  assert.ok(String(follow.content).includes('告诉用户'));
+
+  const steps = Array.from(document.querySelectorAll('.ai-thinking-step')).map((el) => el.textContent).join('|');
+  assert.ok(steps.includes('搜索失败') && steps.includes('余额不足'), '界面应显示搜索失败和余额不足');
+});
+
+test('齿轮打开独立配置窗口，四项仍写回原存储键', () => {
+  const { window, document } = boot({});
+  openAI(document);
+  const modal = document.getElementById('aiConfigModal');
+  assert.ok(modal, '应有配置弹窗');
+  assert.strictEqual(modal.classList.contains('open'), false);
+  assert.strictEqual(document.querySelector('.ai-panel .ai-config'), null, '配置不应留在侧边栏里');
+  document.getElementById('aiConfigToggle').click();
+  assert.ok(modal.classList.contains('open'), '齿轮应打开配置窗口');
+  assert.ok(modal.querySelector('#aiEndpoint'), '地址输入在窗口内');
+  assert.ok(modal.querySelector('#aiBochaKey'), '博查密钥在窗口内');
+
+  document.getElementById('aiEndpoint').value = 'https://api.example.com/v1';
+  document.getElementById('aiKey').value = 'sk-live';
+  document.getElementById('aiModel').value = 'deepseek-chat';
+  document.getElementById('aiBochaKey').value = 'sk-bocha';
+  ['aiEndpoint', 'aiKey', 'aiModel', 'aiBochaKey'].forEach((id) => {
+    document.getElementById(id).dispatchEvent(new window.Event('change', { bubbles: true }));
+  });
+  const cfg = JSON.parse(window.localStorage.getItem('newtab.ai.config.v1'));
+  assert.strictEqual(cfg.endpoint, 'https://api.example.com/v1');
+  assert.strictEqual(cfg.key, 'sk-live');
+  assert.strictEqual(cfg.model, 'deepseek-chat');
+  assert.strictEqual(cfg.bochaKey, 'sk-bocha');
 });
 
 test('多轮搜索：模型收到结果后仍要求搜索时会继续搜一轮', async () => {

@@ -1330,31 +1330,63 @@
   }
   .ai-overlay.open { opacity: 1; pointer-events: auto; }
 
-  /* AI 配置面板（面板内嵌，隐藏/显示） */
-  .ai-config {
-    flex: 0 0 auto;
-    padding: 10px 14px;
-    border-top: 1px solid rgba(31,35,41,0.08);
-    display: none;
-    flex-direction: column;
-    gap: 10px;
+  /* AI 配置窗口：盖过助手侧边栏（z-index 950） */
+  #aiConfigModal { z-index: 1100; }
+  .ai-config-dialog { width: min(640px, 92vw); }
+  .ai-config-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
   }
-  .ai-config.open { display: flex; }
-  .ai-config .field { gap: 4px; }
-  .ai-config .field > span { font-size: 12px; color: #5f6368; }
-  .ai-config input {
-    height: 34px;
-    padding: 0 10px;
-    border: 1px solid rgba(31,35,41,0.12);
+  .ai-config-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .ai-config-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-1);
+  }
+  .ai-config-section .field > span { color: var(--text-2); }
+  .ai-config-section input {
+    height: 38px;
+    width: 100%;
+    padding: 0 12px;
+    border: 1px solid var(--border-strong);
     border-radius: 8px;
     font-size: 13px;
     font-family: inherit;
+    background: var(--surface);
+    color: var(--text-1);
     outline: none;
   }
-  .ai-config input::placeholder { color: #6f7680; }
-  .ai-config input:focus {
-    border-color: #2468f2;
+  .ai-config-section input::placeholder { color: var(--text-3); }
+  .ai-config-section input:focus {
+    border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(36,104,242,0.12);
+  }
+  .ai-config-hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-3);
+  }
+  .ai-search-fail {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(217, 59, 59, 0.08);
+    color: var(--danger);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  @media (max-width: 640px) {
+    .ai-config-layout { grid-template-columns: 1fr; }
   }
   /* AI 气泡底部的撤销按钮 + 取消标签 */
   .ai-undo-btn {
@@ -1479,7 +1511,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .ai-config-btn.active { color: #2468f2; }
+  .ai-config-btn.active { color: var(--accent); }
 
   /* ========== 模式按钮（深度思考 / 联网搜索）：整体按钮，点击开/关 ========== */
   .ai-mode-btn {
@@ -1994,9 +2026,7 @@
   html[data-theme="dark"] .field > span,
   html[data-theme="dark"] .field-group legend { color: var(--text-2); }
   html[data-theme="dark"] .field input[type="text"],
-  html[data-theme="dark"] .field input[type="url"],
-  html[data-theme="dark"] .ai-config input[type="text"],
-  html[data-theme="dark"] .ai-config input[type="url"] {
+  html[data-theme="dark"] .field input[type="url"] {
     background: var(--surface-3);
     color: var(--text-1);
     border-color: var(--border-strong);
@@ -2029,8 +2059,7 @@
     border-color: var(--border-strong);
   }
   html[data-theme="dark"] .ai-input::placeholder { color: var(--text-3); }
-  html[data-theme="dark"] .ai-config { background: var(--surface-3); }
-  html[data-theme="dark"] .ai-config .field > span { color: var(--text-2); }
+  html[data-theme="dark"] .ai-search-fail { background: rgba(255,107,107,0.12); }
   html[data-theme="dark"] .note-panel { background: var(--surface); color: var(--text-1); }
   html[data-theme="dark"] .note-panel-header { border-bottom-color: var(--border); color: var(--text-1); }
   html[data-theme="dark"] .note-input { color: var(--text-1); }

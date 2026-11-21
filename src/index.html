@@ -320,7 +320,7 @@
           <p class="help-intro">这里收录了本 tab 页的教程，让您获得更好的体验。左侧为章节导航，点击即可跳转到对应内容。</p>
           <section class="help-section" id="help-section-ai">
             <h4>配置 AI 助手</h4>
-            <p class="help-p">点击 AI 助手面板右上角的 <span class="help-kbd">⚙</span> 打开配置面板，填入下面的三项即可开始对话：</p>
+            <p class="help-p">点击 AI 助手面板右上角的 <span class="help-kbd">⚙</span> 打开配置窗口，填入下面的三项即可开始对话：</p>
             <div class="help-item">
               <strong>API 地址</strong>
               <span>填供应商开放接口，支持两种写法：</span>
@@ -350,7 +350,7 @@
             <ol class="help-ol">
               <li>打开 <a class="help-link" href="https://open.bochaai.com" target="_blank" rel="noopener">open.bochaai.com</a> 并注册 / 登录</li>
               <li>进入「API 密钥」页面，创建并复制 Key（<span class="help-code">sk-</span> 开头）</li>
-              <li>回到本页 <span class="help-kbd">⚙</span> 配置，填入「博查AI 密钥」，再勾选「联网搜索」</li>
+              <li>回到本页，点 <span class="help-kbd">⚙</span> 打开配置窗口，在「联网搜索」里填入「博查AI 密钥」，再勾选「联网搜索」</li>
             </ol>
             <p class="help-note">未填密钥时勾选联网搜索，会给出提示提醒补填。</p>
           </section>
@@ -486,6 +486,41 @@
     </div>
   </div>
 
+  <!-- AI 配置：独立弹窗，盖在助手侧边栏之上 -->
+  <div class="modal-mask" id="aiConfigModal" aria-hidden="true">
+    <div class="modal ai-config-dialog" role="dialog" aria-labelledby="aiConfigTitle">
+      <h3 id="aiConfigTitle">
+        <span>AI 配置</span>
+        <button class="close" data-close="aiConfigModal" aria-label="关闭">×</button>
+      </h3>
+      <div class="ai-config-layout" id="aiConfigPanel">
+        <section class="ai-config-section">
+          <div class="ai-config-section-title">模型</div>
+          <label class="field">
+            <span>API 地址</span>
+            <input type="url" id="aiEndpoint" placeholder="https://api.deepseek.com 或完整路径" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>API Key</span>
+            <input type="text" id="aiKey" placeholder="sk-xxxxxxxx" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>模型名称</span>
+            <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
+          </label>
+        </section>
+        <section class="ai-config-section">
+          <div class="ai-config-section-title">联网搜索</div>
+          <label class="field" id="bochaKeyField">
+            <span>博查 AI 密钥</span>
+            <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
+          </label>
+          <p class="ai-config-hint">密钥只存在本机。搜索失败时，接口返回的原因会交给助手，并请它告诉你，例如余额不足或密钥无效。</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- AI 助手按钮 -->
   <button class="ai-fab" id="aiFab" aria-label="AI 助手" title="AI 助手">AI</button>
 
@@ -532,24 +567,6 @@
         问我关于这个工具的问题也可以哦
       </div>
     </div>
-    <div class="ai-config" id="aiConfigPanel">
-      <label class="field">
-        <span>API 地址</span>
-        <input type="url" id="aiEndpoint" placeholder="https://api.deepseek.com 或完整路径 https://open.bigmodel.cn/api/paas/v4/chat/completions" autocomplete="off" />
-      </label>
-      <label class="field">
-        <span>API Key</span>
-        <input type="text" id="aiKey" placeholder="sk-xxxxxxxx" autocomplete="off" />
-      </label>
-      <label class="field">
-        <span>模型名称</span>
-        <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
-      </label>
-      <label class="field" id="bochaKeyField">
-        <span>博查AI 密钥（联网搜索用）</span>
-        <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
-      </label>
-    </div>
     <button class="ai-scroll-bottom" id="aiScrollBottom" title="回到底部" aria-label="回到底部">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14m0 0l-6-6m6 6l6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -563,7 +580,7 @@
             <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 18h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10 22h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             <span>深度思考</span>
           </label>
-          <label class="ai-mode-btn" title="联网搜索（博查AI），密钥在 ⚙ 配置中填写">
+          <label class="ai-mode-btn" title="联网搜索（博查 AI）。密钥在 ⚙ 打开的配置窗口里填写">
             <input type="checkbox" id="aiWebSearch" />
             <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span>联网搜索</span>

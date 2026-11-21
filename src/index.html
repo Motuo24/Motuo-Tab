@@ -493,113 +493,124 @@
         <span>AI 配置</span>
         <button class="close" data-close="aiConfigModal" aria-label="关闭">×</button>
       </h3>
-      <div class="ai-config-layout" id="aiConfigPanel">
-        <section class="ai-config-section">
-          <div class="ai-config-section-title">模型</div>
-          <div class="ai-profile-row">
-            <select id="aiProfileSelect" aria-label="配置方案"></select>
-            <input type="text" id="aiProfileName" placeholder="方案名称" aria-label="方案名称" />
-            <button type="button" class="btn btn-secondary" id="aiProfileAdd">新增</button>
-            <button type="button" class="btn btn-secondary" id="aiProfileDel">删除</button>
-          </div>
-          <label class="field">
-            <span>API 地址</span>
-            <input type="url" id="aiEndpoint" placeholder="https://api.deepseek.com 或完整路径" autocomplete="off" />
-          </label>
-          <label class="field">
-            <span>API Key</span>
-            <input type="text" id="aiKey" placeholder="sk-xxxxxxxx" autocomplete="off" />
-          </label>
-          <label class="field">
-            <span>模型名称</span>
-            <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
-          </label>
-          <div class="ai-profile-row">
-            <button type="button" class="btn btn-secondary" id="aiTestBtn">测试连接</button>
-            <span id="aiTestStatus" class="ai-config-hint"></span>
-          </div>
-          <label class="field">
-            <span>思考档位</span>
-            <select id="aiThinkingGear" aria-label="思考档位">
-              <option value="low">低</option>
-              <option value="medium">中</option>
-              <option value="high" selected>高</option>
-            </select>
-          </label>
-          <p class="ai-config-hint">底栏「深度思考」是总开关。打开后按这里的档位：DeepSeek 发送 reasoning_effort，智谱发送 thinking，其他厂商只在提示词里要求对应的思考深度，避免未知字段导致请求失败。</p>
-          <label class="field">
-            <span>采样温度</span>
-            <input type="number" id="aiTemperature" min="0" max="2" step="0.1" value="0.1" />
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="aiSendTemperature" checked />
-            <span>请求里附带温度（部分推理模型需要关掉）</span>
-          </label>
-          <label class="field">
-            <span>回复长度上限（留空不限制）</span>
-            <input type="number" id="aiMaxTokens" min="1" step="1" placeholder="例如 2048" />
-          </label>
-        </section>
-        <section class="ai-config-section">
-          <div class="ai-config-section-title">联网搜索</div>
-          <label class="field">
-            <span>提供商</span>
-            <select id="aiSearchProvider" aria-label="搜索提供商">
-              <option value="bocha">博查</option>
-              <option value="tavily">Tavily</option>
-              <option value="custom">自定义接口</option>
-            </select>
-          </label>
-          <label class="field" id="bochaKeyField">
-            <span>博查 AI 密钥</span>
-            <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
-          </label>
-          <label class="field" id="tavilyKeyField">
-            <span>Tavily 密钥</span>
-            <input type="text" id="aiTavilyKey" placeholder="tvly-xxxxxxxx" autocomplete="off" />
-          </label>
-          <label class="field" id="customUrlField">
-            <span>自定义搜索地址</span>
-            <input type="url" id="aiCustomUrl" placeholder="https://example.com/search" autocomplete="off" />
-          </label>
-          <label class="field" id="customKeyField">
-            <span>自定义接口密钥（可选）</span>
-            <input type="text" id="aiCustomKey" placeholder="Bearer Token" autocomplete="off" />
-          </label>
-          <label class="field">
-            <span>返回条数</span>
-            <input type="number" id="aiSearchCount" min="1" max="10" step="1" value="5" />
-          </label>
-          <label class="field">
-            <span>时间范围</span>
-            <select id="aiSearchFreshness" aria-label="时间范围">
-              <option value="noLimit">不限</option>
-              <option value="day">一天内</option>
-              <option value="week">一周内</option>
-              <option value="month">一月内</option>
-            </select>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="aiSearchSummary" checked />
-            <span>向提供商请求摘要</span>
-          </label>
-          <p class="ai-config-hint">密钥只存在本机。搜索失败时，接口返回的原因会交给助手，并请它告诉你。底栏「联网搜索」是总开关。</p>
-        </section>
-        <section class="ai-config-section ai-config-prompt">
-          <div class="ai-config-section-title">系统提示词</div>
-          <p class="ai-config-hint">留空则使用内置提示词。标签会在每次发送时换成当时的起始页数据。</p>
-          <div class="ai-var-row">
-            <button type="button" class="ai-var-btn" data-var="{{cards}}">卡片列表</button>
-            <button type="button" class="ai-var-btn" data-var="{{card_names}}">卡片名称</button>
-            <button type="button" class="ai-var-btn" data-var="{{card_count}}">卡片数量</button>
-            <button type="button" class="ai-var-btn" data-var="{{site_direct}}">站内直达</button>
-            <button type="button" class="ai-var-btn" data-var="{{search_rules}}">搜索规则</button>
-            <button type="button" class="ai-var-btn" data-var="{{ops_contract}}">卡片操作约定</button>
-            <button type="button" class="ai-var-btn" data-var="{{last_query}}">上次搜索词</button>
-          </div>
-          <textarea id="aiSystemPrompt" spellcheck="false" placeholder="留空使用内置提示词。可插入上面的标签。"></textarea>
-          <button type="button" class="btn btn-secondary" id="aiPromptReset">恢复默认</button>
-        </section>
+      <div class="ai-config-shell" id="aiConfigPanel">
+        <nav class="ai-config-nav" aria-label="配置分类">
+          <button type="button" class="active" data-pane="model">模型</button>
+          <button type="button" data-pane="search">联网搜索</button>
+          <button type="button" data-pane="prompt">提示词</button>
+          <button type="button" data-pane="advanced">高级配置</button>
+        </nav>
+        <div class="ai-config-panes">
+          <section class="ai-config-pane active" data-pane="model">
+            <div class="ai-profile-row">
+              <select id="aiProfileSelect" aria-label="配置方案"></select>
+              <input type="text" id="aiProfileName" placeholder="方案名称" aria-label="方案名称" />
+              <button type="button" class="ai-text-btn" id="aiProfileAdd">新增</button>
+              <button type="button" class="ai-text-btn" id="aiProfileDel">删除</button>
+            </div>
+            <label class="field">
+              <span>API 地址</span>
+              <input type="url" id="aiEndpoint" placeholder="https://api.deepseek.com 或完整路径" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>API Key</span>
+              <input type="text" id="aiKey" placeholder="sk-xxxxxxxx" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>模型名称</span>
+              <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
+            </label>
+            <div class="ai-profile-row">
+              <button type="button" class="ai-text-btn" id="aiTestBtn">测试连接</button>
+              <span id="aiTestStatus" class="ai-config-hint"></span>
+            </div>
+            <label class="field">
+              <span>思考档位</span>
+              <select id="aiThinkingGear" aria-label="思考档位">
+                <option value="low">低</option>
+                <option value="medium">中</option>
+                <option value="high" selected>高</option>
+              </select>
+            </label>
+            <p class="ai-config-hint">底栏「深度思考」是总开关。打开后使用这里的档位。</p>
+          </section>
+          <section class="ai-config-pane" data-pane="search">
+            <label class="field">
+              <span>提供商</span>
+              <select id="aiSearchProvider" aria-label="搜索提供商">
+                <option value="bocha">博查</option>
+                <option value="tavily">Tavily</option>
+                <option value="custom">自定义接口</option>
+              </select>
+            </label>
+            <label class="field" id="bochaKeyField">
+              <span>博查 AI 密钥</span>
+              <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
+            </label>
+            <label class="field" id="tavilyKeyField">
+              <span>Tavily 密钥</span>
+              <input type="text" id="aiTavilyKey" placeholder="tvly-xxxxxxxx" autocomplete="off" />
+            </label>
+            <label class="field" id="customUrlField">
+              <span>自定义搜索地址</span>
+              <input type="url" id="aiCustomUrl" placeholder="https://example.com/search" autocomplete="off" />
+            </label>
+            <label class="field" id="customKeyField">
+              <span>自定义接口密钥（可选）</span>
+              <input type="text" id="aiCustomKey" placeholder="Bearer Token" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>返回条数</span>
+              <input type="number" id="aiSearchCount" min="1" max="10" step="1" value="5" />
+            </label>
+            <label class="field">
+              <span>时间范围</span>
+              <select id="aiSearchFreshness" aria-label="时间范围">
+                <option value="noLimit">不限</option>
+                <option value="day">一天内</option>
+                <option value="week">一周内</option>
+                <option value="month">一月内</option>
+              </select>
+            </label>
+            <label class="ai-check">
+              <input type="checkbox" id="aiSearchSummary" checked />
+              <span>向提供商请求摘要</span>
+            </label>
+            <p class="ai-config-hint">密钥只存在本机。搜索失败时，接口返回的原因会交给助手，并请它告诉你。底栏「联网搜索」是总开关。</p>
+          </section>
+          <section class="ai-config-pane" data-pane="prompt">
+            <div class="ai-prompt-head">
+              <span id="aiPromptState" class="ai-config-hint">当前使用内置默认提示词</span>
+              <button type="button" class="ai-text-btn" id="aiPromptReset">恢复默认</button>
+            </div>
+            <div class="ai-var-row">
+              <button type="button" class="ai-var-btn" data-var="{{cards}}">卡片列表</button>
+              <button type="button" class="ai-var-btn" data-var="{{card_names}}">卡片名称</button>
+              <button type="button" class="ai-var-btn" data-var="{{card_count}}">卡片数量</button>
+              <button type="button" class="ai-var-btn" data-var="{{site_direct}}">站内直达</button>
+              <button type="button" class="ai-var-btn" data-var="{{search_rules}}">搜索规则</button>
+              <button type="button" class="ai-var-btn" data-var="{{ops_contract}}">卡片操作约定</button>
+              <button type="button" class="ai-var-btn" data-var="{{last_query}}">上次搜索词</button>
+            </div>
+            <textarea id="aiSystemPrompt" spellcheck="false" aria-label="当前系统提示词"></textarea>
+          </section>
+          <section class="ai-config-pane" data-pane="advanced">
+            <p class="ai-config-hint">这些选项平时不用改。推理模型若拒绝温度参数，关掉「请求里附带温度」。</p>
+            <label class="field">
+              <span>采样温度</span>
+              <input type="number" id="aiTemperature" min="0" max="2" step="0.1" value="0.1" />
+            </label>
+            <label class="ai-check">
+              <input type="checkbox" id="aiSendTemperature" checked />
+              <span>请求里附带温度</span>
+            </label>
+            <label class="field">
+              <span>回复长度上限（留空不限制）</span>
+              <input type="number" id="aiMaxTokens" min="1" step="1" placeholder="例如 2048" />
+            </label>
+            <p class="ai-config-hint">思考档位在「模型」里。DeepSeek 会发送对应强度，智谱只打开思考，其他厂商不附加它们不认识的字段，只在提示词里要求相应的思考深度。</p>
+          </section>
+        </div>
       </div>
     </div>
   </div>

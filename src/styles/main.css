@@ -1,5 +1,18 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(31, 35, 41, 0.32) transparent;
+  }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(31, 35, 41, 0.28);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-corner { background: transparent; }
   :root {
     --ui-alpha: 1; --ui-img-alpha: 1; --ui-ltr-alpha: 1; --ui-slider-pct: 100%; --blur-slider-pct: 15%;
     --text-1: #1f2329; --text-2: #4b5158; --text-3: #9aa0a6; --text-4: #5b6470; --text-link: #2468f2;
@@ -22,7 +35,9 @@
     --tile-img-bg: rgba(38,43,52, var(--ui-img-alpha));
     --tile-ltr-bg: rgba(38,43,52, var(--ui-ltr-alpha));
     --overlay-bg: linear-gradient(rgba(12,14,18,0.72), rgba(12,14,18,0.72));
+    scrollbar-color: rgba(255, 255, 255, 0.32) transparent;
   }
+  html[data-theme="dark"] *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.28); background-clip: padding-box; }
   #bgContainer {
     position: fixed;
     inset: 0;
@@ -1330,75 +1345,106 @@
   }
   .ai-overlay.open { opacity: 1; pointer-events: auto; }
 
-  /* AI 配置窗口：盖过助手侧边栏（z-index 950） */
+  /* AI 配置窗口：左侧分栏 + 右侧一项 */
   #aiConfigModal { z-index: 1100; }
-  .ai-config-dialog { width: min(760px, 94vw); max-height: 86vh; }
-  .ai-config-layout {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-  }
-  .ai-config-section {
+  .ai-config-dialog {
+    width: min(720px, 94vw);
+    height: min(560px, 78vh);
+    max-height: 78vh;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 14px;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
+    overflow: hidden;
+    padding: 18px 0 0;
   }
-  .ai-config-section-title {
+  .ai-config-dialog > h3 { padding: 0 20px 12px; margin: 0; }
+  .ai-config-shell {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    border-top: 1px solid var(--border);
+  }
+  .ai-config-nav {
+    width: 124px;
+    flex: 0 0 auto;
+    padding: 10px 8px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ai-config-nav button {
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--text-2);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: inherit;
     font-size: 13px;
-    font-weight: 600;
-    color: var(--text-1);
+    cursor: pointer;
   }
-  .ai-config-section .field > span { color: var(--text-2); }
-  .ai-config-section input {
-    height: 38px;
+  .ai-config-nav button.active {
+    background: var(--surface-2);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .ai-config-panes {
+    flex: 1;
+    min-width: 0;
+    overflow: auto;
+    padding: 14px 16px 16px;
+  }
+  .ai-config-pane { display: none; flex-direction: column; gap: 12px; }
+  .ai-config-pane.active { display: flex; }
+  .ai-config-pane .field > span { color: var(--text-2); }
+  .ai-config-pane input,
+  .ai-config-pane select {
+    height: 36px;
     width: 100%;
-    padding: 0 12px;
+    padding: 0 10px;
     border: 1px solid var(--border-strong);
     border-radius: 8px;
+    font: inherit;
     font-size: 13px;
-    font-family: inherit;
     background: var(--surface);
     color: var(--text-1);
     outline: none;
   }
-  .ai-config-section input::placeholder { color: var(--text-3); }
-  .ai-config-section input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(36,104,242,0.12);
-  }
-  .ai-config-hint {
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.6;
-    color: var(--text-3);
-  }
-  .ai-config-prompt { grid-column: 1 / -1; }
-  .ai-config-section select,
-  .ai-profile-row select,
-  .ai-profile-row input[type="text"] {
-    height: 36px;
+  .ai-config-pane input:focus,
+  .ai-config-pane select:focus { border-color: var(--accent); }
+  .ai-config-hint { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+  .ai-text-btn {
+    height: 28px;
     padding: 0 10px;
+    border-radius: 7px;
     border: 1px solid var(--border-strong);
-    border-radius: 8px;
     background: var(--surface);
-    color: var(--text-1);
+    color: var(--text-2);
     font: inherit;
-    font-size: 13px;
+    font-size: 12px;
+    cursor: pointer;
+    flex: 0 0 auto;
   }
+  .ai-text-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .ai-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .ai-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); flex: 0 0 auto; }
   .ai-profile-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .ai-profile-row select { flex: 1 1 140px; min-width: 0; }
-  .ai-profile-row input[type="text"] { flex: 1 1 120px; min-width: 0; }
+  .ai-profile-row select { flex: 1 1 120px; min-width: 0; width: auto; }
+  .ai-profile-row input[type="text"] { flex: 1 1 100px; min-width: 0; width: auto; }
+  .ai-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .ai-var-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .ai-var-btn {
     border: 1px solid var(--border-strong);
     background: var(--surface);
     color: var(--text-2);
     border-radius: 999px;
-    padding: 4px 10px;
+    padding: 3px 9px;
     font: inherit;
     font-size: 12px;
     cursor: pointer;
@@ -1406,8 +1452,9 @@
   .ai-var-btn:hover { color: var(--accent); border-color: var(--accent); }
   #aiSystemPrompt {
     width: 100%;
-    min-height: 180px;
-    resize: vertical;
+    min-height: 280px;
+    flex: 1;
+    resize: none;
     padding: 10px 12px;
     border: 1px solid var(--border-strong);
     border-radius: 8px;
@@ -1417,7 +1464,7 @@
     font-size: 13px;
     line-height: 1.55;
   }
-  .ai-config-section .toggle-row { font-size: 13px; color: var(--text-2); }
+  .ai-config-pane[data-pane="prompt"].active { min-height: 100%; }
   .ai-search-fail {
     margin: 8px 0 0;
     padding: 8px 10px;
@@ -1428,7 +1475,14 @@
     line-height: 1.5;
   }
   @media (max-width: 640px) {
-    .ai-config-layout { grid-template-columns: 1fr; }
+    .ai-config-shell { flex-direction: column; }
+    .ai-config-nav {
+      width: auto;
+      flex-direction: row;
+      flex-wrap: wrap;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
   }
   /* AI 气泡底部的撤销按钮 + 取消标签 */
   .ai-undo-btn {

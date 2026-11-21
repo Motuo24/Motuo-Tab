@@ -131,6 +131,14 @@
         var tpl = custom && custom.value.trim() ? custom.value : defaultPromptTemplate();
         return fillPrompt(tpl) + thinkingHint();
       }
+      function updatePromptState() {
+        var box = document.getElementById('aiSystemPrompt');
+        var label = document.getElementById('aiPromptState');
+        if (!box || !label) return;
+        var cur = box.value.trim();
+        var isDefault = !cur || cur === defaultPromptTemplate().trim();
+        label.textContent = isDefault ? '当前使用内置默认提示词' : '当前使用已修改的提示词';
+      }
       function buildChatUrl(endpoint) {
         var raw = String(endpoint || '').trim();
         if (!raw) return raw;
@@ -414,10 +422,13 @@
           setIf('aiSearchFreshness', search.freshness || 'noLimit');
           var sum = document.getElementById('aiSearchSummary');
           if (sum && search.summary === false) sum.checked = false;
-          setIf('aiSystemPrompt', cfg.systemPrompt || '');
+          setIf('aiSystemPrompt', cfg.systemPrompt || defaultPromptTemplate());
         }
         updateModelBadge();
         syncProviderFields();
+        var promptBox = document.getElementById('aiSystemPrompt');
+        if (promptBox && !promptBox.value.trim()) promptBox.value = defaultPromptTemplate();
+        updatePromptState();
       })();
 
       ['aiEndpoint', 'aiKey', 'aiModel', 'aiBochaKey', 'aiTavilyKey', 'aiCustomUrl', 'aiCustomKey', 'aiTemperature', 'aiMaxTokens', 'aiSearchCount', 'aiSystemPrompt', 'aiProfileName'].forEach(function (id) {
@@ -496,9 +507,31 @@
       if (promptReset) {
         promptReset.addEventListener('click', function () {
           var box = document.getElementById('aiSystemPrompt');
-          if (box) box.value = '';
+          if (box) box.value = defaultPromptTemplate();
+          updatePromptState();
           saveAIConfig();
           showAIToast('已恢复内置提示词');
+        });
+      }
+      var promptBoxLive = document.getElementById('aiSystemPrompt');
+      if (promptBoxLive) {
+        promptBoxLive.addEventListener('input', function () {
+          updatePromptState();
+          saveAIConfig();
+        });
+      }
+      var configNav = document.querySelector('.ai-config-nav');
+      if (configNav) {
+        configNav.addEventListener('click', function (e) {
+          var btn = e.target.closest ? e.target.closest('button[data-pane]') : null;
+          if (!btn) return;
+          var id = btn.getAttribute('data-pane');
+          configNav.querySelectorAll('button').forEach(function (b) {
+            b.classList.toggle('active', b === btn);
+          });
+          document.querySelectorAll('.ai-config-pane').forEach(function (pane) {
+            pane.classList.toggle('active', pane.getAttribute('data-pane') === id);
+          });
         });
       }
       var varRow = document.querySelector('.ai-var-row');

@@ -10,7 +10,7 @@
 //     ├── manifest.json
 //     ├── newtab.html         （引用外部 CSS/JS，符合 MV3 CSP：禁内联脚本）
 //     ├── styles/main.css
-//     ├── scripts/{search,main,idle}.js
+//     ├── scripts/{search,main,ai,idle}.js
 //     ├── favicon.ico
 //     └── icons/icon{16,32,48,128}.png
 // ============================================================================
@@ -33,6 +33,15 @@ function copy(src, dest) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
 }
+// 源码里的 __ASSET_文件名__ 在构建时换成 data URL，避免把大图直接写进源码
+function inlineAssets(code) {
+  return code.replace(/__ASSET_([A-Za-z0-9._-]+)__/g, (_, name) => {
+    const file = path.join(SRC, 'assets', name);
+    const ext = path.extname(name).slice(1).toLowerCase();
+    const mime = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : 'image/' + (ext || 'png');
+    return 'data:' + mime + ';base64,' + fs.readFileSync(file).toString('base64');
+  });
+}
 
 // ---------- 产物 1：单文件 HTML ----------
 let html = read(path.join(SRC, 'index.html'));
@@ -46,7 +55,7 @@ html = html.replace(
 // 内联 JS（按脚本标签顺序逐一替换）
 html = html.replace(
   /<script\s+src="scripts\/([^"]+)"\s*><\/script>/gi,
-  (m, name) => '<script>\n' + read(path.join(SRC, 'scripts', name)) + '\n</script>'
+  (m, name) => '<script>\n' + inlineAssets(read(path.join(SRC, 'scripts', name))) + '\n</script>'
 );
 
 // 注入版本号（关于弹窗显示 v__APP_VERSION__）
@@ -68,8 +77,8 @@ const extHtml = read(path.join(SRC, 'index.html'))
 
 write(path.join(EXT, 'newtab.html'), extHtml);
 copy(path.join(SRC, 'styles', 'main.css'), path.join(EXT, 'styles', 'main.css'));
-['search.js', 'main.js', 'idle.js'].forEach((f) =>
-  copy(path.join(SRC, 'scripts', f), path.join(EXT, 'scripts', f))
+['search.js', 'main.js', 'ai.js', 'idle.js'].forEach((f) =>
+  write(path.join(EXT, 'scripts', f), inlineAssets(read(path.join(SRC, 'scripts', f))))
 );
 copy(path.join(SRC, 'favicon.ico'), path.join(EXT, 'favicon.ico'));
 

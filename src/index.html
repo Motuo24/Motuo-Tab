@@ -3,17 +3,16 @@
 <head>
 <!--
   ============================================================================
-   Motuo-Tab v1.0 · 浏览器 New Tab 替换页（单文件 HTML）
+   Motuo-Tab · 浏览器 New Tab 替换页
   ============================================================================
    开发者：Motuo24 · 博客 https://pod.xr24.cn
-   共约 3100 行：CSS 1139 行 / JS 1864 行 / HTML 96 行
-  ----------------------------------------------------------------------------
-   目录（用 Ctrl+F 搜索下列锚点可快速跳转）：
-     [HTML-HEAD]   <head> 与 <style> (CSS)
-     [HTML-BODY]   <body> 顶层 DOM 结构
-     [JS-SEARCH]   IIFE 1 · 搜索模块（引擎、历史、建议、站内直达）
-     [JS-MAIN]     IIFE 2 · 主模块（卡片 CRUD、编辑、壁纸、AI）
-     [CSS-AI]      AI 助手样式
+   源码拆成多文件，发行由 scripts/build.js 打成单文件 HTML 与 MV3 扩展：
+     index.html
+     styles/main.css
+     scripts/search.js   搜索引擎、历史、联网建议、站内直达
+     scripts/main.js     卡片、壁纸、主题、导入导出、速记
+     scripts/ai.js       AI 助手（须在 main.js 之后）
+     scripts/idle.js     无操作时淡出界面
    ----------------------------------------------------------------------------
    localStorage 键一览（更详细的位置见各模块顶部 CONFIG 注释）：
      newtab.engine.v1         当前搜索引擎
@@ -291,7 +290,7 @@
             <label class="hist-title">
               <input type="checkbox" id="histSelectAll" aria-label="全选搜索历史" />
               <span>搜索历史</span>
-              <span id="histCount" style="font-size:11px;color:#9aa0a6;font-weight:400;"></span>
+              <span id="histCount" class="hist-count"></span>
             </label>
             <button id="histClearAll" class="hist-clear" type="button">清空</button>
           </div>
@@ -373,8 +372,11 @@
               <li><strong>站内搜索直达</strong>：搜索框输入 <span class="help-code">bl</span> 关键词（B站）、<span class="help-code">zh</span>（知乎）、<span class="help-code">gh</span>（GitHub）、<span class="help-code">tb</span>（淘宝）、<span class="help-code">db</span>（豆瓣）</li>
               <li><strong>自定义搜索引擎</strong>：搜索框左侧图标下拉，底部可添加自己的搜索引擎</li>
               <li><strong>管理卡片</strong>：右键快捷方式可「新标签页打开 / 编辑 / 删除 / 复制链接」；编辑模式下可拖动排序</li>
+              <li><strong>联网搜索建议</strong>：输入时，本机搜索历史之外还会向百度请求联想词。发送的只有当前输入框里的文字，不含快捷方式、对话或其他本机数据。右下角菜单里可以关掉「联网搜索建议」，关掉后只使用本机历史。</li>
+              <li><strong>搜索历史</strong>：菜单「通用配置」里可以逐条删除、多选删除，或一键清空。</li>
               <li><strong>数据备份</strong>：菜单「通用配置」→ 导出备份，可迁移全部数据</li>
             </ul>
+            <p class="help-note">联网搜索建议默认开启。若不希望把输入发给百度，请在菜单中关闭该开关。</p>
           </section>
 
           <div class="help-footer">
@@ -592,6 +594,7 @@
 
   <script src="scripts/search.js"></script>
   <script src="scripts/main.js"></script>
+  <script src="scripts/ai.js"></script>
   <script src="scripts/idle.js"></script>
 
 </body>

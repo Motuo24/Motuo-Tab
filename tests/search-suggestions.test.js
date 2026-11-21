@@ -212,3 +212,12 @@ test('导入完整备份保留联网建议开关', async () => {
   await sleep(300);
   assert.strictEqual(ctx.window.localStorage.getItem('newtab.suggestOnline.v1'), '0');
 });
+
+test('帮助中心说明联网建议会把输入发给百度，并可关闭', () => {
+  const { document } = boot({});
+  const tips = document.getElementById('help-section-tips').textContent;
+  assert.match(tips, /联网搜索建议/);
+  assert.match(tips, /百度/);
+  assert.match(tips, /关闭/);
+  assert.match(tips, /搜索历史/);
+});

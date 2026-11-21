@@ -11,6 +11,12 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 ***
 
+## Changelog (v0.8.5)
+
+- **Search suggestions note**: Help explains that online suggestions send the current query to Baidu and can be turned off; search history can be managed in General settings
+
+- **Menu pills**: site-direct and online-suggestion pills share the menu's theme colors and shadow, including in dark mode
+
 ## Changelog (v0.8.4)
 
 - **AI assistant Markdown list fix**: list bullets and numbers now stay inside the message bubble
@@ -45,7 +51,7 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 
 ## Features
 
-- **Search**: Baidu / Bing / Google / custom engines (`%s` template); search history, suggestion dropdown, site-direct shortcuts (`zh`/`gh`/`bl`/`tb`/`db`)
+- **Search**: Baidu / Bing / Google / custom engines (`%s` template); search history (manageable in General settings), suggestion dropdown (local history first, Baidu suggestions after, can be turned off), site-direct shortcuts (`zh`/`gh`/`bl`/`tb`/`db`)
 
 - **Shortcuts**: add / edit / delete, drag-to-sort, drag-to-bottom-to-delete, context menu, automatic favicon fetching
 

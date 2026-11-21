@@ -1332,7 +1332,7 @@
 
   /* AI 配置窗口：盖过助手侧边栏（z-index 950） */
   #aiConfigModal { z-index: 1100; }
-  .ai-config-dialog { width: min(640px, 92vw); }
+  .ai-config-dialog { width: min(760px, 94vw); max-height: 86vh; }
   .ai-config-layout {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1376,6 +1376,48 @@
     line-height: 1.6;
     color: var(--text-3);
   }
+  .ai-config-prompt { grid-column: 1 / -1; }
+  .ai-config-section select,
+  .ai-profile-row select,
+  .ai-profile-row input[type="text"] {
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+  }
+  .ai-profile-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .ai-profile-row select { flex: 1 1 140px; min-width: 0; }
+  .ai-profile-row input[type="text"] { flex: 1 1 120px; min-width: 0; }
+  .ai-var-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ai-var-btn {
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-2);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .ai-var-btn:hover { color: var(--accent); border-color: var(--accent); }
+  #aiSystemPrompt {
+    width: 100%;
+    min-height: 180px;
+    resize: vertical;
+    padding: 10px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .ai-config-section .toggle-row { font-size: 13px; color: var(--text-2); }
   .ai-search-fail {
     margin: 8px 0 0;
     padding: 8px 10px;

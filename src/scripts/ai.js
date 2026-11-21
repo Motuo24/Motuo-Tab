@@ -38,98 +38,130 @@
       // 对话历史
       var aiHistory = [];
       var aiSending = false; // 是否正在请求中
+      var lastSearchQuery = '';
+      var pendingSnapshotId = null;
+      var aiProfiles = [];
+      var activeProfile = null;
+      try { lastSearchQuery = localStorage.getItem('newtab.ai.lastQuery.v1') || ''; } catch (e) {}
 
-      function buildSystemPrompt() {
-        // 简明卡片清单：只列 name + url，节省 token，避免模型注意力稀释
-        var lines = ['当前卡片（共 ' + cards.list.length + ' 个；下面已经给出每张卡片的名称和网址，你可以直接使用，不要声称看不到）：'];
+      function fieldValue(id) {
+        var el = document.getElementById(id);
+        return el ? String(el.value || '').trim() : '';
+      }
+      function thinkingGear() {
+        if (!(aiDeepSearch && aiDeepSearch.checked)) return 'off';
+        var gear = fieldValue('aiThinkingGear') || 'high';
+        if (gear !== 'low' && gear !== 'medium' && gear !== 'high') return 'high';
+        return gear;
+      }
+      function nativeThinkingHost(endpoint, model) {
+        var blob = (String(endpoint || '') + ' ' + String(model || '')).toLowerCase();
+        return blob.indexOf('deepseek') !== -1 || blob.indexOf('bigmodel') !== -1 || blob.indexOf('zhipu') !== -1;
+      }
+      function searchProvider() { return fieldValue('aiSearchProvider') || 'bocha'; }
+      function providerReady() {
+        var p = searchProvider();
+        if (p === 'tavily') return !!fieldValue('aiTavilyKey');
+        if (p === 'custom') return !!fieldValue('aiCustomUrl');
+        return !!(aiBochaKey && aiBochaKey.value.trim());
+      }
+      function searchCount() {
+        var n = parseInt(fieldValue('aiSearchCount') || '5', 10);
+        if (!n || n < 1) n = 5;
+        if (n > 10) n = 10;
+        return n;
+      }
+      function searchFreshness() { return fieldValue('aiSearchFreshness') || 'noLimit'; }
+      function cardLinesText() {
+        var lines = [];
         for (var i = 0; i < cards.list.length; i++) {
           var it = cards.list[i];
           lines.push('- 名称：' + it.name + ' ｜ 网址：' + (it.url ? it.url : '（未设置）'));
         }
-        var cardsList = lines.join('\n');
-
-        var webOn = aiWebSearch && aiWebSearch.checked && aiBochaKey && aiBochaKey.value.trim();
-
-        var cardNames = cards.list.map(function (x) { return x.name; });
-        var cardNamesText = cardNames.length ? cardNames.join('、') : '（暂无卡片）';
-        var exampleUpdate = cardNames.length
-          ? '{"name":"' + cardNames[0] + '","color":"green"}'
-          : '{"name":"GitHub","color":"green"}';
-
-        return '你是 Motuo-Tab 的快捷方式管理助手。\n\n' +
-          '## 工具说明\n' +
-          '- 名称：Motuo-Tab（浏览器标签页）\n' +
-          '- 开发者：Motuo24，博客 https://pod.xr24.cn\n' +
-          '- 站内搜索直达：搜索框输入 "bl 关键词"（B站）、"zh 关键词"（知乎）、"gh 关键词"（GitHub）、"tb 关键词"（淘宝）、"db 关键词"（豆瓣）\n' +
-          '- 自定义搜索引擎：搜索框左侧图标下拉，底部可添加\n' +
-          '- 搜索建议：搜索框输入时弹历史建议\n' +
-          '- 键盘快捷键：Ctrl+E 专注模式、Ctrl+K 编辑模式、Ctrl+A 打开 AI\n\n' +
-          (webOn
-            ? '## 联网搜索（优先级最高）\n' +
-              '当用户需要实时/最新信息（天气、新闻、股价、最新事件、具体网址、你不确定的事实等）时，\n' +
-              '本轮不要直接回答，也不要输出 <ops>；只输出下面这一行：\n' +
-              '<web_search>简洁有效的搜索关键词</web_search>\n\n' +
-              '硬性要求（违反会导致搜索失效）：\n' +
-              '- 必须原样输出完整的尖括号标签，前后不能少 < 或 >。\n' +
-              '- 禁止写成 web_search 关键词、<search>…</search>、用反引号包住、或加空格/说明文字。\n' +
-              '- 本轮除了这一行，不要输出任何其他内容。\n\n' +
-              '补充规则：\n' +
-              '- 用户说"再搜一次 / 重搜 / 换个说法搜"但没给新关键词时：沿用上一轮的搜索词，可加上新的限定词，例如 <web_search>上一轮的词 官网</web_search>。\n' +
-              '- 客户端会把搜索结果发回；收到后：若用户还要求改卡片，输出"一行摘要 + <ops>"；否则用中文回答并标注来源编号（如 [1]）。\n' +
-              '- 常识性问题（如"1+1等于几"）不需要搜索，直接回答。\n\n'
-            : '') +
-          '## 当前卡片\n' + cardsList + '\n\n' +
-          '## 总原则（先看这里）\n' +
-          '下列规则是为了更好地协助用户，**不是必须硬凑的模板**。只有当"确实需要、且信息足够"改动卡片时，才输出 <ops>。\n' +
-          '遇到下列情况**不要输出 <ops>**，只用文字回答即可：\n' +
-          '- 卡片已经存在（**绝不重复添加**）\n' +
-          '- 缺少必要信息（例如没有网址）且无法确定\n' +
-          '- 指令不清/有歧义（先反问确认）\n' +
-          '- 用户只是查询或闲聊\n' +
-          '宁可只回文字，也不要为了凑 <ops> 而做出错误或重复的操作。\n\n' +
-          '## 输出契约\n' +
-          '多意图优先级：需要实时信息 → 先只输出搜索标签，拿到结果后再处理卡片；修改卡片 → 摘要 + <ops>；纯问答 → 普通文字。任何一轮只做一件事。\n\n' +
-          '### A. 修改卡片时\n' +
-          '回复必须且只能由两部分组成，除此之外不得有任何字符：\n' +
-          '1) 一行中文操作摘要（≤30 字，陈述结果）\n' +
-          '2) 紧随其后、位于回复最末尾的一个 <ops> 块：\n' +
-          '<ops>\n{"add":[],"remove":[],"update":[],"reorder":[]}\n</ops>\n\n' +
-          '硬性要求：\n' +
-          '- ops 内必须是**严格 JSON**：键与字符串都用英文双引号；禁止注释、禁止尾逗号、禁止单引号。\n' +
-          '- 只写实际用到的键，不要输出空数组。\n' +
-          '- 只输出**一个** <ops> 块，且必须在回复末尾。\n' +
-          '- 禁止用 ```json 代码块包裹；禁止只输出裸 JSON 而省略 <ops> 标签；禁止在 JSON 外用文字复述 JSON。\n' +
-          '- add：数组，每项 {"name":"名称","url":"完整网址","iconSrc":"auto","color":"blue"}；**不要添加当前卡片里已存在的同名卡片**。\n' +
-          '  iconSrc：auto（自动抓图标，必须同时给 color 占位色）/ color（只用颜色）/ image（配 icon 图片URL）。\n' +
-          '  color 取 blue/pink/orange/purple/sky/green/amber/white。\n' +
-          '- remove：字符串数组，名称必须与当前卡片完全一致。\n' +
-          '- update：数组，每项 {"name":"现有名称", ...只写要改的字段}。\n' +
-          '- reorder：字符串数组，按新的完整顺序列出**当前已存在的卡片名**，不要写不存在的名字。\n' +
-          '- 你只需描述"改了什么"，客户端会 apply 到当前状态；没提到的卡片自动保留。\n\n' +
-          '### B. 纯查询时\n' +
-          '（问有哪些卡片、某网站在不在、数量等）只用中文正常回答，绝不输出 <ops>。\n\n' +
-          '### C. 指令模糊时\n' +
-          '（如"整理一下""优化一下"）用一句话反问确认，不要输出 <ops>。\n\n' +
-          '## 正例\n' +
-          '用户：加个 Google\n' +
-          '你：已添加 Google\n' +
-          '<ops>\n{"add": [{"name": "Google", "url": "https://www.google.com", "iconSrc": "auto", "color": "blue"}]}\n</ops>\n\n' +
-          '用户：把最前面的卡片改成绿色\n' +
-          '你：已将该卡片图标改为绿色\n' +
-          '<ops>\n{"update": [' + exampleUpdate + ']}\n</ops>\n\n' +
-          '用户：删了知乎\n' +
-          '你：已删除知乎\n' +
-          '<ops>\n{"remove": ["知乎"]}\n</ops>\n\n' +
-          '用户：现在有哪些卡片？\n' +
-          '你：当前有 ' + cards.list.length + ' 个卡片：' + cardNamesText + '。\n\n' +
-          '## 反例（以下均为错误输出，禁止出现）\n' +
-          '错误1：把 JSON 放进代码块而不加 <ops> → ```json {"add":[...]} ```\n' +
-          '错误2：只输出裸 JSON，没有 <ops> 标签 → {"add":[...]}\n' +
-          '错误3：JSON 带注释/尾逗号/单引号 → {"add":[{"name":"X", /* 新卡片 */ "url":"https://x.com",}]}\n' +
-          '错误4：add/remove/update 写成对象或字符串 → {"add":{"name":"X","url":"https://x.com"},"remove":"知乎"}\n' +
-          '错误5：修改请求却只用文字描述，没有任何 <ops> 块\n' +
-          '错误6：一条回复里输出多个 <ops> 块或大段解释\n' +
-          '错误7：reorder 里写当前不存在的卡片名';
+        return lines.join('\n') || '（暂无卡片）';
+      }
+      function searchRulesText() {
+        if (!(aiWebSearch && aiWebSearch.checked && providerReady())) return '';
+        return '## 联网搜索（优先级最高）\n'
+          + '当用户需要实时或最新信息时，本轮不要直接回答，也不要输出 <ops>；只输出一行：\n'
+          + '<web_search>简洁有效的搜索关键词</web_search>\n'
+          + '用户说再搜一次且没给新关键词时，沿用最近一次搜索词：' + (lastSearchQuery || '（还没有）') + '。\n'
+          + '客户端会把结果发回。收到后：若用户还要求改卡片，输出一行摘要和 <ops>；否则用中文回答并标注来源编号（如 [1]）。\n'
+          + '常识题直接回答。\n';
+      }
+      function opsContractText() {
+        var first = cards.list.length ? String(cards.list[0].name).replace(/"/g, '') : 'GitHub';
+        return '## 卡片操作\n'
+          + '只有确实要改快捷方式时，才在回复末尾输出一个 <ops>。只写用到的键，不要输出空数组。\n'
+          + '已存在的同名卡片不要再 add。没有把握的网址先问，不要编。\n'
+          + '改名写成 {"name":"现有名称","newName":"新名称"}。\n'
+          + 'reorder 是整表排序：只写一个名字时，这张放到最前，其余按原来的相对顺序接在后面。\n'
+          + '正例：\n已添加 Google\n<ops>\n{"add":[{"name":"Google","url":"https://www.google.com","iconSrc":"auto","color":"blue"}]}\n</ops>\n'
+          + '已将该卡片图标改为绿色\n<ops>\n{"update":[{"name":"' + first + '","color":"green"}]}\n</ops>\n';
+      }
+      function thinkingHint() {
+        var gear = thinkingGear();
+        if (gear === 'off') return '';
+        if (nativeThinkingHost(aiEndpoint && aiEndpoint.value, aiModel && aiModel.value)) return '';
+        if (gear === 'low') return '\n回答尽量简短。\n';
+        if (gear === 'medium') return '\n先想清楚再回答，不要把思考过程写给用户。\n';
+        return '\n充分思考后再回答，不要把思考过程写给用户。\n';
+      }
+      function defaultPromptTemplate() {
+        return '你是 Motuo-Tab 的快捷方式管理助手。\n\n'
+          + '## 当前卡片（共 {{card_count}} 个；下面已经给出每张卡片的名称和网址，不要声称看不到）\n'
+          + '{{cards}}\n\n'
+          + '## 站内搜索直达\n{{site_direct}}\n\n'
+          + '{{search_rules}}\n'
+          + '{{ops_contract}}\n';
+      }
+      function fillPrompt(template) {
+        var names = cards.list.map(function (x) { return x.name; }).join('、') || '（暂无卡片）';
+        return String(template || '')
+          .replace(/\{\{cards\}\}/g, cardLinesText())
+          .replace(/\{\{card_names\}\}/g, names)
+          .replace(/\{\{card_count\}\}/g, String(cards.list.length))
+          .replace(/\{\{site_direct\}\}/g, 'zh 知乎、gh GitHub、bl B站、tb 淘宝、db 豆瓣。搜索框输入「前缀 空格 关键词」。')
+          .replace(/\{\{search_rules\}\}/g, searchRulesText())
+          .replace(/\{\{ops_contract\}\}/g, opsContractText())
+          .replace(/\{\{last_query\}\}/g, lastSearchQuery || '（还没有）');
+      }
+      function buildSystemPrompt() {
+        var custom = document.getElementById('aiSystemPrompt');
+        var tpl = custom && custom.value.trim() ? custom.value : defaultPromptTemplate();
+        return fillPrompt(tpl) + thinkingHint();
+      }
+      function buildChatUrl(endpoint) {
+        var raw = String(endpoint || '').trim();
+        if (!raw) return raw;
+        if (raw.indexOf('/chat/completions') !== -1) return raw;
+        var q = '';
+        var qi = raw.indexOf('?');
+        if (qi !== -1) { q = raw.slice(qi); raw = raw.slice(0, qi); }
+        raw = raw.replace(/\/+$/, '');
+        var path = raw.replace(/^https?:\/\/[^/]+/, '');
+        if (!/\/v\d+/.test(path)) raw += '/v1';
+        return raw + '/chat/completions' + q;
+      }
+      function buildChatBody(modelName, messages, endpointValue) {
+        var body = { model: modelName, messages: messages, stream: true };
+        var sendTemp = document.getElementById('aiSendTemperature');
+        if (!sendTemp || sendTemp.checked) {
+          var tEl = document.getElementById('aiTemperature');
+          var temp = tEl && tEl.value !== '' ? parseFloat(tEl.value) : 0.1;
+          if (!isNaN(temp)) body.temperature = temp;
+        }
+        var mt = parseInt(fieldValue('aiMaxTokens'), 10);
+        if (mt > 0) body.max_tokens = mt;
+        var gear = thinkingGear();
+        if (gear !== 'off' && nativeThinkingHost(endpointValue, modelName)) {
+          var effort = gear === 'low' ? 'low' : gear === 'medium' ? 'medium' : 'high';
+          body.thinking = { type: 'enabled' };
+          if ((String(endpointValue || '') + ' ' + modelName).toLowerCase().indexOf('deepseek') !== -1) {
+            body.reasoning_effort = effort;
+          }
+        }
+        return body;
       }
 
       // 加载历史
@@ -212,7 +244,7 @@
           for (var k in m) {
             // 既不带 native tool_calls，也不带 reasoning_content
             // （后者只有 native tools 链路才需要，旧版 reasoner 收到会 400）
-            if (Object.prototype.hasOwnProperty.call(m, k) && k !== 'tool_calls' && k !== 'reasoning_content' && k !== 'hidden') copy[k] = m[k];
+            if (Object.prototype.hasOwnProperty.call(m, k) && k !== 'tool_calls' && k !== 'reasoning_content' && k !== 'hidden' && k !== 'snapshotId' && k !== 'searchQuery') copy[k] = m[k];
           }
           // 只清洗 assistant 的历史正文，剥离前端渲染用的语义标签。
           // 关键：system 提示词里本来就包含 <ops>/<web_search> 的格式示例，
@@ -261,49 +293,229 @@
         aiModelBadge.title = m ? '当前模型：' + m : '';
       }
 
-      // 加载已保存的配置
-      (function loadAIConfig() {
-        try {
-          var raw = localStorage.getItem(AI_CONFIG_KEY);
-          if (raw) {
-            var cfg = JSON.parse(raw);
-            if (cfg.endpoint) aiEndpoint.value = cfg.endpoint;
-            if (cfg.key) aiKey.value = cfg.key;
-            if (cfg.model) aiModel.value = cfg.model;
-            if (cfg.webSearch) aiWebSearch.checked = true;
-            if (cfg.bochaKey) aiBochaKey.value = cfg.bochaKey;
-            if (cfg.deepSearch) aiDeepSearch.checked = true;
-          }
-        } catch (e) {}
+      function setIf(id, value) {
+        var el = document.getElementById(id);
+        if (el && value != null) el.value = value;
+      }
+      function blankProfile(name) {
+        return { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: name || '新配置', endpoint: '', key: '', model: '' };
+      }
+      function readProfileFromForm(p) {
+        if (!p) return;
+        var nameEl = document.getElementById('aiProfileName');
+        if (nameEl) p.name = nameEl.value.trim() || p.name || '未命名';
+        p.endpoint = aiEndpoint.value.trim();
+        p.key = aiKey.value.trim();
+        p.model = aiModel.value.trim();
+      }
+      function writeProfileToForm(p) {
+        setIf('aiProfileName', p.name || '');
+        aiEndpoint.value = p.endpoint || '';
+        aiKey.value = p.key || '';
+        aiModel.value = p.model || '';
         updateModelBadge();
-      })();
-
+      }
+      function renderProfileSelect() {
+        var sel = document.getElementById('aiProfileSelect');
+        if (!sel) return;
+        sel.innerHTML = '';
+        aiProfiles.forEach(function (p) {
+          var opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.name || '未命名';
+          if (activeProfile && p.id === activeProfile.id) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      }
+      function syncProviderFields() {
+        var p = searchProvider();
+        var show = function (id, on) {
+          var el = document.getElementById(id);
+          if (el) el.style.display = on ? '' : 'none';
+        };
+        show('bochaKeyField', p === 'bocha');
+        show('tavilyKeyField', p === 'tavily');
+        show('customUrlField', p === 'custom');
+        show('customKeyField', p === 'custom');
+      }
       function saveAIConfig() {
         updateModelBadge();
-        try {
-          localStorage.setItem(AI_CONFIG_KEY, JSON.stringify({
-            endpoint: aiEndpoint.value.trim(),
-            key: aiKey.value.trim(),
-            model: aiModel.value.trim(),
-            webSearch: aiWebSearch.checked,
-            bochaKey: aiBochaKey.value.trim(),
-            deepSearch: aiDeepSearch.checked
-          }));
-        } catch (e) {}
+        if (!aiProfiles.length) aiProfiles = [blankProfile('默认')];
+        if (!activeProfile) activeProfile = aiProfiles[0];
+        readProfileFromForm(activeProfile);
+        var gear = thinkingGear() === 'off'
+          ? (fieldValue('aiThinkingGear') || 'high')
+          : thinkingGear();
+        if (gear !== 'low' && gear !== 'medium' && gear !== 'high') gear = 'high';
+        var data = {
+          profiles: aiProfiles,
+          activeProfileId: activeProfile.id,
+          thinkingGear: gear,
+          temperature: fieldValue('aiTemperature') || '0.1',
+          maxTokens: fieldValue('aiMaxTokens'),
+          sendTemperature: !(document.getElementById('aiSendTemperature') && document.getElementById('aiSendTemperature').checked === false),
+          webSearch: !!(aiWebSearch && aiWebSearch.checked),
+          deepSearch: !!(aiDeepSearch && aiDeepSearch.checked),
+          endpoint: aiEndpoint.value.trim(),
+          key: aiKey.value.trim(),
+          model: aiModel.value.trim(),
+          bochaKey: aiBochaKey ? aiBochaKey.value.trim() : '',
+          search: {
+            provider: searchProvider(),
+            count: searchCount(),
+            summary: !(document.getElementById('aiSearchSummary') && document.getElementById('aiSearchSummary').checked === false),
+            freshness: searchFreshness(),
+            bochaKey: aiBochaKey ? aiBochaKey.value.trim() : '',
+            tavilyKey: fieldValue('aiTavilyKey'),
+            customUrl: fieldValue('aiCustomUrl'),
+            customKey: fieldValue('aiCustomKey')
+          },
+          systemPrompt: fieldValue('aiSystemPrompt')
+        };
+        try { localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(data)); } catch (e) {}
+        renderProfileSelect();
+        syncProviderFields();
       }
 
-      aiEndpoint.addEventListener('change', saveAIConfig);
-      aiKey.addEventListener('change', saveAIConfig);
-      aiModel.addEventListener('change', saveAIConfig);
+      (function loadAIConfig() {
+        var cfg = null;
+        try { cfg = JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || 'null'); } catch (e) { cfg = null; }
+        if (cfg && Array.isArray(cfg.profiles) && cfg.profiles.length) {
+          aiProfiles = cfg.profiles;
+          activeProfile = aiProfiles.filter(function (p) { return p.id === cfg.activeProfileId; })[0] || aiProfiles[0];
+        } else {
+          var p0 = blankProfile('默认');
+          if (cfg) {
+            p0.endpoint = cfg.endpoint || '';
+            p0.key = cfg.key || '';
+            p0.model = cfg.model || '';
+          }
+          aiProfiles = [p0];
+          activeProfile = p0;
+        }
+        writeProfileToForm(activeProfile);
+        renderProfileSelect();
+        if (cfg) {
+          if (cfg.webSearch) aiWebSearch.checked = true;
+          var bKey = (cfg.search && cfg.search.bochaKey) || cfg.bochaKey;
+          if (bKey) aiBochaKey.value = bKey;
+          if (cfg.deepSearch) aiDeepSearch.checked = true;
+          setIf('aiThinkingGear', cfg.thinkingGear || (cfg.deepSearch ? 'high' : 'high'));
+          if (cfg.temperature != null && cfg.temperature !== '') setIf('aiTemperature', cfg.temperature);
+          if (cfg.maxTokens != null) setIf('aiMaxTokens', cfg.maxTokens);
+          var sendT = document.getElementById('aiSendTemperature');
+          if (sendT && cfg.sendTemperature === false) sendT.checked = false;
+          var search = cfg.search || {};
+          setIf('aiSearchProvider', search.provider || 'bocha');
+          setIf('aiTavilyKey', search.tavilyKey || '');
+          setIf('aiCustomUrl', search.customUrl || '');
+          setIf('aiCustomKey', search.customKey || '');
+          setIf('aiSearchCount', search.count || 5);
+          setIf('aiSearchFreshness', search.freshness || 'noLimit');
+          var sum = document.getElementById('aiSearchSummary');
+          if (sum && search.summary === false) sum.checked = false;
+          setIf('aiSystemPrompt', cfg.systemPrompt || '');
+        }
+        updateModelBadge();
+        syncProviderFields();
+      })();
+
+      ['aiEndpoint', 'aiKey', 'aiModel', 'aiBochaKey', 'aiTavilyKey', 'aiCustomUrl', 'aiCustomKey', 'aiTemperature', 'aiMaxTokens', 'aiSearchCount', 'aiSystemPrompt', 'aiProfileName'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', saveAIConfig);
+      });
+      ['aiThinkingGear', 'aiSearchProvider', 'aiSearchFreshness'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', saveAIConfig);
+      });
+      ['aiSendTemperature', 'aiSearchSummary'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', saveAIConfig);
+      });
       aiWebSearch.addEventListener('change', function () {
         saveAIConfig();
-        // 开启联网搜索但没有博查密钥时给出提示，避免"开了却搜不了"的静默失效
-        if (this.checked && !aiBochaKey.value.trim()) {
-          showAIToast('联网搜索需要先在配置窗口里填写博查 AI 密钥');
+        if (this.checked && !providerReady()) {
+          showAIToast('联网搜索需要先在配置窗口里填写当前提供商的密钥');
         }
       });
-      aiBochaKey.addEventListener('change', saveAIConfig);
       aiDeepSearch.addEventListener('change', saveAIConfig);
+
+      var profileSel = document.getElementById('aiProfileSelect');
+      if (profileSel) {
+        profileSel.addEventListener('change', function () {
+          readProfileFromForm(activeProfile);
+          activeProfile = aiProfiles.filter(function (p) { return p.id === profileSel.value; })[0] || aiProfiles[0];
+          writeProfileToForm(activeProfile);
+          saveAIConfig();
+        });
+      }
+      var profileAdd = document.getElementById('aiProfileAdd');
+      if (profileAdd) {
+        profileAdd.addEventListener('click', function () {
+          readProfileFromForm(activeProfile);
+          var p = blankProfile('配置 ' + (aiProfiles.length + 1));
+          aiProfiles.push(p);
+          activeProfile = p;
+          writeProfileToForm(p);
+          saveAIConfig();
+        });
+      }
+      var profileDel = document.getElementById('aiProfileDel');
+      if (profileDel) {
+        profileDel.addEventListener('click', function () {
+          if (aiProfiles.length < 2) { showAIToast('至少保留一套配置'); return; }
+          aiProfiles = aiProfiles.filter(function (p) { return p !== activeProfile; });
+          activeProfile = aiProfiles[0];
+          writeProfileToForm(activeProfile);
+          saveAIConfig();
+        });
+      }
+      var testBtn = document.getElementById('aiTestBtn');
+      if (testBtn) {
+        testBtn.addEventListener('click', function () {
+          var status = document.getElementById('aiTestStatus');
+          var endpoint = aiEndpoint.value.trim();
+          var key = aiKey.value.trim();
+          var model = aiModel.value.trim() || 'deepseek-chat';
+          if (!endpoint || !key) { if (status) status.textContent = '请先填写地址和密钥'; return; }
+          if (status) status.textContent = '正在连接…';
+          var testBody = { model: model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false };
+          fetch(buildChatUrl(endpoint), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+            body: JSON.stringify(testBody)
+          }).then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error('HTTP ' + r.status + ' ' + String(t).slice(0, 160)); });
+            if (status) status.textContent = '连接成功';
+          }).catch(function (err) {
+            if (status) status.textContent = '连接失败：' + (err && err.message ? err.message : err);
+          });
+        });
+      }
+      var promptReset = document.getElementById('aiPromptReset');
+      if (promptReset) {
+        promptReset.addEventListener('click', function () {
+          var box = document.getElementById('aiSystemPrompt');
+          if (box) box.value = '';
+          saveAIConfig();
+          showAIToast('已恢复内置提示词');
+        });
+      }
+      var varRow = document.querySelector('.ai-var-row');
+      if (varRow) {
+        varRow.addEventListener('click', function (e) {
+          var btn = e.target.closest ? e.target.closest('.ai-var-btn') : null;
+          if (!btn) return;
+          var box = document.getElementById('aiSystemPrompt');
+          if (!box) return;
+          var token = btn.getAttribute('data-var') || '';
+          var start = box.selectionStart || 0;
+          var end = box.selectionEnd || 0;
+          box.value = box.value.slice(0, start) + token + box.value.slice(end);
+          box.focus();
+          saveAIConfig();
+        });
+      }
 
       // 深度搜索：在气泡内部创建思考过程容器（默认收起，点击头部展开/收起）
       function createThinkingEl() {
@@ -380,7 +592,7 @@
         return String(text || '')
           .replace(/<(\/)?[|\uFF5C]DSML[|\uFF5C]/g, '<$1')
           // 联网搜索标签的别名统一成 <web_search>：模型有时写成 <search>/<websearch>/<search_web>/<web search>
-          .replace(/(<\/?)\s*(?:web\s*search|websearch|search_web|search)\b/gi, '$1web_search');
+          .replace(/(<\/?)\s*(?:web\s*search|websearch|search_web)\b/gi, '$1web_search');
       }
 
       // 剥离模型"泄漏"到正文里的工具调用标记（DeepSeek DSML、<tool_calls><invoke>、
@@ -438,7 +650,8 @@
             var firstKey = Object.keys(params)[0];
             if (firstKey) query = params[firstKey];
           }
-          if (name === 'web_search' || /search/i.test(name)) {
+          var lname = name.toLowerCase();
+          if (lname === 'web_search' || lname === 'websearch' || lname === 'search_web') {
             return { name: 'web_search', query: query, raw: env ? env[0] : inv[0], params: params };
           }
           return null;
@@ -584,6 +797,7 @@
                 undoBtn.type = 'button';
                 undoBtn.className = 'ai-undo-btn';
                 undoBtn.textContent = '↶ 撤销这次操作';
+                if (msg.snapshotId) undoBtn.setAttribute('data-snap', msg.snapshotId);
                 div.appendChild(undoBtn);
               }
             }
@@ -655,8 +869,10 @@
       function renderStreamBubble(el, text, streaming) {
         // 保留气泡内的思考过程容器（深度思考时创建在 bubble 内部）
         var thinkingEls = el.querySelectorAll('.ai-thinking');
+        var failEls = el.querySelectorAll('.ai-search-fail');
         el.innerHTML = '';
         for (var ti = 0; ti < thinkingEls.length; ti++) { el.appendChild(thinkingEls[ti]); }
+        for (var fi = 0; fi < failEls.length; fi++) { el.appendChild(failEls[fi]); }
 
         text = String(text || '');
 
@@ -866,7 +1082,7 @@
         if (Array.isArray(obj)) {
           // 动作数组：[{type:'add',card:{...}}, {action:'remove',name:'x'}]
           if (obj.length && obj.every(function (a) {
-            return a && typeof a === 'object' && (a.type || a.action || a.op) && !a.name;
+            return a && typeof a === 'object' && (a.type || a.action || a.op);
           })) {
             var acc = {};
             obj.forEach(function (a) {
@@ -968,7 +1184,13 @@
       // 把裸 JSON / 代码块的 ops 规范成 <ops>…</ops>，便于统一渲染与保存
       function normalizeOpsTags(content) {
         var s = String(content || '');
-        if (/<ops>[\s\S]*?<\/ops>/i.test(s)) return s;
+        var tagged = s.match(/<ops>([\s\S]*?)<\/ops>/i);
+        if (tagged) {
+          var parsed = parseLooseJson(tagged[1]);
+          var ops = coerceOps(parsed);
+          if (!ops) return s;
+          return s.slice(0, tagged.index) + '<ops>' + JSON.stringify(ops) + '</ops>' + s.slice(tagged.index + tagged[0].length);
+        }
         var ex = extractOps(s);
         if (!ex) return s;
         return s.slice(0, ex.start) + '<ops>' + JSON.stringify(ex.ops) + '</ops>' + s.slice(ex.end);
@@ -1015,48 +1237,58 @@
         var updateArr = Array.isArray(ops.update) ? ops.update : [];
         var reorderArr = Array.isArray(ops.reorder) ? ops.reorder : null;
 
-        // 校验 add 项字段
-        for (var ai2 = 0; ai2 < addArr.length; ai2++) {
-          var a2 = addArr[ai2];
-          if (!a2.name || !a2.url) throw new Error('add[' + ai2 + '] 缺少 name 或 url');
-          // 默认使用 auto 模式，自动抓取网站图标
+        addArr = addArr.filter(function (a2) { return a2 && a2.name && a2.url; });
+        addArr.forEach(function (a2) {
           if (!a2.iconSrc) a2.iconSrc = 'auto';
-          // auto 模式需要 color 作为占位色
           if (a2.iconSrc === 'auto' && !a2.color) a2.color = 'blue';
-        }
+        });
 
         // 从当前 list 出发，按 ops 应用 diff（没提到的字段原样保留）
         // 注意：必须逐项拷贝，浅拷贝 slice() 会让 update 原地改到 list 共享对象，
         // 进而污染下方用于撤销的快照（update 类操作将无法正确撤销）。
         var newList = cards.list.map(function (it) { return Object.assign({}, it); });
         var nameIndex = {};
-        newList.forEach(function (it, idx) { nameIndex[it.name] = idx; });
+        function reindex() {
+          nameIndex = {};
+          newList.forEach(function (it, idx) { nameIndex[it.name] = idx; });
+        }
+        reindex();
 
         // remove: 按 name 删
         removeArr.forEach(function (nm) {
           if (nameIndex[nm] !== undefined) {
             newList.splice(nameIndex[nm], 1);
-            // 索引重算
-            nameIndex = {};
-            newList.forEach(function (it, idx) { nameIndex[it.name] = idx; });
+            reindex();
           }
         });
 
-        // update: 按 name 合并字段
+        // update: 按 name 合并字段；newName / rename 才改显示名
         updateArr.forEach(function (u) {
           if (!u || !u.name) return;
           var idx2 = nameIndex[u.name];
           if (idx2 === undefined) return;
+          var nextName = u.newName || u.rename;
+          if (nextName && nextName !== u.name && nameIndex[nextName] === undefined) {
+            newList[idx2].name = nextName;
+            reindex();
+            idx2 = nameIndex[nextName];
+          }
           var keys = Object.keys(u);
           for (var ki = 0; ki < keys.length; ki++) {
             var k = keys[ki];
-            if (k === 'name') continue;
+            if (k === 'name' || k === 'newName' || k === 'rename') continue;
             newList[idx2][k] = u[k];
           }
         });
 
-        // add: 追加到末尾
-        addArr.forEach(function (c) { newList.push(c); });
+        // add: 已有同名则跳过，追加到末尾
+        var addedNames = {};
+        addArr.forEach(function (c) {
+          if (nameIndex[c.name] !== undefined) return;
+          newList.push(c);
+          addedNames[c.name] = true;
+          reindex();
+        });
 
         // reorder: 按给定名字顺序重排（不重命名，只重排现有项；新加的不在列表里时自动忽略）
         if (reorderArr && reorderArr.length > 0) {
@@ -1088,34 +1320,44 @@
           }
         }
 
-        // 应用前先存一份快照
+        if (JSON.stringify(newList) === JSON.stringify(cards.list)) {
+          showAIToast('没有需要应用的改动');
+          return true;
+        }
+
+        // 每条操作一份快照；同时写旧键，兼容只认 newtab.ai.snapshot.v1 的撤销
+        var snapId = '';
+        var before = cards.list.map(function (it) { return Object.assign({}, it); });
+        var snap = { list: before, time: Date.now() };
         try {
-          localStorage.setItem(AI_SNAPSHOT_KEY, JSON.stringify({
-            list: cards.list,
-            time: Date.now()
-          }));
+          var map = {};
+          try { map = JSON.parse(localStorage.getItem('newtab.ai.snapshots.v1') || '{}') || {}; } catch (e1) { map = {}; }
+          snapId = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+          map[snapId] = snap;
+          var snapKeys = Object.keys(map);
+          while (snapKeys.length > 30) { delete map[snapKeys.shift()]; }
+          localStorage.setItem('newtab.ai.snapshots.v1', JSON.stringify(map));
+          localStorage.setItem(AI_SNAPSHOT_KEY, JSON.stringify(snap));
         } catch (e) {}
+        pendingSnapshotId = snapId;
 
         cards.list = newList;
         var savedOk = save(cards.list);
         render(cards.list);
 
-        // 对 AI 添加的 auto 图标卡片，触发自动抓取
+        // 自动抓图标写回新卡：同名时优先对上网址，避免打到旧卡
         addArr.forEach(function (c) {
-          if (c.iconSrc === 'auto') {
-            // 找新添加卡片的 DOM
-            var cardEls = nav.querySelectorAll('.shortcut');
-            for (var ci = 0; ci < cardEls.length; ci++) {
-              var card = cardEls[ci];
-              // 根据 name 和 url 匹配（render 后的 DOM 用 dataset 存了 iconSrc，但 name 在 .label 里）
-              var label = card.querySelector('.label');
-              if (label && label.textContent === c.name) {
-                var idx = Array.prototype.indexOf.call(cardEls, card);
-                applyAutoIcon(card, idx, c.color || 'blue');
-                break;
-              }
-            }
+          if (c.iconSrc !== 'auto' || !addedNames[c.name]) return;
+          var cardEls = nav.querySelectorAll('.shortcut');
+          var hit = null;
+          for (var ci = 0; ci < cardEls.length; ci++) {
+            var card = cardEls[ci];
+            var label = card.querySelector('.label');
+            if (!label || label.textContent !== c.name) continue;
+            if (c.url && card.getAttribute('href') === c.url) { hit = card; break; }
+            hit = card;
           }
+          if (hit) applyAutoIcon(hit, Array.prototype.indexOf.call(cardEls, hit), c.color || 'blue');
         });
 
         // 保存结果用轻提示反馈，不再往气泡里插技术性状态行
@@ -1141,6 +1383,7 @@
           undoBtn.type = 'button';
           undoBtn.className = 'ai-undo-btn';
           undoBtn.textContent = '↶ 撤销这次操作';
+          if (snapId) undoBtn.setAttribute('data-snap', snapId);
           bubble.appendChild(undoBtn);
         }
         return true;
@@ -1197,24 +1440,32 @@
       // 执行撤销：恢复快照 → 标记已撤销 → 自动以原指令重发（触发新一轮联网搜索）
       function applyAIUndo(undoBtn) {
         try {
-          var raw = localStorage.getItem(AI_SNAPSHOT_KEY);
           var snap = null;
-          if (raw) {
-            try { snap = JSON.parse(raw); } catch (e) { snap = null; }
+          var id = undoBtn.getAttribute('data-snap');
+          if (id) {
+            var map = {};
+            try { map = JSON.parse(localStorage.getItem('newtab.ai.snapshots.v1') || '{}') || {}; } catch (e1) { map = {}; }
+            snap = map[id] || null;
+            if (snap) {
+              delete map[id];
+              localStorage.setItem('newtab.ai.snapshots.v1', JSON.stringify(map));
+            }
           }
+          var legacy = null;
+          try { legacy = JSON.parse(localStorage.getItem(AI_SNAPSHOT_KEY) || 'null'); } catch (e2) { legacy = null; }
+          if (!snap) snap = legacy;
           if (!snap || !Array.isArray(snap.list)) {
-            // 快照已被消费（历史重渲染后再次点击）：只做状态提示，不重复执行
             markUndone(undoBtn);
             return;
           }
-
           cards.list = snap.list;
           save(cards.list);
           render(cards.list);
-          localStorage.removeItem(AI_SNAPSHOT_KEY);
+          if (!id || (legacy && JSON.stringify(legacy.list) === JSON.stringify(snap.list))) {
+            localStorage.removeItem(AI_SNAPSHOT_KEY);
+          }
           markUndone(undoBtn);
           showAIToast('已撤销，卡片恢复到操作前');
-          // 纯回滚语义：撤销只恢复列表，不自动把原指令重发回 agent（避免"撤了又做"）
         } catch (e) {
           undoBtn.textContent = '撤销失败';
         }
@@ -1264,6 +1515,15 @@
         aiSend.textContent = '发送';
       }
 
+      function pushAssistant(content) {
+        var msg = { role: 'assistant', content: content };
+        if (pendingSnapshotId) {
+          msg.snapshotId = pendingSnapshotId;
+          pendingSnapshotId = null;
+        }
+        aiHistory.push(msg);
+      }
+
       function sendAI() {
         // 并发门禁：处理中忽略再次发送（含 Enter 连按），避免两条流水线互相踩状态
         if (aiSending) return;
@@ -1278,6 +1538,7 @@
           addAIMessage('请先点击右上角 ⚙ 打开配置窗口，填写 API 地址和密钥。', 'error');
           return;
         }
+        pendingSnapshotId = null;
 
         var self = this;
 
@@ -1309,16 +1570,11 @@
         //   - 完整路径（含 /chat/completions）→ 直接用
         //   - 路径里已有 /v1、/v4 等版本号 → 只补 /chat/completions
         //   - 只有域名 → 补 /v1/chat/completions（OpenAI 风格）
-        var url = endpoint.trim().replace(/\/+$/, '');
-        if (url && url.indexOf('/chat/completions') === -1) {
-          var urlPath = url.replace(/^https?:\/\/[^\/]+/, '');
-          if (!/\/v\d+/.test(urlPath)) url += '/v1';
-          url += '/chat/completions';
-        }
+        var url = buildChatUrl(endpoint);
 
         // 联网搜索：工具调用相关
         var deepThinkingOn = aiDeepSearch && aiDeepSearch.checked;
-        var webSearchEnabled = aiWebSearch && aiWebSearch.checked && aiBochaKey && aiBochaKey.value.trim();
+        var webSearchEnabled = aiWebSearch && aiWebSearch.checked && providerReady();
         var pendingToolCallId = null;
         var pendingToolCallName = null;
         var pendingToolCallArgs = '';
@@ -1346,8 +1602,7 @@
           aiHistory.push(correctionMsg);
           saveAIHistory();
 
-          var retryBody = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
-          if (deepThinkingOn) { retryBody.thinking = { type: 'enabled' }; retryBody.reasoning_effort = 'high'; }
+          var retryBody = buildChatBody(model, toApiMessages(aiHistory), endpoint);
 
           var retryAccum = '';
           return fetch(url, {
@@ -1464,7 +1719,18 @@
               'Authorization': 'Bearer ' + aiBochaKey.value.trim(),
               'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ query: query, freshness: 'noLimit', summary: true, count: 5 }),
+            body: JSON.stringify({
+              query: query,
+              freshness: (function () {
+                var f = searchFreshness();
+                if (f === 'day') return 'oneDay';
+                if (f === 'week') return 'oneWeek';
+                if (f === 'month') return 'oneMonth';
+                return 'noLimit';
+              })(),
+              summary: !(document.getElementById('aiSearchSummary') && document.getElementById('aiSearchSummary').checked === false),
+              count: searchCount()
+            }),
             signal: AbortSignal.timeout(30000)
           }).then(function (sRes) {
             if (!sRes.ok) {
@@ -1481,7 +1747,7 @@
             try {
               var webPages = sData.data && sData.data.webPages;
               if (webPages && webPages.value && webPages.value.length > 0) {
-                var items = webPages.value.slice(0, 5);
+                var items = webPages.value.slice(0, searchCount());
                 resultCount = items.length;
                 for (var i = 0; i < items.length; i++) {
                   var p = items[i];
@@ -1498,10 +1764,80 @@
           });
         }
 
+        function searchItemsToContext(items) {
+          var searchContext = '';
+          var list = (items || []).slice(0, searchCount());
+          for (var i = 0; i < list.length; i++) {
+            var p = list[i];
+            searchContext += '【' + (i + 1) + '】' + (p.name || p.title || '') + '\n';
+            searchContext += '链接：' + (p.url || p.link || '') + '\n';
+            searchContext += (p.snippet || p.summary || p.content || '') + '\n\n';
+          }
+          return { searchContext: searchContext, resultCount: list.length, failed: false };
+        }
+        function fetchSearchPost(url, headers, body, pickItems) {
+          return fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(30000)
+          }).then(function (sRes) {
+            if (!sRes.ok) {
+              return sRes.text().then(function (t) {
+                var err = new Error('搜索API HTTP ' + sRes.status);
+                err.httpStatus = sRes.status;
+                err.body = String(t || '').slice(0, 500);
+                throw err;
+              });
+            }
+            return sRes.json();
+          }).then(function (data) {
+            return searchItemsToContext(pickItems(data));
+          }).catch(function (sErr) {
+            return { searchContext: '', resultCount: 0, failed: true, error: sErr };
+          });
+        }
+        function fetchTavily(query) {
+          var fresh = searchFreshness();
+          var body = {
+            api_key: fieldValue('aiTavilyKey'),
+            query: query,
+            max_results: searchCount(),
+            include_answer: false,
+            search_depth: 'basic'
+          };
+          if (fresh === 'day' || fresh === 'week' || fresh === 'month') body.time_range = fresh;
+          return fetchSearchPost('https://api.tavily.com/search', { 'Content-Type': 'application/json' }, body, function (data) {
+            return (data && data.results) || [];
+          });
+        }
+        function fetchCustomSearch(query) {
+          var headers = { 'Content-Type': 'application/json' };
+          var customKey = fieldValue('aiCustomKey');
+          if (customKey) headers.Authorization = 'Bearer ' + customKey;
+          return fetchSearchPost(fieldValue('aiCustomUrl'), headers, {
+            query: query,
+            count: searchCount(),
+            freshness: searchFreshness()
+          }, function (data) {
+            if (!data) return [];
+            if (data.data && data.data.webPages && data.data.webPages.value) return data.data.webPages.value;
+            if (Array.isArray(data.results)) return data.results;
+            if (Array.isArray(data.data)) return data.data;
+            if (Array.isArray(data)) return data;
+            return [];
+          });
+        }
+        function fetchWebSearch(query) {
+          var p = searchProvider();
+          if (p === 'tavily') return fetchTavily(query);
+          if (p === 'custom') return fetchCustomSearch(query);
+          return fetchBocha(query);
+        }
+
         // 基于当前 aiHistory 发起后续请求并流式读入 accumulated（含第二轮思考展示）
         function streamFollowUp() {
-          var body = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
-          if (deepThinkingOn) { body.thinking = { type: 'enabled' }; body.reasoning_effort = 'high'; }
+          var body = buildChatBody(model, toApiMessages(aiHistory), endpoint);
           return fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
@@ -1560,6 +1896,8 @@
 
         // 执行一轮"搜索 + 让模型基于结果作答"，可递归支持多轮搜索
         function runSearchRound(query, round) {
+          lastSearchQuery = String(query || '');
+          try { localStorage.setItem('newtab.ai.lastQuery.v1', lastSearchQuery); } catch (e) {}
           if (window.console && console.log) console.log('[AI] 搜索第 ' + round + ' 轮：', query);
           var qEsc = String(query).replace(/</g, '&lt;');
           var searchStepEl = null;
@@ -1577,7 +1915,7 @@
           }
           aiMessages.scrollTop = aiMessages.scrollHeight;
 
-          return fetchBocha(query).then(function (r) {
+          return fetchWebSearch(query).then(function (r) {
             if (r.failed) {
               var detail = describeSearchError(r.error);
               var safe = escapeSearchHtml(detail);
@@ -1613,8 +1951,8 @@
               hidden: true,
               content: r.failed
                 ? searchFailurePrompt(describeSearchError(r.error))
-                : '【联网搜索结果】\n' + (r.searchContext || '未找到相关搜索结果。') +
-                  '\n请基于以上搜索结果回答用户的问题，并在引用处标注来源编号（如 [1]）；不要编造。'
+                : '【联网搜索结果】\n搜索词：' + query + '\n' + (r.searchContext || '未找到相关搜索结果。') +
+                  '\n请基于以上搜索结果回答。若用户还要求添加或修改快捷方式，在回答末尾给出 <ops>。引用处标注来源编号（如 [1]）；不要编造。'
             });
             saveAIHistory();
 
@@ -1646,12 +1984,8 @@
 
         function thinkingElForRound() { return bubble ? bubble.querySelector('.ai-thinking') : null; }
 
-        var reqBody = { model: model, messages: toApiMessages(aiHistory), temperature: 0.1, stream: true };
-        // 深度思考：启用模型推理能力（thinking 参数）
-        if (deepThinkingOn) {
-          reqBody.thinking = { type: 'enabled' };
-          reqBody.reasoning_effort = 'high';
-        }
+        var reqBody = buildChatBody(model, toApiMessages(aiHistory), endpoint);
+        // 深度思考的请求字段由 buildChatBody 按厂商写入。界面上的思考容器仍看底栏开关。
         // 联网搜索：刻意不使用 OpenAI 原生 tools。
         // 原因：DeepSeek 在思考模式下时好时坏（有时返回结构化 tool_calls，有时把调用写成
         // DSML/<tool_calls> 文本，还要求回传 reasoning_content，否则 400），极不稳定。
@@ -1843,7 +2177,7 @@
                 finalContent += stripToolMarkup(accumulated)
                   .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
                   .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
-                aiHistory.push({ role: 'assistant', content: finalContent });
+                pushAssistant(finalContent);
                 saveAIHistory();
                 endAISend();
               }).catch(function (fErr) {
@@ -1902,7 +2236,7 @@
               finalContent = '<think>' + stripToolMarkup(reasoningAccum) + '</think>\n' + finalContent;
             }
             // 注意：普通（无工具调用）回复不回传 reasoning_content —— 旧版 reasoner 会因此 400
-            aiHistory.push({ role: 'assistant', content: finalContent });
+            pushAssistant(finalContent);
             saveAIHistory();
             endAISend();
           };

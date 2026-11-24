@@ -95,3 +95,26 @@ test('导入旧格式（无 iconSrc）卡片时仍保留 color/letter', async (t
   const plain = items.find((it) => it.name === '普通卡片');
   assert.strictEqual(plain.iconSrc, undefined, '无颜色字段的卡片不应补 iconSrc');
 });
+
+test('导入完整备份恢复主题设置并保留空网址卡片', async () => {
+  const { window, document } = setupWindow({});
+  doImport(window, document, {
+    app: 'Motuo-Tab',
+    version: 2,
+    data: {
+      items: [
+        { name: '工作台', url: '', iconSrc: 'color', color: 'blue' }
+      ],
+      settings: { theme: 'dark' },
+      ai: {},
+      wallpaper: null
+    }
+  });
+
+  await new Promise((r) => setTimeout(r, 300));
+
+  const items = readShortcuts(window);
+  assert.strictEqual(items[0].url, '', '空网址卡片导入后应保持空字符串');
+  assert.strictEqual(window.localStorage.getItem('newtab.theme.v1'), 'dark', '主题设置应写回存储');
+  assert.strictEqual(document.documentElement.getAttribute('data-theme'), 'dark', '页面主题应立即切换为 dark');
+});

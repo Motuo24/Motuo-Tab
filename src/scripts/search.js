@@ -67,6 +67,16 @@
 
       var ENGINES = {};
 
+      function escapeHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+      function escapeAttr(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+      function isSafeIconUrl(u) {
+        return !!u && !/^\s*(?:javascript|vbscript):/i.test(String(u));
+      }
+
       // 渲染下拉列表（内置 + 自定义 + 管理按钮）
       function renderEngineDropdown() {
         ENGINES = buildEngines();
@@ -81,7 +91,7 @@
           var div = document.createElement('div');
           div.className = 'opt' + (k === getEngine() ? ' current' : '');
           div.dataset.engine = k;
-          div.innerHTML = '<img class="opt-icon" src="' + e.icon + '" alt="" /><span>' + e.name + '</span>';
+          div.innerHTML = '<img class="opt-icon" src="' + escapeAttr(e.icon) + '" alt="" /><span>' + escapeHtml(e.name) + '</span>';
           selector.appendChild(div);
         });
 
@@ -97,8 +107,10 @@
             var div = document.createElement('div');
             div.className = 'opt custom-opt' + (k === getEngine() ? ' current' : '');
             div.dataset.engine = k;
-            var iconHtml = ce.icon ? '<img class="opt-icon" src="' + ce.icon + '" alt="" />' : '<span class="opt-icon" style="background:#f0f2f5;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#4b5158;">' + ce.name.charAt(0) + '</span>';
-            div.innerHTML = iconHtml + '<span>' + ce.name + '</span><button class="del-custom" data-custom-idx="' + i + '" title="删除此引擎">×</button>';
+            var iconHtml = isSafeIconUrl(ce.icon)
+              ? '<img class="opt-icon" src="' + escapeAttr(ce.icon) + '" alt="" />'
+              : '<span class="opt-icon" style="background:#f0f2f5;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#4b5158;">' + escapeHtml(ce.name.charAt(0)) + '</span>';
+            div.innerHTML = iconHtml + '<span>' + escapeHtml(ce.name) + '</span><button class="del-custom" data-custom-idx="' + i + '" title="删除此引擎">×</button>';
             selector.appendChild(div);
           });
         }
@@ -231,7 +243,9 @@
         customEngines.forEach(function (ce, i) {
           var row = document.createElement('div');
           row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f7f8fc;border-radius:8px;font-size:13px;';
-          var iconHtml = ce.icon ? '<img src="' + ce.icon + '" style="width:18px;height:18px;border-radius:4px;flex-shrink:0;" alt="" />' : '<span style="width:18px;height:18px;border-radius:4px;background:#e8ecf1;display:flex;align-items:center;justify-content:center;font-size:10px;color:#4b5158;flex-shrink:0;">' + ce.name.charAt(0) + '</span>';
+          var iconHtml = isSafeIconUrl(ce.icon)
+            ? '<img src="' + escapeAttr(ce.icon) + '" style="width:18px;height:18px;border-radius:4px;flex-shrink:0;" alt="" />'
+            : '<span style="width:18px;height:18px;border-radius:4px;background:#e8ecf1;display:flex;align-items:center;justify-content:center;font-size:10px;color:#4b5158;flex-shrink:0;">' + escapeHtml(ce.name.charAt(0)) + '</span>';
           row.innerHTML = iconHtml +
             '<span style="flex:1;color:#1f2329;">' + escapeHtml(ce.name) + '</span>' +
             '<span style="font-size:11px;color:#9aa0a6;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(ce.url) + '</span>' +
@@ -251,10 +265,6 @@
              }
           });
         });
-      }
-
-      function escapeHtml(s) {
-        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       }
 
       // 添加自定义引擎
@@ -373,8 +383,6 @@
         if (searchHistory.length > MAX_HISTORY) searchHistory.length = MAX_HISTORY;
         saveSearchHistory();
       }
-
-      function escapeAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
       function onlineEnabled() {
         try { return localStorage.getItem(SUGGEST_ONLINE_KEY) !== '0'; } catch (e) { return true; }
@@ -517,6 +525,10 @@
       }
 
       // 建议点击委托（历史可单条删除；联网建议点击即搜）
+      // mousedown 阻止输入框失焦，避免长按点击时 blur 180ms 定时器抢先关闭下拉
+      suggestionsEl.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+      });
       suggestionsEl.addEventListener('click', function (e) {
         var item = e.target.closest('.sg-item');
         if (item) {

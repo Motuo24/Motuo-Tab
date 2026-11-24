@@ -1315,7 +1315,13 @@
         // 删除线 ~~text~~
         html = html.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
         // 链接 [text](url)
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, label, rawUrl) {
+          var href = String(rawUrl || '').trim().replace(/&amp;/g, '&');
+          if (/^https?:\/\//i.test(href)) {
+            return '<a href="' + href.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener">' + label + '</a>';
+          }
+          return label;
+        });
         // 表格 | A | B |\n |---|---|\n | C | D |
         html = html.replace(/^\|(.+)\|\n\|[-| :]+\|\n(\|.+\|\n?)+/gm, function(m) {
           var lines = m.trim().split('\n');
@@ -1724,7 +1730,19 @@
         var updateArr = Array.isArray(ops.update) ? ops.update : [];
         var reorderArr = Array.isArray(ops.reorder) ? ops.reorder : null;
 
-        addArr = addArr.filter(function (a2) { return a2 && a2.name && a2.url; });
+        function safeNormalizeCardUrl(u) {
+          var s = String(u || '').trim();
+          if (!s || /^\s*(?:javascript|data|vbscript):/i.test(s)) return '';
+          if (cards.normalizeUrl) return cards.normalizeUrl(s);
+          if (/^(file|mailto|about|chrome|chrome-extension|ftp|https?):/i.test(s)) return s;
+          return 'http://' + s;
+        }
+        addArr = addArr.map(function (a2) {
+          if (!a2 || !a2.name || !a2.url) return null;
+          var normUrl = safeNormalizeCardUrl(a2.url);
+          if (!normUrl) return null;
+          return Object.assign({}, a2, { url: normUrl });
+        }).filter(Boolean);
         addArr.forEach(function (a2) {
           if (!a2.iconSrc) a2.iconSrc = 'auto';
           if (a2.iconSrc === 'auto' && !a2.color) a2.color = 'blue';
@@ -1764,6 +1782,11 @@
           for (var ki = 0; ki < keys.length; ki++) {
             var k = keys[ki];
             if (k === 'name' || k === 'newName' || k === 'rename') continue;
+            if (k === 'url' && typeof u[k] === 'string' && u[k].trim()) {
+              var normU = safeNormalizeCardUrl(u[k]);
+              if (normU) newList[idx2][k] = normU;
+              continue;
+            }
             newList[idx2][k] = u[k];
           }
         });

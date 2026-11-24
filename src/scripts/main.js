@@ -23,6 +23,9 @@
       var AI_SNAPSHOT_KEY    = 'newtab.ai.snapshot.v1';    // AI 操作前的快照（用于撤销）
       var SCRATCHPAD_KEY     = 'newtab.scratchpad.v1';     // 速记本内容
       var THEME_KEY          = 'newtab.theme.v1';          // 主题模式：light / dark / auto
+      var BACKUP_META_KEY    = 'newtab.backupMeta.v1';     // 备份提醒状态
+      var BACKUP_REMIND_MS   = 30 * 86400000;
+      var BACKUP_DISMISS_MS  = 7 * 86400000;
       // IndexedDB（壁纸 blob 存这里）
       var DB_NAME            = 'MotuoTabDB';
       var DB_VERSION         = 1;
@@ -264,6 +267,23 @@
       }
 
       // 填充 tile 内容（图片/文字 + 颜色），公共逻辑给 build/update 共用
+      var cardItemMap = new WeakMap();
+
+      // 文字/颜色兜底 tile（无图或图标加载失败时使用）
+      function fillFallbackTile(tile, item) {
+        while (tile.firstChild) tile.removeChild(tile.firstChild);
+        tile.removeAttribute('style');
+        tile.className = 'tile';
+        var ch = (item.letter || (item.name || '').trim().charAt(0).toUpperCase()) || '?';
+        if (item.color) {
+          applyTileColor(tile, item.color);
+        } else {
+          tile.style.background = 'var(--tile-ltr-bg)';
+          tile.style.color = 'var(--text-1)';
+        }
+        tile.textContent = ch;
+      }
+
       function fillTile(tile, item) {
         while (tile.firstChild) tile.removeChild(tile.firstChild);
         tile.removeAttribute('style');
@@ -281,6 +301,7 @@
           img.style.padding = '10px';
           img.style.boxSizing = 'border-box';
           img.style.borderRadius = '16px';
+          img.onerror = function () { fillFallbackTile(tile, item); };
           tile.appendChild(img);
         } else {
           var ch = (item.letter || (item.name || '').trim().charAt(0).toUpperCase()) || '?';
@@ -310,6 +331,7 @@
 
         a.appendChild(tile);
         a.appendChild(label);
+        cardItemMap.set(a, item);
         return a;
       }
 
@@ -324,6 +346,7 @@
 
       // 就地更新某张卡片的内容（编辑后用，不重绘避免闪烁）
       function updateCardContent(card, item) {
+        cardItemMap.set(card, item);
         card.href = item.url || '#';
         card.dataset.iconSrc = item.iconSrc || 'color';
         var tile = card.querySelector('.tile');
@@ -819,6 +842,12 @@
       function openModal(el) { el.classList.add('open'); el.setAttribute('aria-hidden', 'false'); }
       function closeModal(el) { el.classList.remove('open'); el.setAttribute('aria-hidden', 'true'); }
 
+      function setEditBtnLabel(on) {
+        var lbl = editBtn && editBtn.querySelector('.mi-label');
+        if (lbl) lbl.textContent = on ? '退出编辑' : '编辑页面';
+        else if (editBtn) editBtn.textContent = on ? '退出编辑' : '编辑页面';
+      }
+
       function setEditing(on) {
         document.body.classList.toggle('editing', !!on);
         editBanner.classList.toggle('open', !!on);
@@ -862,7 +891,7 @@
         if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
           e.preventDefault();
           editing = !editing;
-          editBtn.textContent = editing ? '退出编辑' : '编辑页面';
+          setEditBtnLabel(editing);
           setEditing(editing);
           return;
         }
@@ -901,12 +930,12 @@
       editBtn.addEventListener('click', function () {
         editing = !editing;
         // 文字也跟随变化
-        editBtn.textContent = editing ? '退出编辑' : '编辑页面';
+        setEditBtnLabel(editing);
         setEditing(editing);
       });
       exitEditBtn.addEventListener('click', function () {
         editing = false;
-        editBtn.textContent = '编辑页面';
+        setEditBtnLabel(false);
         setEditing(false);
       });
 
@@ -989,6 +1018,8 @@
         // 同步到 list（DOM 顺序已经反映新顺序）
         var cards = Array.prototype.slice.call(nav.querySelectorAll('.shortcut'));
         var newOrder = cards.map(function (el) {
+          var mapped = cardItemMap.get(el);
+          if (mapped && list.indexOf(mapped) !== -1) return mapped;
           var lbl = el.querySelector('.label');
           var name = lbl ? lbl.textContent : '';
           return list.find(function (it) { return it.name === name; });
@@ -1194,7 +1225,8 @@
                 alpha: readLS('newtab.alpha.v1'),
                 toggleImg: readLS('newtab.toggleImg.v1'),
                 toggleLtr: readLS('newtab.toggleLtr.v1'),
-                scratchpad: readLS('newtab.scratchpad.v1')
+                scratchpad: readLS('newtab.scratchpad.v1'),
+                theme: readLS(THEME_KEY) || getTheme()
               },
               ai: {
                 config: readLS('newtab.ai.config.v1'),
@@ -1212,6 +1244,7 @@
           a.click();
           a.remove();
           URL.revokeObjectURL(url);
+          recordBackupExported();
           if (skippedWallpaper) alert('当前是动态/超大壁纸，备份已跳过壁纸文件（卡片与配置已照常导出）。');
         }).catch(function (err) {
           console.error('导出失败', err);
@@ -1246,7 +1279,7 @@
             items = (items || [])
               .filter(function (it) { return it && typeof it.name === 'string' && it.name.trim(); })
               .map(function (it) {
-                var clean = { name: String(it.name).slice(0, 40), url: String(it.url || '#') };
+                var clean = { name: String(it.name).slice(0, 40), url: it.url == null ? '' : String(it.url) };
                 // 保留图标相关字段，避免导入后丢失自定义图标
                 if (it.iconSrc === 'image' && it.icon) { clean.iconSrc = 'image'; clean.icon = String(it.icon); }
                 else if (it.color) {
@@ -1275,6 +1308,10 @@
               writeLS('newtab.toggleImg.v1', s.toggleImg);
               writeLS('newtab.toggleLtr.v1', s.toggleLtr);
               writeLS('newtab.scratchpad.v1', s.scratchpad);
+              if (s.theme === 'light' || s.theme === 'dark' || s.theme === 'auto') {
+                writeLS(THEME_KEY, s.theme);
+                applyTheme(s.theme);
+              }
             }
 
             // ---- AI 配置 / 历史 ----
@@ -1498,6 +1535,62 @@
         });
       });
       // 初始化：应用已保存的主题（不重复写回）
+
+      // ========== 温和备份提醒（30 天未导出 / 稍后 7 天） ==========
+      function readBackupMeta() {
+        try {
+          var obj = JSON.parse(localStorage.getItem(BACKUP_META_KEY) || 'null');
+          return (obj && typeof obj === 'object') ? obj : {};
+        } catch (e) { return {}; }
+      }
+      function writeBackupMeta(meta) {
+        try { localStorage.setItem(BACKUP_META_KEY, JSON.stringify(meta)); } catch (e) {}
+      }
+      function refreshBackupReminder() {
+        var meta = readBackupMeta();
+        var now = Date.now();
+        if (!meta.firstSeenAt) {
+          meta.firstSeenAt = now;
+          meta.lastExportAt = meta.lastExportAt || 0;
+          meta.dismissedAt = meta.dismissedAt || 0;
+          writeBackupMeta(meta);
+        }
+        var ref = meta.lastExportAt || meta.firstSeenAt;
+        var overdue = ref > 0 && (now - ref) >= BACKUP_REMIND_MS;
+        var dismissed = meta.dismissedAt > 0 && (now - meta.dismissedAt) < BACKUP_DISMISS_MS;
+        var show = overdue && !dismissed;
+        var gBtn = document.getElementById('generalConfigBtn');
+        var bar = document.getElementById('backupReminderBar');
+        var txt = document.getElementById('backupReminderText');
+        fabBtn.classList.toggle('has-backup-dot', show);
+        if (gBtn) gBtn.classList.toggle('has-backup-dot', show);
+        if (bar) bar.hidden = !show;
+        if (show && txt) {
+          var days = Math.max(30, Math.floor((now - ref) / 86400000));
+          txt.textContent = '已超过 ' + days + ' 天未导出备份，建议留存一份';
+        }
+      }
+      function recordBackupExported() {
+        var meta = readBackupMeta();
+        if (!meta.firstSeenAt) meta.firstSeenAt = Date.now();
+        meta.lastExportAt = Date.now();
+        meta.dismissedAt = 0;
+        writeBackupMeta(meta);
+        refreshBackupReminder();
+      }
+      var remindExportBtn = document.getElementById('backupRemindExport');
+      var remindLaterBtn = document.getElementById('backupRemindLater');
+      if (remindExportBtn) remindExportBtn.addEventListener('click', function () { exportBtn.click(); });
+      if (remindLaterBtn) {
+        remindLaterBtn.addEventListener('click', function () {
+          var meta = readBackupMeta();
+          if (!meta.firstSeenAt) meta.firstSeenAt = Date.now();
+          meta.dismissedAt = Date.now();
+          writeBackupMeta(meta);
+          refreshBackupReminder();
+        });
+      }
+      refreshBackupReminder();
       setTheme(getTheme(), false);
 
       // 个性化按钮：打开弹窗
@@ -1822,6 +1915,7 @@
         render: render,
         nav: nav,
         applyAutoIcon: applyAutoIcon,
+        normalizeUrl: normalizeUrl,
         keys: {
           config: AI_CONFIG_KEY,
           history: AI_HISTORY_KEY,

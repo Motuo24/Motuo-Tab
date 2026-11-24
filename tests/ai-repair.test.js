@@ -169,3 +169,34 @@ test('自定义系统提示词里的卡片标签会被换成当前列表', async
   assert.ok(sys.indexOf('GitHub') !== -1);
   assert.ok(sys.indexOf('https://github.com') !== -1);
 });
+
+test('Markdown 链接拒绝 javascript: 协议且保留 https:// 链接', async () => {
+  const { document } = boot({
+    fetchStub: () => sseResponse([{ choices: [{ delta: { content: '点[危险](javascript:alert(1))或[正常](https://example.com)' } }] }])
+  });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '发个链接');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  const msgs = document.querySelectorAll('#aiMessages .ai-msg-assistant');
+  const last = msgs[msgs.length - 1];
+  const links = Array.from(last.querySelectorAll('a'));
+  assert.strictEqual(links.some((a) => /^javascript:/i.test(a.getAttribute('href') || '')), false, '不应生成 javascript: 链接');
+  assert.ok(links.some((a) => a.getAttribute('href') === 'https://example.com'), '合法 https 链接应保留');
+  assert.ok(last.textContent.includes('危险'), '被拦截链接的文字应保留');
+});
+
+test('AI 添加无协议域名卡片时自动补全 http:// 并拦截 javascript:', async () => {
+  const { window, document } = boot({
+    fetchStub: () => sseResponse([{ choices: [{ delta: { content: '已添加\n<ops>{"add":[{"name":"无协议站","url":"example.org"},{"name":"危险卡","url":"javascript:alert(1)"}]}</ops>' } }] }])
+  });
+  openAI(document);
+  configureAI(document);
+  sendMessage(document, '添加 example.org');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  const items = readShortcuts(window);
+  const added = items.find((it) => it.name === '无协议站');
+  assert.ok(added, '无协议站应成功添加');
+  assert.strictEqual(added.url, 'http://example.org', '应自动补全 http://');
+  assert.strictEqual(items.some((it) => it.name === '危险卡'), false, 'javascript: 协议卡片应被拦截');
+});

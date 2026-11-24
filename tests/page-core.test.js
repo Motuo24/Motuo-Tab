@@ -153,5 +153,102 @@ test('导出备份包含当前快捷方式和版本号', async () => {
   assert.strictEqual(payload.version, 2);
   assert.ok(payload.data.items.some((it) => it.name === '导出站' && it.url === 'https://export.example'));
   assert.ok(payload.data.settings, '备份应带上个性化设置');
+  assert.strictEqual(payload.data.settings.theme, 'light', '导出备份应包含主题模式');
   assert.ok(payload.data.ai, '备份应带上 AI 配置槽');
+});
+
+test('切换编辑模式保留菜单图标并正确切换文案', () => {
+  const { window, document } = boot();
+  const editBtn = document.getElementById('editBtn');
+  assert.strictEqual(editBtn.querySelectorAll('svg').length, 2);
+  editBtn.click();
+  assert.strictEqual(editBtn.querySelectorAll('svg').length, 2, '进入编辑模式后图标 SVG 应保留');
+  assert.strictEqual(editBtn.querySelector('.mi-label').textContent, '退出编辑');
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+  assert.strictEqual(editBtn.querySelectorAll('svg').length, 2, 'Ctrl+K 退出编辑后图标 SVG 应保留');
+  assert.strictEqual(editBtn.querySelector('.mi-label').textContent, '编辑页面');
+});
+
+test('同名卡片拖拽排序不覆盖且图片图标失败自动降级', () => {
+  const { window, document } = boot();
+  addColorCard(window, document, '同名卡', 'https://first.example');
+  addColorCard(window, document, '同名卡', 'https://second.example');
+  document.getElementById('editBtn').click();
+
+  const cards = Array.from(document.querySelectorAll('.shortcut'));
+  const firstCard = cards[cards.length - 2];
+  const secondCard = cards[cards.length - 1];
+  assert.strictEqual(firstCard.getAttribute('href'), 'https://first.example');
+  assert.strictEqual(secondCard.getAttribute('href'), 'https://second.example');
+
+  // 模拟把第一张同名卡拖到第二张同名卡之后
+  secondCard.getBoundingClientRect = () => ({ left: 100, top: 0, width: 80, height: 80 });
+  const nav = document.querySelector('.shortcuts');
+  const dt = { effectAllowed: 'move', dropEffect: 'move', setData() {} };
+  firstCard.dispatchEvent(Object.assign(new window.Event('dragstart', { bubbles: true }), { dataTransfer: dt }));
+  secondCard.dispatchEvent(Object.assign(new window.MouseEvent('drop', { bubbles: true, cancelable: true, clientX: 160 }), { dataTransfer: dt }));
+
+  const saved = readShortcuts(window);
+  const same = saved.filter((it) => it.name === '同名卡');
+  assert.strictEqual(same.length, 2, '两张同名卡都应保留');
+  assert.strictEqual(same[0].url, 'https://second.example');
+  assert.strictEqual(same[1].url, 'https://first.example');
+
+  // 测试远程图标加载失败自动降级为首字卡片且不破坏存储
+  const imgCard = cardByName(document, '知乎');
+  const img = imgCard.querySelector('.tile img');
+  assert.ok(img, '知乎卡片应包含图片图标');
+  img.dispatchEvent(new window.Event('error'));
+  assert.strictEqual(imgCard.querySelector('.tile img'), null, '失败后应移除破图');
+  assert.strictEqual(imgCard.querySelector('.tile').textContent, '知', '失败后应展示首字兜底');
+  const storedZhihu = readShortcuts(window).find((it) => it.name === '知乎');
+  assert.strictEqual(storedZhihu.iconSrc, 'image', 'DOM 降级不应覆盖原存储配置');
+});
+
+test('自定义搜索引擎渲染对危险字符转义', () => {
+  const { document } = boot();
+  document.getElementById('engineName').value = '<img src=x onerror=alert(1)>';
+  document.getElementById('engineUrl').value = 'https://s.example/?q=%s';
+  document.getElementById('engineIcon').value = 'javascript:alert(1)';
+  document.getElementById('engineAddBtn').click();
+
+  const selector = document.getElementById('engineSelector');
+  const list = document.getElementById('customEngineList');
+  assert.strictEqual(selector.querySelectorAll('img[onerror]').length, 0, '下拉不应注入 img 标签');
+  assert.strictEqual(list.querySelectorAll('img[onerror]').length, 0, '列表不应注入 img 标签');
+  assert.strictEqual(selector.querySelectorAll('img[src^="javascript:"]').length, 0, '不应允许 javascript: 图标');
+  assert.ok(selector.textContent.includes('<img src=x onerror=alert(1)>'), '名称应作为纯文本展示');
+});
+
+test('超过 30 天未导出显示温和备份提醒，稍后或导出后消退', async () => {
+  const fresh = boot();
+  assert.strictEqual(fresh.document.getElementById('fabBtn').classList.contains('has-backup-dot'), false, '新用户不应立即提醒');
+  assert.strictEqual(fresh.document.getElementById('backupReminderBar').hidden, true);
+
+  const staleTs = Date.now() - 35 * 86400000;
+  const stale = boot({
+    seed: { 'newtab.backupMeta.v1': JSON.stringify({ firstSeenAt: staleTs, lastExportAt: 0, dismissedAt: 0 }) }
+  });
+  installWallpaperDB(stale.window);
+  assert.strictEqual(stale.document.getElementById('fabBtn').classList.contains('has-backup-dot'), true, '超 30 天应显示菜单角标');
+  assert.strictEqual(stale.document.getElementById('generalConfigBtn').classList.contains('has-backup-dot'), true, '通用配置项应显示角标');
+  assert.strictEqual(stale.document.getElementById('backupReminderBar').hidden, false, '通用配置弹窗内应显示提示条');
+
+  stale.document.getElementById('backupRemindLater').click();
+  assert.strictEqual(stale.document.getElementById('fabBtn').classList.contains('has-backup-dot'), false, '点稍后应隐藏角标');
+  assert.strictEqual(stale.document.getElementById('backupReminderBar').hidden, true, '点稍后应隐藏提示条');
+  const metaAfterLater = JSON.parse(stale.window.localStorage.getItem('newtab.backupMeta.v1'));
+  assert.ok(metaAfterLater.dismissedAt > 0, '应记录稍后时间戳');
+
+  const stale2 = boot({
+    seed: { 'newtab.backupMeta.v1': JSON.stringify({ firstSeenAt: staleTs, lastExportAt: 0, dismissedAt: 0 }) }
+  });
+  installWallpaperDB(stale2.window);
+  stale2.window.URL.createObjectURL = () => 'blob:mock';
+  stale2.window.URL.revokeObjectURL = () => {};
+  stale2.document.getElementById('backupRemindExport').click();
+  await waitFor(() => !stale2.document.getElementById('fabBtn').classList.contains('has-backup-dot'));
+  const metaAfterExport = JSON.parse(stale2.window.localStorage.getItem('newtab.backupMeta.v1'));
+  assert.ok(metaAfterExport.lastExportAt > 0, '导出后应更新 lastExportAt');
+  assert.strictEqual(stale2.document.getElementById('backupReminderBar').hidden, true, '导出后应隐藏提示条');
 });

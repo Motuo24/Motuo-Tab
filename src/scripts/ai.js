@@ -58,12 +58,33 @@
         var blob = (String(endpoint || '') + ' ' + String(model || '')).toLowerCase();
         return blob.indexOf('deepseek') !== -1 || blob.indexOf('bigmodel') !== -1 || blob.indexOf('zhipu') !== -1;
       }
+      var SEARCH_CHECKED = '2026-11-20';
+      var searchKeyBag = {};
+      var shownProvider = 'bocha';
       function searchProvider() { return fieldValue('aiSearchProvider') || 'bocha'; }
-      function providerReady() {
+      function currentSearchKey() {
+        var typed = fieldValue('aiSearchKey');
+        if (typed) return typed;
         var p = searchProvider();
-        if (p === 'tavily') return !!fieldValue('aiTavilyKey');
-        if (p === 'custom') return !!fieldValue('aiCustomUrl');
-        return !!(aiBochaKey && aiBochaKey.value.trim());
+        if (searchKeyBag[p]) return searchKeyBag[p];
+        if (p === 'tavily') return fieldValue('aiTavilyKey');
+        if (p === 'custom') return fieldValue('aiCustomKey');
+        if (p === 'bocha' && aiBochaKey) return aiBochaKey.value.trim();
+        if (p === 'deepseek' && aiKey) return aiKey.value.trim();
+        return '';
+      }
+      function providerReady() {
+        if (searchProvider() === 'custom') return !!fieldValue('aiCustomUrl');
+        return !!currentSearchKey();
+      }
+      function clipText(s, n) {
+        s = String(s || '').trim();
+        return s.length > n ? s.slice(0, n) : s;
+      }
+      function isoDaysAgo(days) {
+        var d = new Date(Date.now() - days * 86400000);
+        function p(n) { return (n < 10 ? '0' : '') + n; }
+        return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
       }
       function searchCount() {
         var n = parseInt(fieldValue('aiSearchCount') || '5', 10);
@@ -107,7 +128,7 @@
         if (gear === 'medium') return '\n先想清楚再回答，不要把思考过程写给用户。\n';
         return '\n充分思考后再回答，不要把思考过程写给用户。\n';
       }
-      function defaultPromptTemplate() {
+      function legacyPromptTemplate() {
         return '你是 Motuo-Tab 的快捷方式管理助手。\n\n'
           + '## 当前卡片（共 {{card_count}} 个；下面已经给出每张卡片的名称和网址，不要声称看不到）\n'
           + '{{cards}}\n\n'
@@ -115,29 +136,229 @@
           + '{{search_rules}}\n'
           + '{{ops_contract}}\n';
       }
+      function oldCombinedPrompt(id) {
+        if (id === 'cards') {
+          return '你是 Motuo-Tab 的快捷方式管理员。Motuo-Tab 是浏览器新标签页，你只处理下面这些卡片。\n\n'
+            + '## 当前卡片（共 {{card_count}} 个）\n'
+            + '{{cards}}\n\n'
+            + '用户没有明确要求添加、修改、排序或删除卡片时，不要输出 <ops>。\n'
+            + '{{ops_contract}}\n';
+        }
+        if (id === 'qa') {
+          return '你负责回答 Motuo-Tab 怎么用。这是一个浏览器新标签页，作者是 Motuo（Motuo24，pod.xr24.cn），数据只在本机。\n\n'
+            + '能做的事：搜索（百度 / 必应 / 谷歌 / 自定义 %s 引擎）、搜索历史管理、联网联想开关、站内直达（{{site_direct}}）、快捷方式的增删改和拖拽、壁纸与主题、速记、导入导出。快捷键是 Ctrl+E、Ctrl+K、Ctrl+A、Esc。\n\n'
+            + '## 当前卡片（共 {{card_count}} 个）\n'
+            + '{{cards}}\n\n'
+            + '先回答问题。只有用户明确要求改快捷方式时，才在末尾输出 <ops>。你不能替用户改壁纸、主题或速记。\n'
+            + '{{search_rules}}\n'
+            + '{{ops_contract}}\n';
+        }
+        return '你是 Motuo-Tab 的页内助手。\n\n'
+          + '## 项目\n'
+          + 'Motuo-Tab 是 Motuo（Motuo24，说明站 pod.xr24.cn）做的浏览器新标签页。它替换新开的标签页，用来放快捷方式、搜索、壁纸和速记。数据只存在这台浏览器里，没有项目自己的服务器。\n\n'
+          + '## 页面现在有的能力\n'
+          + '- 搜索：百度、必应、谷歌，以及用户自己添加的引擎（地址模板用 %s 表示关键词）。搜索历史在菜单「通用配置」里可以逐条删、多选删或清空。输入联想先用本机历史，再向百度要联想词；菜单里的「联网搜索建议」关掉后，只留本机历史。\n'
+          + '- 站内直达：{{site_direct}}\n'
+          + '- 快捷方式：添加、改名、改网址、改颜色、排序、删除。右键可以新标签页打开、编辑、删除、复制链接或复制成 Markdown。Ctrl+K 进入编辑模式后可以拖动排序，拖进底部删除区即删除。图标可以自动抓取。\n'
+          + '- 外观：图片、视频、动图或纯色壁纸，模糊，卡片透明度，浅色 / 深色 / 自动主题。\n'
+          + '- 速记：右下角「速记」，输入后自动留在本机。\n'
+          + '- 备份：菜单「通用配置」导出或导入全部本机数据。\n'
+          + '- 快捷键：Ctrl+E 专注模式，Ctrl+K 编辑模式，Ctrl+A 打开本助手，Esc 关闭弹窗。Mac 上用 Command 代替 Ctrl。\n\n'
+          + '## 你的边界\n'
+          + '你只能用文末的 <ops> 修改快捷方式卡片。不要改壁纸、主题、速记、搜索引擎或搜索历史，也不要声称能看到其他标签页、浏览历史或密码。没有把握的网址先问，不要编。下面的卡片列表是当前页面的真实数据，不要说自己看不到。\n\n'
+          + '## 当前卡片（共 {{card_count}} 个）\n'
+          + '{{cards}}\n\n'
+          + '{{search_rules}}\n'
+          + '{{ops_contract}}\n';
+      }
+      function builtinSystemPresets() {
+        return [
+          {
+            id: 'general',
+            name: '通用助手',
+            builtin: true,
+            text: '你是 Motuo-Tab 的页内助手。\n\n'
+              + '## 项目\n'
+              + 'Motuo-Tab 是 Motuo（Motuo24，说明站 pod.xr24.cn）做的浏览器新标签页。它替换新开的标签页，用来放快捷方式、搜索、壁纸和速记。数据只存在这台浏览器里，没有项目自己的服务器。\n\n'
+              + '## 页面现在有的能力\n'
+              + '- 搜索：百度、必应、谷歌，以及用户自己添加的引擎（地址模板用 %s 表示关键词）。搜索历史在菜单「通用配置」里可以逐条删、多选删或清空。输入联想先用本机历史，再向百度要联想词；菜单里的「联网搜索建议」关掉后，只留本机历史。\n'
+              + '- 站内直达：搜索框输入「前缀 空格 关键词」。zh 知乎，gh GitHub，bl 和 b站 是哔哩哔哩，tb 淘宝，db 豆瓣。\n'
+              + '- 快捷方式：添加、改名、改网址、改颜色、排序、删除。右键可以新标签页打开、编辑、删除、复制链接或复制成 Markdown。Ctrl+K 进入编辑模式后可以拖动排序，拖进底部删除区即删除。图标可以自动抓取。\n'
+              + '- 外观：图片、视频、动图或纯色壁纸，模糊，卡片透明度，浅色 / 深色 / 自动主题。\n'
+              + '- 速记：右下角「速记」，输入后自动留在本机。\n'
+              + '- 备份：菜单「通用配置」导出或导入全部本机数据。\n'
+              + '- 快捷键：Ctrl+E 专注模式，Ctrl+K 编辑模式，Ctrl+A 打开本助手，Esc 关闭弹窗。Mac 上用 Command 代替 Ctrl。\n\n'
+              + '## 你的边界\n'
+              + '你只能用文末的 <ops> 修改快捷方式卡片。不要改壁纸、主题、速记、搜索引擎或搜索历史，也不要声称能看到其他标签页、浏览历史或密码。没有把握的网址先问，不要编。\n'
+              + '当前有哪些卡片，以用户消息前面的环境说明为准，不要说自己看不到。\n'
+          },
+          {
+            id: 'cards',
+            name: '只改卡片',
+            builtin: true,
+            text: '你是 Motuo-Tab 的快捷方式管理员。Motuo-Tab 是浏览器新标签页，你只处理快捷方式卡片。\n'
+              + '用户没有明确要求添加、修改、排序或删除卡片时，不要输出 <ops>。没有把握的网址先问，不要编。\n'
+          },
+          {
+            id: 'qa',
+            name: '页面问答',
+            builtin: true,
+            text: '你负责回答 Motuo-Tab 怎么用。这是一个浏览器新标签页，作者是 Motuo（Motuo24，pod.xr24.cn），数据只在本机。\n'
+              + '能做的事：搜索（百度 / 必应 / 谷歌 / 自定义 %s 引擎）、搜索历史管理、联网联想开关、站内直达、快捷方式的增删改和拖拽、壁纸与主题、速记、导入导出。快捷键是 Ctrl+E、Ctrl+K、Ctrl+A、Esc。\n'
+              + '先回答问题。只有用户明确要求改快捷方式时，才在末尾输出 <ops>。你不能替用户改壁纸、主题或速记。\n'
+          }
+        ];
+      }
+      function builtinContextPresets() {
+        return [
+          {
+            id: 'full',
+            name: '完整环境',
+            builtin: true,
+            text: '## 当前环境\n'
+              + '页面上现有 {{card_count}} 张快捷方式。下面是此刻的列表。\n'
+              + '{{cards}}\n\n'
+              + '## 站内直达\n{{site_direct}}\n\n'
+              + '{{search_rules}}\n'
+              + '{{ops_contract}}\n'
+          },
+          {
+            id: 'cards',
+            name: '仅卡片',
+            builtin: true,
+            text: '## 当前卡片（共 {{card_count}} 个）\n{{cards}}\n'
+          },
+          {
+            id: 'none',
+            name: '不附加',
+            builtin: true,
+            text: ''
+          }
+        ];
+      }
+      var systemPresetList = builtinSystemPresets();
+      var contextPresetList = builtinContextPresets();
+      var activeSystemPresetId = 'general';
+      var activeContextPresetId = 'full';
+      function defaultPromptTemplate() {
+        return builtinSystemPresets()[0].text;
+      }
+      function presetById(list, id) {
+        for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+        return list[0] || null;
+      }
+      function mergePresets(saved, builtins) {
+        var out = [];
+        builtins.forEach(function (b) {
+          var hit = null;
+          (saved || []).forEach(function (p) { if (p && p.id === b.id) hit = p; });
+          out.push({
+            id: b.id,
+            name: (hit && hit.name) || b.name,
+            text: hit && typeof hit.text === 'string' ? hit.text : b.text,
+            builtin: true
+          });
+        });
+        (saved || []).forEach(function (p) {
+          if (!p || !p.id || out.some(function (x) { return x.id === p.id; })) return;
+          out.push({ id: p.id, name: p.name || '未命名', text: p.text || '', builtin: false });
+        });
+        return out;
+      }
+      function classifyStoredPrompt(text) {
+        var t = String(text || '').trim();
+        if (!t || t === legacyPromptTemplate().trim() || t === oldCombinedPrompt('general').trim()) {
+          return { systemId: 'general', contextId: 'full' };
+        }
+        if (t === oldCombinedPrompt('cards').trim()) return { systemId: 'cards', contextId: 'cards' };
+        if (t === oldCombinedPrompt('qa').trim()) return { systemId: 'qa', contextId: 'full' };
+        return {
+          custom: t,
+          contextId: /\{\{(cards|ops_contract|search_rules|site_direct|card_names|card_count|last_query)\}\}/.test(t) ? 'none' : 'full'
+        };
+      }
+      function layerState(kind) {
+        if (kind === 'context') {
+          return {
+            list: function () { return contextPresetList; },
+            getId: function () { return activeContextPresetId; },
+            setId: function (v) { activeContextPresetId = v; },
+            select: 'aiContextPreset',
+            name: 'aiContextPresetName',
+            del: 'aiContextPresetDel',
+            box: 'aiContextPrompt'
+          };
+        }
+        return {
+          list: function () { return systemPresetList; },
+          getId: function () { return activeSystemPresetId; },
+          setId: function (v) { activeSystemPresetId = v; },
+          select: 'aiPromptPreset',
+          name: 'aiSystemPresetName',
+          del: 'aiSystemPresetDel',
+          box: 'aiSystemPrompt'
+        };
+      }
+      function commitLayer(kind) {
+        var s = layerState(kind);
+        var cur = presetById(s.list(), s.getId());
+        if (!cur) return;
+        var box = document.getElementById(s.box);
+        var name = document.getElementById(s.name);
+        if (box) cur.text = box.value;
+        if (name && name.value.trim()) cur.name = name.value.trim();
+      }
+      function renderLayer(kind) {
+        var s = layerState(kind);
+        var list = s.list();
+        var sel = document.getElementById(s.select);
+        if (sel) {
+          var prev = s.getId();
+          sel.innerHTML = '';
+          list.forEach(function (p) {
+            var opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name || '未命名';
+            if (p.id === prev) opt.selected = true;
+            sel.appendChild(opt);
+          });
+          if (!presetById(list, prev) && list[0]) s.setId(list[0].id);
+        }
+        var cur = presetById(list, s.getId());
+        var box = document.getElementById(s.box);
+        var name = document.getElementById(s.name);
+        if (box && cur && document.activeElement !== box) box.value = cur.text;
+        if (name && cur && document.activeElement !== name) name.value = cur.name || '';
+        var del = document.getElementById(s.del);
+        if (del) del.style.display = !cur || cur.builtin ? 'none' : '';
+      }
+      function commitPromptLayers() {
+        commitLayer('system');
+        commitLayer('context');
+      }
       function fillPrompt(template) {
         var names = cards.list.map(function (x) { return x.name; }).join('、') || '（暂无卡片）';
         return String(template || '')
           .replace(/\{\{cards\}\}/g, cardLinesText())
           .replace(/\{\{card_names\}\}/g, names)
           .replace(/\{\{card_count\}\}/g, String(cards.list.length))
-          .replace(/\{\{site_direct\}\}/g, 'zh 知乎、gh GitHub、bl B站、tb 淘宝、db 豆瓣。搜索框输入「前缀 空格 关键词」。')
+          .replace(/\{\{site_direct\}\}/g, '搜索框输入「前缀 空格 关键词」会打开对应网站的站内搜索。zh 知乎，gh GitHub，bl 和 b站 都是哔哩哔哩，tb 淘宝，db 豆瓣。开关在菜单「站内搜索直达」。')
           .replace(/\{\{search_rules\}\}/g, searchRulesText())
           .replace(/\{\{ops_contract\}\}/g, opsContractText())
           .replace(/\{\{last_query\}\}/g, lastSearchQuery || '（还没有）');
       }
       function buildSystemPrompt() {
-        var custom = document.getElementById('aiSystemPrompt');
-        var tpl = custom && custom.value.trim() ? custom.value : defaultPromptTemplate();
+        var box = document.getElementById('aiSystemPrompt');
+        var cur = presetById(systemPresetList, activeSystemPresetId);
+        var tpl = box && box.value.trim() ? box.value : (cur && cur.text) || defaultPromptTemplate();
         return fillPrompt(tpl) + thinkingHint();
       }
-      function updatePromptState() {
-        var box = document.getElementById('aiSystemPrompt');
-        var label = document.getElementById('aiPromptState');
-        if (!box || !label) return;
-        var cur = box.value.trim();
-        var isDefault = !cur || cur === defaultPromptTemplate().trim();
-        label.textContent = isDefault ? '当前使用内置默认提示词' : '当前使用已修改的提示词';
+      function buildContextPrefix() {
+        var box = document.getElementById('aiContextPrompt');
+        var cur = presetById(contextPresetList, activeContextPresetId);
+        var tpl = box ? box.value : (cur && cur.text) || '';
+        if (!String(tpl).trim()) return '';
+        return fillPrompt(tpl).trim();
       }
       function buildChatUrl(endpoint) {
         var raw = String(endpoint || '').trim();
@@ -269,6 +490,14 @@
           if (m.tool_calls && (copy.content === null || copy.content === undefined || copy.content === '')) continue;
           out.push(copy);
         }
+        var prefix = buildContextPrefix();
+        if (prefix) {
+          for (var n = out.length - 1; n >= 0; n--) {
+            if (out[n].role !== 'user' || typeof out[n].content !== 'string') continue;
+            if (out[n].content.indexOf(prefix) !== 0) out[n].content = prefix + '\n\n' + out[n].content;
+            break;
+          }
+        }
         return out;
       }
 
@@ -298,7 +527,7 @@
         var m = aiModel.value.trim();
         aiModelBadge.textContent = m;
         aiModelBadge.style.display = m ? '' : 'none';
-        aiModelBadge.title = m ? '当前模型：' + m : '';
+        aiModelBadge.title = m ? ('当前模型：' + m) : '';
       }
 
       function setIf(id, value) {
@@ -335,20 +564,150 @@
           sel.appendChild(opt);
         });
       }
+      function searchCatalog() {
+        return {
+          deepseek: {
+            auth: 'Authorization: Bearer，与 DeepSeek 对话用的是同一把密钥。搜索密钥留空时，用模型页里的密钥。',
+            bill: 'Search API 成功且 results 非空才计费，1000 次 0.75 美元。空结果、失败、超时不计。条数不影响单价。',
+            time: '没有单独的时间参数。选择时间范围时，会在查询词后加上官方支持的 after:YYYY-MM-DD。',
+            shape: 'POST https://api.deepseek.com/v1/tools/search，读 results[] 的 title、url、snippet、summary。同一密钥还能调 /v1/tools/fetch 抓单页，本页搜索只用 Search。'
+          },
+          zhipu: {
+            auth: 'Authorization: Bearer，密钥在 open.bigmodel.cn 创建。',
+            bill: '按次。search_std 0.01 元，search_pro 0.03 元，search_pro_sogou 与 search_pro_quark 各 0.05 元。',
+            time: 'search_recency_filter：oneDay / oneWeek / oneMonth / oneYear / noLimit。本页的一天、一周、一月对应前三个。',
+            shape: 'POST https://open.bigmodel.cn/api/paas/v4/web_search。查询字段是 search_query（最长 70 字）。返回 search_result[] 的 title、link、content，不是 results。'
+          },
+          kimi: {
+            auth: 'Authorization: Bearer。官方地址是 api.moonshot.ai。',
+            bill: '成功且 search_results 非空才计费。基础版 POST /v1/tools/search 为 0.002 美元/次；Pro 为 POST /v1/tools/search_pro，0.003 美元/次。失败或空结果不计。',
+            time: '只有 Pro 接受 time_window（start、end，YYYY-MM-DD）。基础版没有时间参数，选了时间范围也不会传。',
+            shape: '返回 search_results[] 的 title、url、snippet。Pro 另有按相关度排好的 chunks。'
+          },
+          bailian: {
+            auth: 'Authorization: Bearer，用百炼 API Key（sk- 开头）。Token Plan 专属的 sk-sp- 密钥不能调用这个 MCP。',
+            bill: '这是 Token Plan 的 Harness 工具「联网搜索增强版」。Standard 每月 100 次、Pro 每月 500 次免费，超出部分按目录价 88 折。帮助页没有写明目录单价，以控制台「查看明细」为准。广场上另一个「联网搜索 MCP」是 2000 次免费后 29 元/千次，不是这一项。',
+            time: '先读取工具自己的参数说明，只有里面真有时间字段才传。',
+            shape: 'POST https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp，HTTP Streamable MCP。优先调用名为 search_pro 的工具，再从返回文本里取标题和链接。'
+          },
+          doubao: {
+            auth: 'Authorization: Bearer。密钥在火山引擎联网搜索控制台按量后付费里创建，和订阅套餐的密钥不通用。',
+            bill: 'Global 版文搜按量 0.020 元/次，按日结算。每个火山账号每月 500 次免费额度，与 Custom 版共用。',
+            time: 'Global 版文搜的 Filter 只有 IcpHostOnly，没有时间范围参数。上面的时间范围对它无效。',
+            shape: 'POST https://open.feedcoopapi.com/search_api/global_search，正文是 Query、SearchType=web、DocCount。结果在 Result.Documents[] 的 Title、Url、Snippet[].Text。'
+          },
+          qianfan: {
+            auth: 'Authorization: Bearer，用千帆 API Key。',
+            bill: '本页固定请求标准版（edition=standard）。每月 1500 次免费，按天发放，优先抵扣；国内内容标准版超出后 0.036 元/次。增强版、旗舰版价格不同，这里不调用。',
+            time: 'search_recency_filter 只有 week / month / semiyear / year。没有「一天」，选一天时按最近 7 天（week）查询。',
+            shape: 'POST https://qianfan.baidubce.com/v2/ai_search/web_search。查询放在 messages 最后一条 content 里，最长约 72 个字符宽度（一个汉字算两个）。返回 references[] 的 title、url、snippet。'
+          },
+          bocha: {
+            auth: 'Authorization: Bearer。密钥在 open.bochaai.com 创建。',
+            bill: '按次计费。官网「产品价格」在飞书文档里，这次核对时页面要登录，没有写死单价。',
+            time: 'freshness：noLimit、oneDay、oneWeek、oneMonth、oneYear。官网示例使用 oneYear；一天 / 一周 / 一月对应该字段的 oneDay / oneWeek / oneMonth。',
+            shape: 'POST https://api.bochaai.com/v1/web-search，字段 query、freshness、summary、count。结果在 data.webPages.value[] 的 name、url、snippet 或 summary。'
+          },
+          you: {
+            auth: '请求头是 X-API-Key，不是 Authorization。',
+            bill: 'Web Search 标准接口 5 美元 / 1000 次。一次请求不论返回多少条都算一次。新账号有免费额度，以 you.com/pricing 为准。',
+            time: 'freshness：day、week、month、year，或 YYYY-MM-DDtoYYYY-MM-DD。本页的一天 / 一周 / 一月对应前三个。',
+            shape: 'POST https://ydc-index.io/v1/search，字段 query、count、freshness。结果读 results 或 results.web 里的 title、url、snippets。'
+          },
+          tencent: {
+            auth: 'Authorization: Bearer，用元宝搜索（WSA）的 API Key。',
+            bill: '按开通的版本按次计费。官方 MCP 页不写单价，免费额度以控制台活动专区为准。这次没能打开 cloud.tencent.com 计费页，所以不写死每千次价格。',
+            time: 'SearchPro 的 Freshness：d1–d30、m1–m12、y1–y5。一天传 d1，一周传 d7，一月传 m1。',
+            shape: 'POST https://api.wsa.cloud.tencent.com/Mcp，MCP 工具 SearchPro。入参 Query、Freshness、Cnt（只允许 10/20/30/40/50，不足 10 条会请求 10 条再截取）。网页结果在 Pages 里，每条是含 title、url、passage 的 JSON 字符串。'
+          },
+          tavily: {
+            auth: '密钥放在 JSON 的 api_key 字段，不走 Authorization 头。',
+            bill: '按 Tavily 账户额度计费。这次打开的接口文档没有单列单价，以 tavily.com 账户为准。',
+            time: 'time_range：day、week、month，与本页三个范围一致。',
+            shape: 'POST https://api.tavily.com/search。返回 results[] 的 title、url、content。'
+          },
+          custom: {
+            auth: '可选 Authorization: Bearer。',
+            bill: '费用由你填写的接口决定。',
+            time: '请求体带 freshness：noLimit、day、week、month。对端是否识别取决于该接口。',
+            shape: 'POST 到填写的地址，字段 query、count、freshness。能识别 data.webPages.value、results 或 data 数组。'
+          }
+        };
+      }
+      function commitSearchKeyFromDom() {
+        var activeId = document.activeElement && document.activeElement.id;
+        if (activeId === 'aiBochaKey' && aiBochaKey) {
+          searchKeyBag.bocha = aiBochaKey.value.trim();
+          if (shownProvider === 'bocha') setIf('aiSearchKey', searchKeyBag.bocha);
+        } else if (activeId === 'aiTavilyKey') {
+          searchKeyBag.tavily = fieldValue('aiTavilyKey');
+          if (shownProvider === 'tavily') setIf('aiSearchKey', searchKeyBag.tavily);
+        } else if (activeId === 'aiCustomKey') {
+          searchKeyBag.custom = fieldValue('aiCustomKey');
+          if (shownProvider === 'custom') setIf('aiSearchKey', searchKeyBag.custom);
+        } else if (activeId === 'aiSearchKey') {
+          searchKeyBag[shownProvider] = fieldValue('aiSearchKey');
+        } else if (fieldValue('aiSearchKey')) {
+          searchKeyBag[shownProvider] = fieldValue('aiSearchKey');
+        }
+        if (activeId !== 'aiSearchKey' && aiBochaKey && aiBochaKey.value.trim() && !searchKeyBag.bocha) {
+          searchKeyBag.bocha = aiBochaKey.value.trim();
+        }
+        if (activeId !== 'aiSearchKey' && fieldValue('aiTavilyKey') && !searchKeyBag.tavily) {
+          searchKeyBag.tavily = fieldValue('aiTavilyKey');
+        }
+        if (shownProvider === 'bocha' && aiBochaKey && activeId !== 'aiBochaKey') aiBochaKey.value = searchKeyBag.bocha || '';
+        if (shownProvider === 'tavily' && activeId !== 'aiTavilyKey') setIf('aiTavilyKey', searchKeyBag.tavily || '');
+        if (shownProvider === 'custom' && activeId !== 'aiCustomKey') setIf('aiCustomKey', searchKeyBag.custom || '');
+      }
+      function renderSearchMeta() {
+        var box = document.getElementById('aiSearchMeta');
+        var info = searchCatalog()[searchProvider()] || searchCatalog().bocha;
+        if (!box || !info) return;
+        box.innerHTML = '<b>鉴权</b> ' + info.auth
+          + '<br><b>计费</b> ' + info.bill
+          + '<br><b>时间过滤</b> ' + info.time
+          + '<br><b>返回</b> ' + info.shape;
+      }
       function syncProviderFields() {
         var p = searchProvider();
         var show = function (id, on) {
           var el = document.getElementById(id);
           if (el) el.style.display = on ? '' : 'none';
         };
-        show('bochaKeyField', p === 'bocha');
-        show('tavilyKeyField', p === 'tavily');
+        show('bochaKeyField', false);
+        show('tavilyKeyField', false);
+        show('aiSearchKeyField', p !== 'custom');
+        show('zhipuEngineField', p === 'zhipu');
+        show('kimiTierField', p === 'kimi');
         show('customUrlField', p === 'custom');
         show('customKeyField', p === 'custom');
+        var keyLabel = document.getElementById('aiSearchKeyLabel');
+        if (keyLabel) {
+          keyLabel.textContent = p === 'you' ? 'You.com API Key（X-API-Key）' : '搜索密钥';
+        }
+        renderSearchMeta();
+      }
+      function shouldShowProfiles() {
+        if (aiProfiles.length > 1) return true;
+        if (fieldValue('aiEndpoint') || fieldValue('aiKey') || fieldValue('aiModel')) return true;
+        for (var i = 0; i < aiProfiles.length; i++) {
+          var p = aiProfiles[i];
+          if (p && (String(p.endpoint || '').trim() || String(p.key || '').trim() || String(p.model || '').trim())) return true;
+        }
+        return false;
+      }
+      function syncProfileRow() {
+        var row = document.getElementById('aiProfileRow');
+        if (row) row.style.display = shouldShowProfiles() ? '' : 'none';
+        var del = document.getElementById('aiProfileDel');
+        if (del) del.style.display = aiProfiles.length > 1 ? '' : 'none';
       }
       function saveAIConfig() {
         updateModelBadge();
-        if (!aiProfiles.length) aiProfiles = [blankProfile('默认')];
+        commitPromptLayers();
+        commitSearchKeyFromDom();
+        if (!aiProfiles.length) aiProfiles = [blankProfile('通用配置')];
         if (!activeProfile) activeProfile = aiProfiles[0];
         readProfileFromForm(activeProfile);
         var gear = thinkingGear() === 'off'
@@ -367,32 +726,45 @@
           endpoint: aiEndpoint.value.trim(),
           key: aiKey.value.trim(),
           model: aiModel.value.trim(),
-          bochaKey: aiBochaKey ? aiBochaKey.value.trim() : '',
+          bochaKey: searchKeyBag.bocha || (aiBochaKey ? aiBochaKey.value.trim() : ''),
           search: {
             provider: searchProvider(),
             count: searchCount(),
             summary: !(document.getElementById('aiSearchSummary') && document.getElementById('aiSearchSummary').checked === false),
             freshness: searchFreshness(),
-            bochaKey: aiBochaKey ? aiBochaKey.value.trim() : '',
-            tavilyKey: fieldValue('aiTavilyKey'),
+            bochaKey: searchKeyBag.bocha || (aiBochaKey ? aiBochaKey.value.trim() : ''),
+            tavilyKey: searchKeyBag.tavily || fieldValue('aiTavilyKey'),
             customUrl: fieldValue('aiCustomUrl'),
-            customKey: fieldValue('aiCustomKey')
+            customKey: searchKeyBag.custom || fieldValue('aiCustomKey'),
+            keys: searchKeyBag,
+            zhipuEngine: fieldValue('aiZhipuEngine') || 'search_pro',
+            kimiTier: fieldValue('aiKimiTier') || 'pro'
           },
-          systemPrompt: fieldValue('aiSystemPrompt')
+          systemPrompt: fieldValue('aiSystemPrompt'),
+          contextPrompt: fieldValue('aiContextPrompt'),
+          systemPresets: systemPresetList,
+          activeSystemPresetId: activeSystemPresetId,
+          contextPresets: contextPresetList,
+          activeContextPresetId: activeContextPresetId
         };
         try { localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(data)); } catch (e) {}
         renderProfileSelect();
         syncProviderFields();
+        syncProfileRow();
       }
 
       (function loadAIConfig() {
         var cfg = null;
+        var migrated = false;
         try { cfg = JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || 'null'); } catch (e) { cfg = null; }
         if (cfg && Array.isArray(cfg.profiles) && cfg.profiles.length) {
           aiProfiles = cfg.profiles;
           activeProfile = aiProfiles.filter(function (p) { return p.id === cfg.activeProfileId; })[0] || aiProfiles[0];
+          aiProfiles.forEach(function (p) {
+            if (p && p.name === '默认') { p.name = '通用配置'; migrated = true; }
+          });
         } else {
-          var p0 = blankProfile('默认');
+          var p0 = blankProfile('通用配置');
           if (cfg) {
             p0.endpoint = cfg.endpoint || '';
             p0.key = cfg.key || '';
@@ -414,31 +786,78 @@
           var sendT = document.getElementById('aiSendTemperature');
           if (sendT && cfg.sendTemperature === false) sendT.checked = false;
           var search = cfg.search || {};
+          searchKeyBag = (search.keys && typeof search.keys === 'object') ? search.keys : {};
+          if (!searchKeyBag.bocha && bKey) searchKeyBag.bocha = bKey;
+          if (!searchKeyBag.tavily && search.tavilyKey) searchKeyBag.tavily = search.tavilyKey;
+          if (!searchKeyBag.custom && search.customKey) searchKeyBag.custom = search.customKey;
           setIf('aiSearchProvider', search.provider || 'bocha');
-          setIf('aiTavilyKey', search.tavilyKey || '');
+          shownProvider = search.provider || 'bocha';
+          setIf('aiSearchKey', searchKeyBag[shownProvider] || '');
+          setIf('aiTavilyKey', search.tavilyKey || searchKeyBag.tavily || '');
           setIf('aiCustomUrl', search.customUrl || '');
-          setIf('aiCustomKey', search.customKey || '');
+          setIf('aiCustomKey', search.customKey || searchKeyBag.custom || '');
+          setIf('aiZhipuEngine', search.zhipuEngine || 'search_pro');
+          setIf('aiKimiTier', search.kimiTier || 'pro');
           setIf('aiSearchCount', search.count || 5);
           setIf('aiSearchFreshness', search.freshness || 'noLimit');
           var sum = document.getElementById('aiSearchSummary');
           if (sum && search.summary === false) sum.checked = false;
-          setIf('aiSystemPrompt', cfg.systemPrompt || defaultPromptTemplate());
+          if (Array.isArray(cfg.systemPresets) && cfg.systemPresets.length) {
+            systemPresetList = mergePresets(cfg.systemPresets, builtinSystemPresets());
+            activeSystemPresetId = cfg.activeSystemPresetId || 'general';
+          }
+          if (Array.isArray(cfg.contextPresets) && cfg.contextPresets.length) {
+            contextPresetList = mergePresets(cfg.contextPresets, builtinContextPresets());
+            activeContextPresetId = cfg.activeContextPresetId || 'full';
+          }
+          if (!cfg.systemPresets) {
+            var classified = classifyStoredPrompt(cfg.systemPrompt);
+            if (classified.custom) {
+              var customId = 's' + Date.now().toString(36);
+              systemPresetList.push({ id: customId, name: '已保存的提示词', text: classified.custom, builtin: false });
+              activeSystemPresetId = customId;
+              activeContextPresetId = classified.contextId;
+              migrated = true;
+            } else if (cfg.systemPrompt) {
+              activeSystemPresetId = classified.systemId;
+              activeContextPresetId = classified.contextId;
+              migrated = true;
+            }
+          }
         }
+        if (!presetById(systemPresetList, activeSystemPresetId)) activeSystemPresetId = 'general';
+        if (!presetById(contextPresetList, activeContextPresetId)) activeContextPresetId = 'full';
+        renderLayer('system');
+        renderLayer('context');
         updateModelBadge();
         syncProviderFields();
-        var promptBox = document.getElementById('aiSystemPrompt');
-        if (promptBox && !promptBox.value.trim()) promptBox.value = defaultPromptTemplate();
-        updatePromptState();
+        syncProfileRow();
+        if (migrated) saveAIConfig();
       })();
 
-      ['aiEndpoint', 'aiKey', 'aiModel', 'aiBochaKey', 'aiTavilyKey', 'aiCustomUrl', 'aiCustomKey', 'aiTemperature', 'aiMaxTokens', 'aiSearchCount', 'aiSystemPrompt', 'aiProfileName'].forEach(function (id) {
+      ['aiEndpoint', 'aiKey', 'aiModel', 'aiBochaKey', 'aiTavilyKey', 'aiCustomUrl', 'aiCustomKey', 'aiSearchKey', 'aiTemperature', 'aiMaxTokens', 'aiSearchCount', 'aiSystemPrompt', 'aiProfileName'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.addEventListener('change', saveAIConfig);
       });
-      ['aiThinkingGear', 'aiSearchProvider', 'aiSearchFreshness'].forEach(function (id) {
+      ['aiThinkingGear', 'aiSearchFreshness', 'aiZhipuEngine', 'aiKimiTier'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.addEventListener('change', saveAIConfig);
       });
+      var searchProviderSel = document.getElementById('aiSearchProvider');
+      if (searchProviderSel) {
+        searchProviderSel.addEventListener('change', function () {
+          var next = searchProvider();
+          if (next !== shownProvider) {
+            searchKeyBag[shownProvider] = fieldValue('aiSearchKey');
+            if (shownProvider === 'bocha' && aiBochaKey) aiBochaKey.value = searchKeyBag.bocha || '';
+            if (shownProvider === 'tavily') setIf('aiTavilyKey', searchKeyBag.tavily || '');
+            if (shownProvider === 'custom') setIf('aiCustomKey', searchKeyBag.custom || '');
+            shownProvider = next;
+            setIf('aiSearchKey', searchKeyBag[next] || '');
+          }
+          saveAIConfig();
+        });
+      }
       ['aiSendTemperature', 'aiSearchSummary'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.addEventListener('change', saveAIConfig);
@@ -487,7 +906,7 @@
           var status = document.getElementById('aiTestStatus');
           var endpoint = aiEndpoint.value.trim();
           var key = aiKey.value.trim();
-          var model = aiModel.value.trim() || 'deepseek-chat';
+          var model = aiModel.value.trim() || 'deepseek-flash';
           if (!endpoint || !key) { if (status) status.textContent = '请先填写地址和密钥'; return; }
           if (status) status.textContent = '正在连接…';
           var testBody = { model: model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false };
@@ -503,23 +922,58 @@
           });
         });
       }
-      var promptReset = document.getElementById('aiPromptReset');
-      if (promptReset) {
-        promptReset.addEventListener('click', function () {
-          var box = document.getElementById('aiSystemPrompt');
-          if (box) box.value = defaultPromptTemplate();
-          updatePromptState();
-          saveAIConfig();
-          showAIToast('已恢复内置提示词');
-        });
+      function bindPromptLayer(kind, addId) {
+        var s = layerState(kind);
+        var sel = document.getElementById(s.select);
+        if (sel) {
+          sel.addEventListener('change', function () {
+            commitLayer(kind);
+            s.setId(sel.value);
+            renderLayer(kind);
+            saveAIConfig();
+          });
+        }
+        var box = document.getElementById(s.box);
+        if (box) box.addEventListener('input', saveAIConfig);
+        var name = document.getElementById(s.name);
+        if (name) name.addEventListener('change', saveAIConfig);
+        var addBtn = document.getElementById(addId);
+        if (addBtn) {
+          addBtn.addEventListener('click', function () {
+            commitLayer(kind);
+            var list = s.list();
+            var created = {
+              id: (kind === 'context' ? 'c' : 's') + Date.now().toString(36),
+              name: (kind === 'context' ? '环境预设 ' : '系统预设 ') + (list.length + 1),
+              text: (presetById(list, s.getId()) || {}).text || '',
+              builtin: false
+            };
+            list.push(created);
+            s.setId(created.id);
+            renderLayer(kind);
+            saveAIConfig();
+          });
+        }
+        var delBtn = document.getElementById(s.del);
+        if (delBtn) {
+          delBtn.addEventListener('click', function () {
+            var cur = presetById(s.list(), s.getId());
+            if (!cur || cur.builtin) return;
+            var next = s.list().filter(function (p) { return p.id !== cur.id; });
+            if (kind === 'context') contextPresetList = next;
+            else systemPresetList = next;
+            s.setId((next[0] && next[0].id) || (kind === 'context' ? 'full' : 'general'));
+            renderLayer(kind);
+            saveAIConfig();
+          });
+        }
       }
-      var promptBoxLive = document.getElementById('aiSystemPrompt');
-      if (promptBoxLive) {
-        promptBoxLive.addEventListener('input', function () {
-          updatePromptState();
-          saveAIConfig();
-        });
-      }
+      bindPromptLayer('system', 'aiSystemPresetAdd');
+      bindPromptLayer('context', 'aiContextPresetAdd');
+      ['aiEndpoint', 'aiKey', 'aiModel'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('input', syncProfileRow);
+      });
       var configNav = document.querySelector('.ai-config-nav');
       if (configNav) {
         configNav.addEventListener('click', function (e) {
@@ -539,7 +993,7 @@
         varRow.addEventListener('click', function (e) {
           var btn = e.target.closest ? e.target.closest('.ai-var-btn') : null;
           if (!btn) return;
-          var box = document.getElementById('aiSystemPrompt');
+          var box = document.getElementById('aiContextPrompt');
           if (!box) return;
           var token = btn.getAttribute('data-var') || '';
           var start = box.selectionStart || 0;
@@ -1565,7 +2019,7 @@
 
         var endpoint = aiEndpoint.value.trim();
         var key = aiKey.value.trim();
-        var model = aiModel.value.trim() || 'deepseek-chat';
+        var model = aiModel.value.trim() || 'deepseek-flash';
 
         if (!endpoint || !key) {
           addAIMessage('请先点击右上角 ⚙ 打开配置窗口，填写 API 地址和密钥。', 'error');
@@ -1738,7 +2192,7 @@
           return '【联网搜索失败】\n'
             + '原因：' + detail + '\n'
             + '请用中文把上述原因告诉用户，不要只说「调用失败」或「无法核实」。'
-            + '不要编造网址或搜索结果。如果原因和密钥、余额或额度有关，请提醒用户打开 AI 配置窗口检查博查密钥。';
+            + '不要编造网址或搜索结果。如果原因和密钥、余额或额度有关，请提醒用户打开 AI 配置窗口，检查当前搜索提供商的密钥和余额。';
         }
         function escapeSearchHtml(s) {
           return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1749,7 +2203,7 @@
           return fetch('https://api.bochaai.com/v1/web-search', {
             method: 'POST',
             headers: {
-              'Authorization': 'Bearer ' + aiBochaKey.value.trim(),
+              'Authorization': 'Bearer ' + currentSearchKey(),
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
@@ -1797,14 +2251,32 @@
           });
         }
 
+        function normalizeSearchItem(p) {
+          p = p || {};
+          var snippet = p.summary || p.snippet || p.content || p.text || p.description || p.passage || p.Text || '';
+          if (!snippet && Array.isArray(p.snippets)) snippet = p.snippets.join('\n');
+          if (!snippet && Array.isArray(p.chunks)) {
+            snippet = p.chunks.map(function (c) { return (c && (c.text || c.Text || c.content)) || ''; }).filter(Boolean).join('\n');
+          }
+          if (!snippet && Array.isArray(p.Snippet)) {
+            snippet = p.Snippet.map(function (c) { return (c && (c.Text || c.text)) || ''; }).filter(Boolean).join('\n');
+          }
+          snippet = String(snippet);
+          if (snippet.length > 700) snippet = snippet.slice(0, 700);
+          return {
+            title: p.title || p.name || p.Title || '',
+            url: p.url || p.link || p.Url || '',
+            snippet: snippet
+          };
+        }
         function searchItemsToContext(items) {
           var searchContext = '';
-          var list = (items || []).slice(0, searchCount());
+          var list = (items || []).slice(0, searchCount()).map(normalizeSearchItem);
           for (var i = 0; i < list.length; i++) {
             var p = list[i];
-            searchContext += '【' + (i + 1) + '】' + (p.name || p.title || '') + '\n';
-            searchContext += '链接：' + (p.url || p.link || '') + '\n';
-            searchContext += (p.snippet || p.summary || p.content || '') + '\n\n';
+            searchContext += '【' + (i + 1) + '】' + p.title + '\n';
+            searchContext += '链接：' + p.url + '\n';
+            searchContext += p.snippet + '\n\n';
           }
           return { searchContext: searchContext, resultCount: list.length, failed: false };
         }
@@ -1833,7 +2305,7 @@
         function fetchTavily(query) {
           var fresh = searchFreshness();
           var body = {
-            api_key: fieldValue('aiTavilyKey'),
+            api_key: currentSearchKey(),
             query: query,
             max_results: searchCount(),
             include_answer: false,
@@ -1846,7 +2318,7 @@
         }
         function fetchCustomSearch(query) {
           var headers = { 'Content-Type': 'application/json' };
-          var customKey = fieldValue('aiCustomKey');
+          var customKey = currentSearchKey();
           if (customKey) headers.Authorization = 'Bearer ' + customKey;
           return fetchSearchPost(fieldValue('aiCustomUrl'), headers, {
             query: query,
@@ -1861,8 +2333,321 @@
             return [];
           });
         }
+        function fetchDeepSeekSearch(query) {
+          var fresh = searchFreshness();
+          var q = clipText(query, fresh === 'noLimit' ? 128 : 110);
+          if (fresh === 'day') q += ' after:' + isoDaysAgo(1);
+          else if (fresh === 'week') q += ' after:' + isoDaysAgo(7);
+          else if (fresh === 'month') q += ' after:' + isoDaysAgo(30);
+          return fetchSearchPost('https://api.deepseek.com/v1/tools/search', {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + currentSearchKey()
+          }, { query: q, count: searchCount(), need_content: false }, function (data) {
+            return (data && data.results) || [];
+          });
+        }
+        function fetchZhipu(query) {
+          var engine = fieldValue('aiZhipuEngine') || 'search_pro';
+          var fresh = searchFreshness();
+          var body = {
+            search_query: clipText(query, 70),
+            search_engine: engine,
+            search_intent: false,
+            search_recency_filter: fresh === 'day' ? 'oneDay' : fresh === 'week' ? 'oneWeek' : fresh === 'month' ? 'oneMonth' : 'noLimit'
+          };
+          if (engine !== 'search_pro_quark') body.count = searchCount();
+          return fetchSearchPost('https://open.bigmodel.cn/api/paas/v4/web_search', {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + currentSearchKey()
+          }, body, function (data) {
+            return (data && (data.search_result || data.search_results)) || [];
+          });
+        }
+        function fetchKimi(query) {
+          var tier = fieldValue('aiKimiTier') || 'pro';
+          var fresh = searchFreshness();
+          var path = tier === 'basic' ? '/v1/tools/search' : '/v1/tools/search_pro';
+          var body = { text_query: query, limit: searchCount() };
+          if (tier === 'basic') {
+            var sum = document.getElementById('aiSearchSummary');
+            body.include_content = !(sum && sum.checked === false);
+          } else if (fresh === 'day' || fresh === 'week' || fresh === 'month') {
+            var days = fresh === 'day' ? 1 : fresh === 'week' ? 7 : 30;
+            body.time_window = { start: isoDaysAgo(days), end: isoDaysAgo(0) };
+          }
+          return fetchSearchPost('https://api.moonshot.ai' + path, {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + currentSearchKey()
+          }, body, function (data) {
+            return (data && data.search_results) || [];
+          });
+        }
+        function qianfanQuery(query) {
+          var s = String(query || '');
+          var n = 0;
+          var out = '';
+          for (var i = 0; i < s.length; i++) {
+            var add = s.charCodeAt(i) > 255 ? 2 : 1;
+            if (n + add > 72) break;
+            n += add;
+            out += s.charAt(i);
+          }
+          return out || clipText(s, 36);
+        }
+        function fetchQianfan(query) {
+          var fresh = searchFreshness();
+          var body = {
+            messages: [{ role: 'user', content: qianfanQuery(query) }],
+            search_source: 'baidu_search_v2',
+            edition: 'standard',
+            resource_type_filter: [{ type: 'web', top_k: searchCount() }]
+          };
+          if (fresh === 'day' || fresh === 'week') body.search_recency_filter = 'week';
+          else if (fresh === 'month') body.search_recency_filter = 'month';
+          return fetchSearchPost('https://qianfan.baidubce.com/v2/ai_search/web_search', {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + currentSearchKey()
+          }, body, function (data) {
+            return (data && data.references) || [];
+          });
+        }
+        function fetchDoubao(query) {
+          return fetchSearchPost('https://open.feedcoopapi.com/search_api/global_search', {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + currentSearchKey()
+          }, {
+            SearchType: 'web',
+            Query: clipText(query, 100),
+            DocCount: searchCount(),
+            MaxSnippetLength: 500
+          }, function (data) {
+            if (data && data.ResponseMetadata && data.ResponseMetadata.Error) {
+              var metaErr = new Error('搜索API ' + (data.ResponseMetadata.Error.Message || data.ResponseMetadata.Error.Code || '调用失败'));
+              metaErr.body = JSON.stringify(data.ResponseMetadata.Error).slice(0, 500);
+              throw metaErr;
+            }
+            if (data && data.Result && data.Result.ErrorCode) {
+              var err = new Error('搜索API ' + data.Result.ErrorCode + ' ' + (data.Result.ErrorMsg || ''));
+              err.body = data.Result.ErrorMsg || '';
+              throw err;
+            }
+            return (data && data.Result && data.Result.Documents) || [];
+          });
+        }
+        function fetchYou(query) {
+          var body = { query: query, count: searchCount() };
+          var fresh = searchFreshness();
+          if (fresh === 'day' || fresh === 'week' || fresh === 'month') body.freshness = fresh;
+          return fetchSearchPost('https://ydc-index.io/v1/search', {
+            'Content-Type': 'application/json',
+            'X-API-Key': currentSearchKey()
+          }, body, function (data) {
+            if (data && data.results && Array.isArray(data.results.web)) return data.results.web;
+            if (data && Array.isArray(data.results)) return data.results;
+            return [];
+          });
+        }
+        function parseMcpPayload(text) {
+          var raw = String(text || '').trim();
+          if (!raw) return null;
+          if (raw.charAt(0) === '{' || raw.charAt(0) === '[') {
+            try { return JSON.parse(raw); } catch (e) {}
+          }
+          var last = null;
+          var lines = raw.split('\n');
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (line.indexOf('data:') !== 0) continue;
+            var payload = line.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            try { last = JSON.parse(payload); } catch (e2) {}
+          }
+          return last;
+        }
+        function mcpRequest(url, session, body) {
+          var headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/event-stream',
+            'Authorization': 'Bearer ' + currentSearchKey()
+          };
+          if (session) headers['Mcp-Session-Id'] = session;
+          return fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(30000)
+          }).then(function (res) {
+            var next = session || '';
+            try {
+              if (res.headers && res.headers.get) next = res.headers.get('mcp-session-id') || res.headers.get('Mcp-Session-Id') || next;
+            } catch (e) {}
+            return res.text().then(function (t) {
+              if (!res.ok) {
+                var err = new Error('搜索API HTTP ' + res.status);
+                err.httpStatus = res.status;
+                err.body = String(t || '').slice(0, 500);
+                throw err;
+              }
+              return { session: next, json: parseMcpPayload(t), raw: String(t || '') };
+            });
+          });
+        }
+        function pickMcpTool(tools, preferred) {
+          var list = tools || [];
+          var i;
+          if (preferred) {
+            for (i = 0; i < list.length; i++) if (list[i] && list[i].name === preferred) return list[i];
+          }
+          var order = ['search_pro', 'SearchPro', 'web_search', 'search'];
+          for (var n = 0; n < order.length; n++) {
+            for (i = 0; i < list.length; i++) if (list[i] && list[i].name === order[n]) return list[i];
+          }
+          for (i = 0; i < list.length; i++) {
+            if (list[i] && /search/i.test(list[i].name || '')) return list[i];
+          }
+          return list[0] || null;
+        }
+        function mcpProp(props, names) {
+          for (var i = 0; i < names.length; i++) if (props[names[i]]) return names[i];
+          return '';
+        }
+        function fillMcpArgs(tool, query, fallbackArgs) {
+          var schema = (tool && (tool.inputSchema || tool.input_schema)) || {};
+          var props = schema.properties || {};
+          var names = Object.keys(props);
+          if (!names.length) return fallbackArgs ? fallbackArgs() : { query: query };
+          var args = {};
+          var qKey = mcpProp(props, ['query', 'Query', 'text_query', 'search_query', 'q']);
+          args[qKey || names[0]] = qKey === 'Query' ? clipText(query, 500) : query;
+          var countKey = mcpProp(props, ['count', 'Count', 'Cnt', 'limit', 'top_k']);
+          if (countKey) args[countKey] = countKey === 'Cnt' ? 10 : searchCount();
+          var timeKey = mcpProp(props, ['Freshness', 'freshness', 'search_recency_filter', 'time_range']);
+          var fresh = searchFreshness();
+          if (timeKey && fresh !== 'noLimit') {
+            if (timeKey === 'Freshness') args[timeKey] = fresh === 'day' ? 'd1' : fresh === 'week' ? 'd7' : 'm1';
+            else if (timeKey === 'search_recency_filter') args[timeKey] = fresh === 'day' ? 'oneDay' : fresh === 'week' ? 'oneWeek' : 'oneMonth';
+            else args[timeKey] = fresh;
+          }
+          return args;
+        }
+        function mcpResultText(result) {
+          if (!result) return '';
+          if (typeof result === 'string') return result;
+          var content = result.content;
+          if (typeof content === 'string') return content;
+          if (Array.isArray(content)) {
+            return content.map(function (c) { return (c && (c.text || c.content)) || ''; }).join('\n');
+          }
+          return JSON.stringify(result);
+        }
+        function itemsFromUnknown(data) {
+          if (!data) return [];
+          if (typeof data === 'string') {
+            var trimmed = data.trim();
+            if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
+              try { return itemsFromUnknown(JSON.parse(trimmed)); } catch (e) { return [{ snippet: trimmed.slice(0, 700) }]; }
+            }
+            return trimmed ? [{ snippet: trimmed.slice(0, 700) }] : [];
+          }
+          if (Array.isArray(data)) {
+            if (data.length && typeof data[0] === 'string') {
+              return data.map(function (s) {
+                try { return JSON.parse(s); } catch (e) { return { snippet: s }; }
+              });
+            }
+            return data;
+          }
+          if (Array.isArray(data.Pages)) return itemsFromUnknown(data.Pages);
+          if (data.Response && Array.isArray(data.Response.Pages)) return itemsFromUnknown(data.Response.Pages);
+          if (Array.isArray(data.search_result)) return data.search_result;
+          if (Array.isArray(data.search_results)) return data.search_results;
+          if (Array.isArray(data.references)) return data.references;
+          if (Array.isArray(data.results)) return data.results;
+          if (data.results && Array.isArray(data.results.web)) return data.results.web;
+          if (data.Result && Array.isArray(data.Result.Documents)) return data.Result.Documents;
+          if (data.data && data.data.webPages && Array.isArray(data.data.webPages.value)) return data.data.webPages.value;
+          return [];
+        }
+        function fetchMcpSearch(url, preferred, query, fallbackArgs) {
+          return mcpRequest(url, '', {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'initialize',
+            params: {
+              protocolVersion: '2025-06-18',
+              capabilities: {},
+              clientInfo: { name: 'motuo-tab', version: '0.8.9' }
+            }
+          }).then(function (init) {
+            if (init.json && init.json.error) {
+              var err = new Error('搜索API ' + (init.json.error.message || 'initialize 失败'));
+              err.body = JSON.stringify(init.json.error).slice(0, 500);
+              throw err;
+            }
+            return mcpRequest(url, init.session, { jsonrpc: '2.0', method: 'notifications/initialized' }).then(function () {
+              return init.session;
+            }, function () { return init.session; });
+          }).then(function (session) {
+            return mcpRequest(url, session, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }).then(function (listed) {
+              return { session: listed.session || session, listed: listed };
+            }, function () {
+              return { session: session, listed: null };
+            });
+          }).then(function (state) {
+            var tools = state.listed && state.listed.json && state.listed.json.result && state.listed.json.result.tools;
+            var tool = pickMcpTool(tools, preferred);
+            var args = fillMcpArgs(tool, query, fallbackArgs);
+            return mcpRequest(url, state.session, {
+              jsonrpc: '2.0',
+              id: 3,
+              method: 'tools/call',
+              params: { name: (tool && tool.name) || preferred, arguments: args }
+            });
+          }).then(function (called) {
+            if (called.json && called.json.error) {
+              var err = new Error('搜索API ' + (called.json.error.message || 'tools/call 失败'));
+              err.body = JSON.stringify(called.json.error).slice(0, 500);
+              throw err;
+            }
+            var result = called.json && called.json.result;
+            if (result && result.isError) {
+              var err2 = new Error('搜索API 工具返回错误');
+              err2.body = mcpResultText(result).slice(0, 500);
+              throw err2;
+            }
+            var text = mcpResultText(result);
+            var items = itemsFromUnknown(text);
+            if (!items.length) items = itemsFromUnknown(result);
+            return searchItemsToContext(items);
+          }).catch(function (sErr) {
+            return { searchContext: '', resultCount: 0, failed: true, error: sErr };
+          });
+        }
+        function fetchBailian(query) {
+          return fetchMcpSearch('https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp', 'search_pro', query, function () {
+            return { query: query };
+          });
+        }
+        function fetchTencent(query) {
+          return fetchMcpSearch('https://api.wsa.cloud.tencent.com/Mcp', 'SearchPro', query, function () {
+            var args = { Query: clipText(query, 500), Mode: 0, Cnt: 10 };
+            var fresh = searchFreshness();
+            if (fresh === 'day') args.Freshness = 'd1';
+            else if (fresh === 'week') args.Freshness = 'd7';
+            else if (fresh === 'month') args.Freshness = 'm1';
+            return args;
+          });
+        }
         function fetchWebSearch(query) {
           var p = searchProvider();
+          if (p === 'deepseek') return fetchDeepSeekSearch(query);
+          if (p === 'zhipu') return fetchZhipu(query);
+          if (p === 'kimi') return fetchKimi(query);
+          if (p === 'bailian') return fetchBailian(query);
+          if (p === 'doubao') return fetchDoubao(query);
+          if (p === 'qianfan') return fetchQianfan(query);
+          if (p === 'you') return fetchYou(query);
+          if (p === 'tencent') return fetchTencent(query);
           if (p === 'tavily') return fetchTavily(query);
           if (p === 'custom') return fetchCustomSearch(query);
           return fetchBocha(query);

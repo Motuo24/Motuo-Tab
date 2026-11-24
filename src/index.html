@@ -339,14 +339,14 @@
             </div>
             <div class="help-item">
               <strong>模型名称</strong>
-              <span>填该平台提供的模型名，如 <span class="help-code">deepseek-chat</span>、<span class="help-code">glm-4-flash</span>。</span>
+              <span>填该平台提供的模型名。DeepSeek 填 <span class="help-code">deepseek-flash</span>。</span>
             </div>
             <p class="help-note">密钥仅保存在本地浏览器（localStorage），不会上传到任何服务器。</p>
           </section>
 
           <section class="help-section" id="help-section-bocha">
             <h4>如何获取博查AI密钥</h4>
-            <p class="help-p">勾选 AI 面板底部的「联网搜索」后，AI 会搜索互联网获取实时信息（天气、新闻、股价等）。联网需要「博查AI 密钥」：</p>
+            <p class="help-p">勾选 AI 面板底部的「联网搜索」后，AI 会按配置窗口里选中的提供商去搜。提供商各自的鉴权、计费和时间过滤，写在「联网搜索」那一栏的说明里。下面仍以博查为例：</p>
             <ol class="help-ol">
               <li>打开 <a class="help-link" href="https://open.bochaai.com" target="_blank" rel="noopener">open.bochaai.com</a> 并注册 / 登录</li>
               <li>进入「API 密钥」页面，创建并复制 Key（<span class="help-code">sk-</span> 开头）</li>
@@ -502,7 +502,8 @@
         </nav>
         <div class="ai-config-panes">
           <section class="ai-config-pane active" data-pane="model">
-            <div class="ai-profile-row">
+            <div class="ai-profile-row" id="aiProfileRow">
+              <span class="ai-profile-label">配置方案</span>
               <select id="aiProfileSelect" aria-label="配置方案"></select>
               <input type="text" id="aiProfileName" placeholder="方案名称" aria-label="方案名称" />
               <button type="button" class="ai-text-btn" id="aiProfileAdd">新增</button>
@@ -518,7 +519,7 @@
             </label>
             <label class="field">
               <span>模型名称</span>
-              <input type="text" id="aiModel" placeholder="deepseek-chat" autocomplete="off" />
+              <input type="text" id="aiModel" placeholder="deepseek-flash" autocomplete="off" />
             </label>
             <div class="ai-profile-row">
               <button type="button" class="ai-text-btn" id="aiTestBtn">测试连接</button>
@@ -538,16 +539,45 @@
             <label class="field">
               <span>提供商</span>
               <select id="aiSearchProvider" aria-label="搜索提供商">
-                <option value="bocha">博查</option>
+                <option value="deepseek">DeepSeek Search</option>
+                <option value="zhipu">智谱 Web Search</option>
+                <option value="kimi">Kimi / Moonshot</option>
+                <option value="bailian">百炼 EnhancedSearch</option>
+                <option value="doubao">豆包搜索</option>
+                <option value="qianfan">百度千帆</option>
+                <option value="bocha" selected>博查</option>
+                <option value="you">You.com</option>
+                <option value="tencent">腾讯元宝搜索</option>
                 <option value="tavily">Tavily</option>
                 <option value="custom">自定义接口</option>
               </select>
             </label>
-            <label class="field" id="bochaKeyField">
+            <div id="aiSearchMeta" class="ai-search-meta"></div>
+            <label class="field" id="zhipuEngineField">
+              <span>智谱引擎</span>
+              <select id="aiZhipuEngine" aria-label="智谱搜索引擎">
+                <option value="search_std">基础 search_std（0.01 元/次）</option>
+                <option value="search_pro" selected>高阶 search_pro（0.03 元/次）</option>
+                <option value="search_pro_sogou">搜狗 search_pro_sogou（0.05 元/次）</option>
+                <option value="search_pro_quark">夸克 search_pro_quark（0.05 元/次）</option>
+              </select>
+            </label>
+            <label class="field" id="kimiTierField">
+              <span>Kimi 档位</span>
+              <select id="aiKimiTier" aria-label="Kimi 搜索档位">
+                <option value="pro" selected>Pro（0.003 美元/次，可按时间过滤）</option>
+                <option value="basic">基础（0.002 美元/次，无时间过滤）</option>
+              </select>
+            </label>
+            <label class="field" id="aiSearchKeyField">
+              <span id="aiSearchKeyLabel">搜索密钥</span>
+              <input type="text" id="aiSearchKey" placeholder="当前提供商的密钥" autocomplete="off" />
+            </label>
+            <label class="field" id="bochaKeyField" hidden>
               <span>博查 AI 密钥</span>
               <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
             </label>
-            <label class="field" id="tavilyKeyField">
+            <label class="field" id="tavilyKeyField" hidden>
               <span>Tavily 密钥</span>
               <input type="text" id="aiTavilyKey" placeholder="tvly-xxxxxxxx" autocomplete="off" />
             </label>
@@ -576,23 +606,40 @@
               <input type="checkbox" id="aiSearchSummary" checked />
               <span>向提供商请求摘要</span>
             </label>
-            <p class="ai-config-hint">密钥只存在本机。搜索失败时，接口返回的原因会交给助手，并请它告诉你。底栏「联网搜索」是总开关。</p>
+            <p class="ai-config-hint">密钥只存在本机。换提供商时，各自的密钥会留下来。搜索失败时，接口返回的原因会交给助手，并请它告诉你。底栏「联网搜索」是总开关。DeepSeek 的搜索密钥可以留空，留空就用模型页的密钥。</p>
           </section>
           <section class="ai-config-pane" data-pane="prompt">
-            <div class="ai-prompt-head">
-              <span id="aiPromptState" class="ai-config-hint">当前使用内置默认提示词</span>
-              <button type="button" class="ai-text-btn" id="aiPromptReset">恢复默认</button>
+            <div class="ai-prompt-block">
+              <h4>全局系统提示词</h4>
+              <p class="ai-config-hint">基础人设。整段对话都放在系统提示词里，不随卡片变化。</p>
+              <div class="ai-profile-row">
+                <select id="aiPromptPreset" aria-label="系统提示词预设"></select>
+                <input type="text" id="aiSystemPresetName" placeholder="预设名称" aria-label="系统提示词预设名称" />
+                <button type="button" class="ai-text-btn" id="aiSystemPresetAdd">新增</button>
+                <button type="button" class="ai-text-btn" id="aiSystemPresetDel">删除</button>
+              </div>
+              <textarea id="aiSystemPrompt" spellcheck="false" aria-label="全局系统提示词"></textarea>
             </div>
-            <div class="ai-var-row">
-              <button type="button" class="ai-var-btn" data-var="{{cards}}">卡片列表</button>
-              <button type="button" class="ai-var-btn" data-var="{{card_names}}">卡片名称</button>
-              <button type="button" class="ai-var-btn" data-var="{{card_count}}">卡片数量</button>
-              <button type="button" class="ai-var-btn" data-var="{{site_direct}}">站内直达</button>
-              <button type="button" class="ai-var-btn" data-var="{{search_rules}}">搜索规则</button>
-              <button type="button" class="ai-var-btn" data-var="{{ops_contract}}">卡片操作约定</button>
-              <button type="button" class="ai-var-btn" data-var="{{last_query}}">上次搜索词</button>
+            <div class="ai-prompt-block">
+              <h4>环境上下文前缀</h4>
+              <p class="ai-config-hint">每次发送前加在这条用户消息前面。卡片或搜索开关变了，下一条会带上新的内容。</p>
+              <div class="ai-profile-row">
+                <select id="aiContextPreset" aria-label="环境上下文预设"></select>
+                <input type="text" id="aiContextPresetName" placeholder="预设名称" aria-label="环境上下文预设名称" />
+                <button type="button" class="ai-text-btn" id="aiContextPresetAdd">新增</button>
+                <button type="button" class="ai-text-btn" id="aiContextPresetDel">删除</button>
+              </div>
+              <div class="ai-var-row">
+                <button type="button" class="ai-var-btn" data-var="{{cards}}">卡片列表</button>
+                <button type="button" class="ai-var-btn" data-var="{{card_names}}">卡片名称</button>
+                <button type="button" class="ai-var-btn" data-var="{{card_count}}">卡片数量</button>
+                <button type="button" class="ai-var-btn" data-var="{{site_direct}}">站内直达</button>
+                <button type="button" class="ai-var-btn" data-var="{{search_rules}}">搜索规则</button>
+                <button type="button" class="ai-var-btn" data-var="{{ops_contract}}">卡片操作约定</button>
+                <button type="button" class="ai-var-btn" data-var="{{last_query}}">上次搜索词</button>
+              </div>
+              <textarea id="aiContextPrompt" spellcheck="false" aria-label="环境上下文前缀" placeholder="留空则发送时不附加环境说明"></textarea>
             </div>
-            <textarea id="aiSystemPrompt" spellcheck="false" aria-label="当前系统提示词"></textarea>
           </section>
           <section class="ai-config-pane" data-pane="advanced">
             <p class="ai-config-hint">这些选项平时不用改。推理模型若拒绝温度参数，关掉「请求里附带温度」。</p>
@@ -674,7 +721,7 @@
             <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 18h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10 22h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             <span>深度思考</span>
           </label>
-          <label class="ai-mode-btn" title="联网搜索（博查 AI）。密钥在 ⚙ 打开的配置窗口里填写">
+          <label class="ai-mode-btn" title="联网搜索。提供商和密钥在配置窗口的「联网搜索」里">
             <input type="checkbox" id="aiWebSearch" />
             <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span>联网搜索</span>

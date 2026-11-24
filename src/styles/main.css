@@ -1434,9 +1434,22 @@
     color: var(--text-2);
   }
   .ai-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); flex: 0 0 auto; }
+  .ai-profile-label { flex: 0 0 auto; font-size: 13px; color: var(--text-2); }
+  .ai-search-meta {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.65;
+  }
+  .ai-search-meta b { color: var(--text-1); font-weight: 600; }
   .ai-profile-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .ai-profile-row select { flex: 1 1 120px; min-width: 0; width: auto; }
   .ai-profile-row input[type="text"] { flex: 1 1 100px; min-width: 0; width: auto; }
+  .ai-prompt-block { display: flex; flex-direction: column; gap: 8px; }
+  .ai-prompt-block h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-1); }
   .ai-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .ai-var-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .ai-var-btn {
@@ -1450,9 +1463,10 @@
     cursor: pointer;
   }
   .ai-var-btn:hover { color: var(--accent); border-color: var(--accent); }
-  #aiSystemPrompt {
+  #aiSystemPrompt,
+  #aiContextPrompt {
     width: 100%;
-    min-height: 280px;
+    min-height: 150px;
     flex: 1;
     resize: none;
     padding: 10px 12px;

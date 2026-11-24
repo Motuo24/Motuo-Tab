@@ -14,7 +14,7 @@ A browser New Tab replacement page: shortcut management, personalized wallpapers
 ## Changelog (v0.8.7)
 
 - **AI settings**: multiple model profiles, thinking level, temperature, max length, and an editable system prompt with `{{cards}}` style tags
-- **Web search**: Bocha, Tavily, or a custom endpoint, with result count and time range
+- **Web search**: DeepSeek, Zhipu, Kimi, Bailian, Doubao, Qianfan, Bocha, You.com, Tencent, Tavily, or a custom endpoint. Each option notes auth, billing, time filters, and response shape (checked 2026-11-20)
 - **Card edits**: each change can be undone on its own; duplicate names are not added again
 
 ## Changelog (v0.8.6)

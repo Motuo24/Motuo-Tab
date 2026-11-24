@@ -76,6 +76,15 @@
       function isSafeIconUrl(u) {
         return !!u && !/^\s*(?:javascript|vbscript):/i.test(String(u));
       }
+      function resolveEngineIcon(u) {
+        if (!u) return '';
+        var cache = window.__motuo && window.__motuo.iconCache;
+        if (cache && typeof cache.getSync === 'function') {
+          var hit = cache.getSync(u);
+          if (hit) return hit;
+        }
+        return u;
+      }
 
       // 渲染下拉列表（内置 + 自定义 + 管理按钮）
       function renderEngineDropdown() {
@@ -91,7 +100,7 @@
           var div = document.createElement('div');
           div.className = 'opt' + (k === getEngine() ? ' current' : '');
           div.dataset.engine = k;
-          div.innerHTML = '<img class="opt-icon" src="' + escapeAttr(e.icon) + '" alt="" /><span>' + escapeHtml(e.name) + '</span>';
+          div.innerHTML = '<img class="opt-icon" data-icon-url="' + escapeAttr(e.icon) + '" src="' + escapeAttr(resolveEngineIcon(e.icon)) + '" alt="" /><span>' + escapeHtml(e.name) + '</span>';
           selector.appendChild(div);
         });
 
@@ -108,7 +117,7 @@
             div.className = 'opt custom-opt' + (k === getEngine() ? ' current' : '');
             div.dataset.engine = k;
             var iconHtml = isSafeIconUrl(ce.icon)
-              ? '<img class="opt-icon" src="' + escapeAttr(ce.icon) + '" alt="" />'
+              ? '<img class="opt-icon" data-icon-url="' + escapeAttr(ce.icon) + '" src="' + escapeAttr(resolveEngineIcon(ce.icon)) + '" alt="" />'
               : '<span class="opt-icon" style="background:#f0f2f5;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#4b5158;">' + escapeHtml(ce.name.charAt(0)) + '</span>';
             div.innerHTML = iconHtml + '<span>' + escapeHtml(ce.name) + '</span><button class="del-custom" data-custom-idx="' + i + '" title="删除此引擎">×</button>';
             selector.appendChild(div);
@@ -139,9 +148,16 @@
         });
         // 更新主图标
         if (engineIcon) {
-          engineIcon.src = engine.icon;
-          engineIcon.style.display = '';
-          engineIconFallback.style.display = 'none';
+          if (isSafeIconUrl(engine.icon)) {
+            engineIcon.dataset.iconUrl = engine.icon;
+            engineIcon.src = resolveEngineIcon(engine.icon);
+            engineIcon.style.display = '';
+            engineIconFallback.style.display = 'none';
+          } else {
+            engineIcon.removeAttribute('data-icon-url');
+            engineIcon.style.display = 'none';
+            engineIconFallback.style.display = '';
+          }
         }
         // 更新 placeholder
         input.placeholder = engine.placeholder;
@@ -244,7 +260,7 @@
           var row = document.createElement('div');
           row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f7f8fc;border-radius:8px;font-size:13px;';
           var iconHtml = isSafeIconUrl(ce.icon)
-            ? '<img src="' + escapeAttr(ce.icon) + '" style="width:18px;height:18px;border-radius:4px;flex-shrink:0;" alt="" />'
+            ? '<img data-icon-url="' + escapeAttr(ce.icon) + '" src="' + escapeAttr(resolveEngineIcon(ce.icon)) + '" style="width:18px;height:18px;border-radius:4px;flex-shrink:0;" alt="" />'
             : '<span style="width:18px;height:18px;border-radius:4px;background:#e8ecf1;display:flex;align-items:center;justify-content:center;font-size:10px;color:#4b5158;flex-shrink:0;">' + escapeHtml(ce.name.charAt(0)) + '</span>';
           row.innerHTML = iconHtml +
             '<span style="flex:1;color:#1f2329;">' + escapeHtml(ce.name) + '</span>' +
@@ -284,6 +300,9 @@
         saveCustomEngines();
         renderCustomEngineList();
         refreshEngines();
+        if (icon && /^https?:/i.test(icon) && window.__motuo && window.__motuo.iconCache && window.__motuo.iconCache.sync) {
+          window.__motuo.iconCache.sync({ force: false, urls: [icon] });
+        }
         engineName.value = '';
         engineUrl.value = '';
         engineIconInput.value = '';
@@ -611,6 +630,41 @@
       input.setAttribute('aria-controls', 'searchSuggestions');
       input.setAttribute('aria-expanded', 'false');
       suggestionsEl.setAttribute('role', 'listbox');
+
+      window.__motuo = window.__motuo || {};
+      window.__motuo.engines = {
+        getIconUrls: function () {
+          var seen = {};
+          var urls = [];
+          var all = buildEngines();
+          Object.keys(all).forEach(function (k) {
+            var u = all[k] && all[k].icon;
+            if (u && /^https?:/i.test(u) && !seen[u]) {
+              seen[u] = true;
+              urls.push(u);
+            }
+          });
+          return urls;
+        },
+        applyCachedIcons: function () {
+          if (engineIcon && engineIcon.dataset && engineIcon.dataset.iconUrl) {
+            var resolvedMain = resolveEngineIcon(engineIcon.dataset.iconUrl);
+            if (resolvedMain && engineIcon.src !== resolvedMain) {
+              engineIcon.src = resolvedMain;
+              engineIcon.style.display = '';
+              if (engineIconFallback) engineIconFallback.style.display = 'none';
+            }
+          }
+          [selector, customEngineList].forEach(function (root) {
+            if (!root) return;
+            root.querySelectorAll('img[data-icon-url]').forEach(function (img) {
+              var u = img.getAttribute('data-icon-url');
+              var resolved = resolveEngineIcon(u);
+              if (resolved && img.src !== resolved) img.src = resolved;
+            });
+          });
+        }
+      };
 
       // 调试/测试钩子（传输层可注入：jsdom 无法发真实 JSONP）
       window.__debug = window.__debug || {};

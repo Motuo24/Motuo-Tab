@@ -2,6 +2,14 @@
 
 本项目的版本历史。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.11] - 2026-11-24
+
+### 新增
+
+- 图标缓存迁入 IndexedDB（`MotuoTabDB` v2 `icons` store），支持全量快捷方式与搜索引擎图标（含百度、必应、谷歌内置托管图标与自定义引擎）本地缓存，避免占用 `localStorage` 配额（T22 + T4）
+- 缓存采用 stale-while-revalidate 策略：优先使用本地缓存秒渲染，后台按 7 天周期静默重抓更新；抓不到时保留旧缓存不显示破图
+- 通用配置弹窗新增「更新图标缓存」手动入口，支持一键强制全量刷新并展示更新/保留结果
+
 ## [0.8.10] - 2026-11-24
 
 ### 新增

@@ -2263,3 +2263,15 @@
     font-size: 12px;
     padding: 0 10px;
   }
+  .icon-cache-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .icon-cache-status {
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-3);
+    text-align: center;
+  }
+  .icon-cache-status:empty { display: none; }

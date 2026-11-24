@@ -28,7 +28,19 @@
       var BACKUP_DISMISS_MS  = 7 * 86400000;
       // IndexedDB（壁纸 blob 存这里）
       var DB_NAME            = 'MotuoTabDB';
-      var DB_VERSION         = 1;
+      var DB_VERSION         = 2;
+      var ICON_STORE_NAME    = 'icons';
+      var ICON_TTL_MS        = 7 * 86400000;
+      var ICON_MAX_SINGLE_BYTES = 256 * 1024;
+      var ICON_MAX_ENTRIES   = 200;
+      var ICON_MAX_TOTAL_CHARS = 10 * 1024 * 1024;
+      var iconCacheMem       = Object.create(null);
+      var iconCacheReadyPromise = null;
+      function getCachedIconSync(url) {
+        if (!url || !/^https?:/i.test(url)) return '';
+        var entry = iconCacheMem[url];
+        return (entry && entry.dataUrl) ? entry.dataUrl : '';
+      }
       var STORE_NAME         = 'wallpapers';
       // favicon 自动抓取候选（按顺序尝试，第一个成功即用）
       var RANDOM_COLORS      = ['blue', 'pink', 'orange', 'purple', 'sky', 'green', 'amber'];
@@ -293,7 +305,12 @@
           // 背景用主题变量：深色模式为深色，自动模式为透明（背景由 CSS 反色层提供）
           tile.style.background = 'var(--tile-img-bg)';
           var img = document.createElement('img');
-          img.src = item.icon;
+          var cachedSrc = '';
+          if (/^https?:/i.test(item.icon)) {
+            img.dataset.iconUrl = item.icon;
+            cachedSrc = getCachedIconSync(item.icon);
+          }
+          img.src = cachedSrc || item.icon;
           img.alt = item.name || '';
           img.style.width = '100%';
           img.style.height = '100%';
@@ -301,7 +318,14 @@
           img.style.padding = '10px';
           img.style.boxSizing = 'border-box';
           img.style.borderRadius = '16px';
-          img.onerror = function () { fillFallbackTile(tile, item); };
+          img.onerror = function () {
+            if (img.dataset.iconUrl && !img.dataset.retriedRemote && img.src !== img.dataset.iconUrl) {
+              img.dataset.retriedRemote = '1';
+              img.src = img.dataset.iconUrl;
+              return;
+            }
+            fillFallbackTile(tile, item);
+          };
           tile.appendChild(img);
         } else {
           var ch = (item.letter || (item.name || '').trim().charAt(0).toUpperCase()) || '?';
@@ -408,7 +432,8 @@
       var list = load();
       render(list);
       // 后台把远程图标缓存到本地（首次以后进页面无需再联网加载图标）
-      cacheExistingIcons();
+      // 图标缓存优先（IndexedDB）：先读本地缓存渲染，再后台 7 天周期静默刷新
+      initIconCache();
 
       // 离开页面前最后再存一次（关 tab/刷新/navigate 都触发）
       window.addEventListener('beforeunload', function () {
@@ -693,7 +718,7 @@
             return r.blob();
           })
           .then(function (blob) {
-            if (blob.size > 80 * 1024) return null; // 太大不缓存，避免撑爆 localStorage
+            if (blob.size <= 0 || blob.size > ICON_MAX_SINGLE_BYTES) return null; // 太大或空图不缓存
             return new Promise(function (resolve) {
               var fr = new FileReader();
               fr.onload = function () { resolve(typeof fr.result === 'string' ? fr.result : null); };
@@ -713,7 +738,8 @@
              // 尽量转成 data URL 本地缓存（下次进页面秒开）；转不了就退回存远程 URL
              return cacheImageAsDataUrl(iconUrl).then(function (dataUrl) {
                item.iconSrc = 'image';
-               item.icon = dataUrl || iconUrl;
+               item.icon = iconUrl;
+               if (dataUrl) putIconToDB(iconUrl, dataUrl, Date.now());
                save(list);
                updateCardContent(cardEl, item);
              });
@@ -726,23 +752,6 @@
            updateCardContent(cardEl, item);
          });
        }
-
-      // 启动时后台把仍是远程 URL 的图标缓存成本地 data URL（一次性；之后每次进页面秒开）
-      function cacheExistingIcons() {
-        var changed = false;
-        var tasks = [];
-        list.forEach(function (item) {
-          if (item && item.iconSrc === 'image' && typeof item.icon === 'string' && /^https?:/i.test(item.icon)) {
-            tasks.push(cacheImageAsDataUrl(item.icon).then(function (dataUrl) {
-              if (dataUrl) { item.icon = dataUrl; changed = true; }
-            }));
-          }
-        });
-        if (!tasks.length) return;
-        Promise.all(tasks).then(function () {
-          if (changed) save(list);
-        });
-      }
 
       // 打开添加弹窗
       var editingIndex = -1; // ≥0 表示编辑模式
@@ -1371,10 +1380,14 @@
 
       function openWallpaperDB() {
         return new Promise(function (resolve, reject) {
+          if (typeof indexedDB === 'undefined') { reject(new Error('indexedDB unavailable')); return; }
           if (wallpaperDb) { resolve(wallpaperDb); return; }
           var req = indexedDB.open(DB_NAME, DB_VERSION);
           req.onupgradeneeded = function (e) {
             var d = e.target.result;
+            if (!d.objectStoreNames.contains(ICON_STORE_NAME)) {
+              d.createObjectStore(ICON_STORE_NAME, { keyPath: 'url' });
+            }
             if (!d.objectStoreNames.contains(STORE_NAME)) {
               d.createObjectStore(STORE_NAME, { keyPath: 'id' });
             }
@@ -1413,6 +1426,191 @@
             req.onerror = function (e) { reject(e.target.error); };
           });
         });
+      }
+
+      // ========== 图标缓存（IndexedDB：缓存优先 + 7 天静默刷新 + 配额淘汰） ==========
+      function loadIconCacheFromDB() {
+        return openWallpaperDB().then(function (db) {
+          if (!db || !db.objectStoreNames || !db.objectStoreNames.contains(ICON_STORE_NAME)) return [];
+          return new Promise(function (resolve) {
+            try {
+              var tx = db.transaction(ICON_STORE_NAME, 'readonly');
+              var store = tx.objectStore(ICON_STORE_NAME);
+              if (!store || typeof store.getAll !== 'function') { resolve([]); return; }
+              var req = store.getAll();
+              req.onsuccess = function (e) {
+                var rows = (e && e.target && Array.isArray(e.target.result)) ? e.target.result : [];
+                rows.forEach(function (row) {
+                  if (row && row.url && row.dataUrl) {
+                    iconCacheMem[row.url] = {
+                      url: row.url,
+                      dataUrl: row.dataUrl,
+                      fetchedAt: Number(row.fetchedAt) || 0,
+                      size: Number(row.size) || String(row.dataUrl).length
+                    };
+                  }
+                });
+                resolve(rows);
+              };
+              req.onerror = function () { resolve([]); };
+            } catch (err) { resolve([]); }
+          });
+        }).catch(function () { return []; });
+      }
+
+      function putIconToDB(url, dataUrl, fetchedAt) {
+        if (!url || !dataUrl) return Promise.resolve(false);
+        var entry = {
+          url: url,
+          dataUrl: dataUrl,
+          fetchedAt: typeof fetchedAt === 'number' ? fetchedAt : Date.now(),
+          size: String(dataUrl).length
+        };
+        iconCacheMem[url] = entry;
+        return openWallpaperDB().then(function (db) {
+          if (!db || !db.objectStoreNames || !db.objectStoreNames.contains(ICON_STORE_NAME)) return false;
+          return new Promise(function (resolve) {
+            try {
+              var tx = db.transaction(ICON_STORE_NAME, 'readwrite');
+              var store = tx.objectStore(ICON_STORE_NAME);
+              if (!store || typeof store.put !== 'function') { resolve(false); return; }
+              store.put(entry);
+              tx.oncomplete = function () { resolve(true); };
+              tx.onerror = function () { resolve(false); };
+            } catch (err) { resolve(false); }
+          });
+        }).catch(function () { return false; });
+      }
+
+      function deleteIconFromDB(url) {
+        delete iconCacheMem[url];
+        return openWallpaperDB().then(function (db) {
+          if (!db || !db.objectStoreNames || !db.objectStoreNames.contains(ICON_STORE_NAME)) return;
+          return new Promise(function (resolve) {
+            try {
+              var tx = db.transaction(ICON_STORE_NAME, 'readwrite');
+              var store = tx.objectStore(ICON_STORE_NAME);
+              if (!store || typeof store.delete !== 'function') { resolve(); return; }
+              store.delete(url);
+              tx.oncomplete = function () { resolve(); };
+              tx.onerror = function () { resolve(); };
+            } catch (err) { resolve(); }
+          });
+        }).catch(function () {});
+      }
+
+      function pruneIconCache(keepSet) {
+        var keys = Object.keys(iconCacheMem);
+        var totalChars = 0;
+        keys.forEach(function (k) { totalChars += (iconCacheMem[k] && iconCacheMem[k].size) || 0; });
+        if (keys.length <= ICON_MAX_ENTRIES && totalChars <= ICON_MAX_TOTAL_CHARS) return Promise.resolve();
+        var candidates = keys.map(function (k) {
+          var e = iconCacheMem[k];
+          return {
+            url: k,
+            pinned: !!(keepSet && keepSet[k]),
+            fetchedAt: (e && e.fetchedAt) || 0,
+            size: (e && e.size) || 0
+          };
+        }).sort(function (a, b) {
+          if (a.pinned !== b.pinned) return a.pinned ? 1 : -1;
+          return a.fetchedAt - b.fetchedAt;
+        });
+        var drops = [];
+        var count = keys.length;
+        for (var i = 0; i < candidates.length && (count > ICON_MAX_ENTRIES || totalChars > ICON_MAX_TOTAL_CHARS); i++) {
+          var c = candidates[i];
+          count--;
+          totalChars -= c.size;
+          drops.push(deleteIconFromDB(c.url));
+        }
+        return Promise.all(drops);
+      }
+
+      function applyCachedIconsToDom() {
+        nav.querySelectorAll('.shortcut').forEach(function (card) {
+          var item = cardItemMap.get(card);
+          if (!item || item.iconSrc !== 'image' || !item.icon || !/^https?:/i.test(item.icon)) return;
+          var cached = getCachedIconSync(item.icon);
+          if (!cached) return;
+          var tile = card.querySelector('.tile');
+          if (!tile) return;
+          var img = tile.querySelector('img');
+          if (!img) {
+            fillTile(tile, item);
+            return;
+          }
+          if (img.src !== cached) {
+            delete img.dataset.retriedRemote;
+            img.src = cached;
+          }
+        });
+        var eng = window.__motuo && window.__motuo.engines;
+        if (eng && typeof eng.applyCachedIcons === 'function') eng.applyCachedIcons();
+      }
+
+      function collectRemoteIconUrls() {
+        var seen = {};
+        var urls = [];
+        function pushUrl(u) {
+          if (u && /^https?:/i.test(u) && !seen[u]) {
+            seen[u] = true;
+            urls.push(u);
+          }
+        }
+        list.forEach(function (item) {
+          if (item && item.iconSrc === 'image' && typeof item.icon === 'string') pushUrl(item.icon);
+        });
+        var eng = window.__motuo && window.__motuo.engines;
+        if (eng && typeof eng.getIconUrls === 'function') {
+          eng.getIconUrls().forEach(pushUrl);
+        }
+        return urls;
+      }
+
+      function syncIcons(options) {
+        var opts = options || {};
+        var force = !!opts.force;
+        var ready = iconCacheReadyPromise || loadIconCacheFromDB().then(function () { applyCachedIconsToDom(); });
+        return ready.then(function () {
+          var allUrls = Array.isArray(opts.urls)
+            ? opts.urls.filter(function (u) { return /^https?:/i.test(u || ''); })
+            : collectRemoteIconUrls();
+          var now = Date.now();
+          var targets = allUrls.filter(function (u) {
+            if (force) return true;
+            var entry = iconCacheMem[u];
+            return !entry || !entry.dataUrl || (now - (entry.fetchedAt || 0)) >= ICON_TTL_MS;
+          });
+          var updated = 0, failed = 0, kept = 0;
+          return Promise.all(targets.map(function (u) {
+            return cacheImageAsDataUrl(u).then(function (dataUrl) {
+              if (dataUrl) {
+                return putIconToDB(u, dataUrl, Date.now()).then(function () { updated++; });
+              }
+              failed++;
+              if (iconCacheMem[u] && iconCacheMem[u].dataUrl) kept++;
+            });
+          })).then(function () {
+            if (updated > 0) applyCachedIconsToDom();
+            var keepSet = {};
+            collectRemoteIconUrls().forEach(function (u) { keepSet[u] = true; });
+            return pruneIconCache(keepSet).then(function () {
+              return { total: allUrls.length, attempted: targets.length, updated: updated, failed: failed, kept: kept };
+            });
+          });
+        }).catch(function () {
+          return { total: 0, attempted: 0, updated: 0, failed: 0, kept: 0 };
+        });
+      }
+
+      function initIconCache() {
+        iconCacheReadyPromise = loadIconCacheFromDB().then(function () {
+          applyCachedIconsToDom();
+        }).catch(function () {});
+        return iconCacheReadyPromise.then(function () {
+          return syncIcons({ force: false });
+        }).catch(function () {});
       }
 
       function removeWallpaperFromDB() {
@@ -1651,6 +1849,29 @@
         toggleMenu(false);
         openModal(document.getElementById('generalConfigModal'));
       });
+
+      // 手动刷新图标缓存（强制全量重抓，失败保留旧缓存）
+      var refreshIconsBtn = document.getElementById('refreshIconsBtn');
+      var refreshIconsStatus = document.getElementById('refreshIconsStatus');
+      if (refreshIconsBtn) {
+        refreshIconsBtn.addEventListener('click', function () {
+          refreshIconsBtn.disabled = true;
+          if (refreshIconsStatus) refreshIconsStatus.textContent = '正在更新图标缓存…';
+          syncIcons({ force: true }).then(function (res) {
+            if (refreshIconsStatus) {
+              if (!res || res.total === 0) {
+                refreshIconsStatus.textContent = '当前没有可刷新的远程图标';
+              } else if (res.failed === 0) {
+                refreshIconsStatus.textContent = '已更新 ' + res.updated + ' 个图标缓存';
+              } else {
+                refreshIconsStatus.textContent = '已更新 ' + res.updated + ' 个，' + res.failed + ' 个拉取失败已保留旧缓存';
+              }
+            }
+          }).finally(function () {
+            refreshIconsBtn.disabled = false;
+          });
+        });
+      }
 
       // 站内搜索直达开关
       var siteDirectToggle = document.getElementById('toggleSiteDirect');
@@ -1921,6 +2142,13 @@
           history: AI_HISTORY_KEY,
           snapshot: AI_SNAPSHOT_KEY
         }
+      };
+      window.__motuo.iconCache = {
+        getSync: getCachedIconSync,
+        put: putIconToDB,
+        sync: syncIcons,
+        get ready() { return iconCacheReadyPromise; },
+        getAllSync: function () { return Object.assign({}, iconCacheMem); }
       };
 
       // ========== 速记本 ==========

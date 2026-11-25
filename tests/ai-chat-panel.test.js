@@ -1,4 +1,4 @@
-// v0.9.2 AI 侧边栏 DeepSeek 风格升级测试：多对话模式 / 提示文案 / 复制 / 重新回答 / 修改已发送消息
+// v0.9.2 AI 侧边栏升级测试：多对话模式 / 提示文案 / 思考折叠 / 操作撤销栏 / 消息操作
 'use strict';
 
 const { test, afterEach } = require('node:test');
@@ -92,31 +92,63 @@ test('多对话模式：旧历史自动迁移、开启新对话、切换/重命�
   assert.strictEqual(document.querySelectorAll('#aiMessages .ai-msg-group').length, 0);
 });
 
-test('提示文案与按钮兼容性：底部提示、回答免责声明且不污染 .ai-msg-assistant', async () => {
+test('提示文案、思考折叠、操作栏内嵌撤销与按钮兼容性', async () => {
   const { window, document } = boot({
-    fetchStub() {
-      return sseResponse([{ choices: [{ delta: { content: '这是一句干净的回答' } }] }]);
+    fetchStub(url) {
+      if (!String(url).includes('/chat/completions')) return Promise.resolve({ ok: false, status: 404 });
+      return sseResponse([{
+        choices: [{
+          delta: {
+            reasoning_content: '逐步推理分析用户意图',
+            content: '已为您添加。\n<ops>{"add":[{"name":"谷歌","url":"https://www.google.com","iconSrc":"auto","color":"blue"}]}</ops>'
+          }
+        }]
+      }]);
     }
   });
   openAI(document);
-  configureAI(document);
+  configureAI(document, { deepSearch: true });
 
   // #aiSend 兼容现有测试断言 textContent === '发送'
   assert.strictEqual(document.getElementById('aiSend').textContent, '发送');
   const footerDisc = document.querySelector('.ai-footer-disclaimer');
   assert.ok(footerDisc);
-  assert.strictEqual(footerDisc.textContent.trim(), '内容由 AI 生成，请仔细甄别');
+  assert.strictEqual(footerDisc.textContent.trim(), 'AI 生成内容仅供参考，请核实重要信息');
 
-  sendMessage(document, '你好');
+  sendMessage(document, '帮我添加谷歌');
   await waitFor(() => document.getElementById('aiSend').textContent === '发送');
 
-  const assistantBubbles = document.querySelectorAll('#aiMessages .ai-msg-assistant:not(.ai-msg-persist)');
-  assert.strictEqual(assistantBubbles.length, 1);
-  assert.strictEqual(assistantBubbles[0].textContent.trim(), '这是一句干净的回答');
+  // 深度思考折叠胶囊：完成后显示用时并默认收起，可点击展开/关闭
+  const thinking = document.querySelector('#aiMessages .ai-thinking');
+  const thinkHeader = thinking.querySelector('.ai-thinking-header');
+  assert.ok(/已思考（用时 \d+ 秒）/.test(thinkHeader.textContent));
+  assert.strictEqual(thinking.classList.contains('open'), false);
+  assert.strictEqual(thinkHeader.getAttribute('aria-expanded'), 'false');
+  thinkHeader.click();
+  assert.strictEqual(thinking.classList.contains('open'), true);
+  assert.strictEqual(thinkHeader.getAttribute('aria-expanded'), 'true');
+  thinkHeader.click();
+  assert.strictEqual(thinking.classList.contains('open'), false);
 
+  // 操作芯片与撤销按钮合并在同一个 .ai-tool-calls 栏内
+  const opsBar = document.querySelector('#aiMessages .ai-tool-calls');
+  assert.ok(opsBar, '应生成操作栏 .ai-tool-calls');
+  assert.ok(opsBar.querySelector('.ai-tool-call.add'), '操作栏内应包含添加芯片');
+  const undoBtn = opsBar.querySelector('.ai-undo-btn');
+  assert.ok(undoBtn, '撤销按钮应放入 .ai-tool-calls 同排展示');
+
+  // 回复下方免责文案
   const msgDisc = document.querySelector('.ai-msg-group-assistant .ai-msg-disclaimer');
   assert.ok(msgDisc);
-  assert.strictEqual(msgDisc.textContent.trim(), '本回答由 AI 生成，内容仅供参考，请仔细甄别');
+  assert.strictEqual(msgDisc.textContent.trim(), '以上内容由 AI 生成，仅供参考');
+
+  // 切换回来重渲染历史：思考标题为「思考过程」，撤销仍在 .ai-tool-calls 内
+  document.getElementById('aiNewChatBtn').click();
+  const list = window.__motuo.aiSessions.list();
+  window.__motuo.aiSessions.switchTo(list[1].id);
+  const histThinkTitle = document.querySelector('#aiMessages .ai-thinking-title');
+  assert.strictEqual(histThinkTitle.textContent, '思考过程');
+  assert.ok(document.querySelector('#aiMessages .ai-tool-calls .ai-undo-btn'));
 });
 
 test('消息操作：复制（过滤思考与 ops）、重新回答、原地修改已发送消息并重发分支', async () => {

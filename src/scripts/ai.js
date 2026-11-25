@@ -2214,11 +2214,33 @@
           flashSaved('已恢复默认配置');
         });
       }
-      // 深度搜索：在气泡内部创建思考过程容器（默认收起，点击头部展开/收起）
-      function createThinkingEl() {
+      // 深度搜索：在气泡内部创建思考过程容器（流式默认"正在思考…"，历史恢复显示"思考过程"）
+      var AI_THINK_ICO_SVG = '<svg class="ai-thinking-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-4.24 10.24c.72.72 1.24 1.56 1.44 2.76h5.6c.2-1.2.72-2.04 1.44-2.76A6 6 0 0 0 12 3z"/><path d="M9.5 19h5M10.5 22h3"/></svg>';
+      var AI_CHEVRON_DOWN_SVG = '<svg class="ai-thinking-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+      var AI_UNDO_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
+
+      function createUndoButton(snapId) {
+        var undoBtn = document.createElement('button');
+        undoBtn.type = 'button';
+        undoBtn.className = 'ai-undo-btn';
+        undoBtn.innerHTML = AI_UNDO_SVG + '<span>撤销</span>';
+        if (snapId) undoBtn.setAttribute('data-snap', snapId);
+        return undoBtn;
+      }
+
+      function createThinkingEl(opts) {
+        var isHist = !!(opts && opts.historical);
         var el = document.createElement('div');
         el.className = 'ai-thinking';
-        el.innerHTML = '<div class="ai-thinking-header" role="button" tabindex="0" aria-expanded="false"><span class="ai-thinking-arrow">▶</span> 深度思考</div><div class="ai-thinking-body"></div>';
+        el._thinkStartAt = isHist ? 0 : Date.now();
+        el.innerHTML =
+          '<div class="ai-thinking-header" role="button" tabindex="0" aria-expanded="false">' +
+          AI_THINK_ICO_SVG +
+          '<span class="ai-thinking-title"></span>' +
+          AI_CHEVRON_DOWN_SVG +
+          '</div>' +
+          '<div class="ai-thinking-body"></div>';
+        el.querySelector('.ai-thinking-title').textContent = isHist ? '思考过程' : '正在思考…';
         var header = el.querySelector('.ai-thinking-header');
         function flip() {
           var open = el.classList.toggle('open');
@@ -2254,12 +2276,17 @@
         aiMessages.scrollTop = aiMessages.scrollHeight;
         return step;
       }
-      // 标记思考完成：移除加载指示并收起，降低完成后的默认信息密度
+      // 标记思考完成：更新耗时提示、移除加载指示并收起，降低完成后的默认信息密度
       function finishThinking(thinkingEl) {
         if (!thinkingEl) return;
         var spins = thinkingEl.querySelectorAll('.ai-spinner');
         for (var i = 0; i < spins.length; i++) {
           if (spins[i].parentNode) spins[i].parentNode.removeChild(spins[i]);
+        }
+        var titleEl = thinkingEl.querySelector('.ai-thinking-title');
+        if (titleEl && thinkingEl._thinkStartAt) {
+          var secs = Math.max(1, Math.round((Date.now() - thinkingEl._thinkStartAt) / 1000));
+          titleEl.textContent = '已思考（用时 ' + secs + ' 秒）';
         }
         thinkingEl.classList.remove('open');
         var _h = thinkingEl.querySelector('.ai-thinking-header');
@@ -2519,7 +2546,7 @@
         if (!isError && !group.querySelector('.ai-msg-disclaimer')) {
           var disc = document.createElement('div');
           disc.className = 'ai-msg-disclaimer';
-          disc.textContent = '本回答由 AI 生成，内容仅供参考，请仔细甄别';
+          disc.textContent = '以上内容由 AI 生成，仅供参考';
           group.appendChild(disc);
         }
         if (!group.querySelector('.ai-msg-actions')) {
@@ -2670,7 +2697,7 @@
         // 1) 思考过程（默认收起，点击展开；避免窄侧边栏默认信息密度过高）
         var thinkMatch = rest.match(/<think>([\s\S]*?)<\/think>/i);
         if (thinkMatch) {
-          var thinkEl = createThinkingEl();
+          var thinkEl = createThinkingEl({ historical: true });
           var stepEl = document.createElement('div');
           stepEl.className = 'ai-thinking-step ai-reasoning-step';
           stepEl.innerHTML = '<span class="step-icon">' + _thinkingIconMap.reasoning + '</span><span class="step-text"><span class="ai-reasoning-text"></span></span>';
@@ -2771,15 +2798,12 @@
                 var frag = renderAIContent(content);
                 if (frag.childNodes.length) div.appendChild(frag);
               }
-              // 含 <ops> 的历史消息补"撤销"按钮：点击由 aiMessages 上的
-              // 事件委托（applyAIUndo）统一处理，重渲染后依然可点
+              // 含 <ops> 的历史消息补"撤销"按钮：优先嵌入 .ai-tool-calls 操作栏右侧
               if (typeof content === 'string' && /<ops>/i.test(content)) {
-                var undoBtn = document.createElement('button');
-                undoBtn.type = 'button';
-                undoBtn.className = 'ai-undo-btn';
-                undoBtn.textContent = '↶ 撤销这次操作';
-                if (msg.snapshotId) undoBtn.setAttribute('data-snap', msg.snapshotId);
-                div.appendChild(undoBtn);
+                var undoBtn = createUndoButton(msg.snapshotId);
+                var toolBar = div.querySelector('.ai-tool-calls');
+                if (toolBar) toolBar.appendChild(undoBtn);
+                else div.appendChild(undoBtn);
               }
             }
           } else {
@@ -3398,7 +3422,7 @@
         // 保存结果用轻提示反馈，不再往气泡里插技术性状态行
         showAIToast(savedOk ? '已应用 AI 的修改' : '修改已应用，但保存失败（存储空间不足？）');
 
-        // 把流式时的 placeholder 换成实际的 tool call chips
+        // 把流式时的 placeholder 换成实际的 tool call chips，并在同一栏末尾放入"撤销"按钮
         if (bubble) {
           var chips = renderOpsChips(ops);
           var oldPlaceholder = bubble.querySelector('.ai-ops-placeholder');
@@ -3407,19 +3431,12 @@
           } else {
             bubble.appendChild(chips);
           }
-        }
-
-        // 在气泡底部加"撤销"按钮
-        // 点击处理统一由 aiMessages 上的事件委托（applyAIUndo）负责：
-        // 若把 onclick 直接绑在按钮上，保存历史时 innerHTML 序列化会丢失该 handler，
-        // 重进页面/重开面板后按钮会变成"点了没反应"的僵尸按钮。
-        if (bubble) {
-          var undoBtn = document.createElement('button');
-          undoBtn.type = 'button';
-          undoBtn.className = 'ai-undo-btn';
-          undoBtn.textContent = '↶ 撤销这次操作';
-          if (snapId) undoBtn.setAttribute('data-snap', snapId);
-          bubble.appendChild(undoBtn);
+          var undoBtn = createUndoButton(snapId);
+          if (chips && chips.nodeType === 1) {
+            chips.appendChild(undoBtn);
+          } else {
+            bubble.appendChild(undoBtn);
+          }
         }
         return true;
       }

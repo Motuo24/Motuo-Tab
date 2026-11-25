@@ -182,15 +182,7 @@
         if (searchProvider() === 'custom') return !!fieldValue('aiCustomUrl');
         return !!currentSearchKey();
       }
-      function clipText(s, n) {
-        s = String(s || '').trim();
-        return s.length > n ? s.slice(0, n) : s;
-      }
-      function isoDaysAgo(days) {
-        var d = new Date(Date.now() - days * 86400000);
-        function p(n) { return (n < 10 ? '0' : '') + n; }
-        return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
-      }
+
       function searchCount() {
         var n = parseInt(fieldValue('aiSearchCount') || '5', 10);
         if (!n || n < 1) n = 5;
@@ -202,7 +194,12 @@
         var lines = [];
         for (var i = 0; i < cards.list.length; i++) {
           var it = cards.list[i];
-          lines.push('- 名称：' + it.name + ' ｜ 网址：' + (it.url ? it.url : '（未设置）'));
+          if (it && it.type === 'folder') {
+            var kids = Array.isArray(it.children) ? it.children : [];
+            lines.push('- [分组] ' + it.name + '（' + kids.length + ' 项）' + (kids.length ? '：' + kids.map(function (c) { return c.name + (c.url ? '(' + c.url + ')' : ''); }).join('、') : ''));
+          } else if (it) {
+            lines.push('- 名称：' + it.name + ' ｜ 网址：' + (it.url ? it.url : '（未设置）'));
+          }
         }
         return lines.join('\n') || '（暂无卡片）';
       }
@@ -1067,514 +1064,27 @@
         if (delSep) delSep.hidden = !hasMulti;
       }
 
-      // 搜索报错格式化与提供商适配器（对话与「测试搜索」共用）
-      function pickErrorMessage(obj, depth) {
-        if (obj == null || depth > 4) return '';
-        if (typeof obj === 'string') return obj.trim();
-        if (typeof obj !== 'object') return '';
-        var keys = ['message', 'msg', 'error_message', 'detail', 'error'];
-        for (var i = 0; i < keys.length; i++) {
-          if (obj[keys[i]] != null) {
-            var got = pickErrorMessage(obj[keys[i]], (depth || 0) + 1);
-            if (got) return got;
-          }
-        }
-        if (obj.data) return pickErrorMessage(obj.data, (depth || 0) + 1);
-        return '';
-      }
-      function readableSearchBody(text) {
-        var raw = String(text || '').trim();
-        if (!raw) return '';
-        var parsed = null;
-        try { parsed = JSON.parse(raw); } catch (e) {
-          var start = raw.indexOf('{');
-          var end = raw.lastIndexOf('}');
-          if (start !== -1 && end > start) {
-            try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch (e2) {}
-          }
-        }
-        var friendly = parsed ? pickErrorMessage(parsed, 0) : '';
-        var snippet = raw.replace(/\s+/g, ' ');
-        if (snippet.length > 500) snippet = snippet.slice(0, 500);
-        if (friendly && snippet && snippet !== friendly) return friendly + '（原文：' + snippet + '）';
-        return friendly || snippet;
-      }
-      function describeSearchError(err) {
-        var status = err && err.httpStatus;
-        var body = err && err.body;
-        var msg = String((err && err.message) || err || '');
-        if (!body) {
-          var matched = msg.match(/^搜索API HTTP (\d+)：([\s\S]*)$/);
-          if (matched) {
-            status = status || matched[1];
-            body = matched[2];
-          } else {
-            body = msg;
-          }
-        }
-        var detail = readableSearchBody(body);
-        if (status) return 'HTTP ' + status + '：' + (detail || '无响应正文');
-        return detail || '未知错误';
-      }
-      function searchFailurePrompt(detail) {
-        return '【联网搜索失败】\n'
-          + '原因：' + detail + '\n'
-          + '请用中文把上述原因告诉用户，不要只说「调用失败」或「无法核实」。'
-          + '不要编造网址或搜索结果。如果原因和密钥、余额或额度有关，请提醒用户打开 AI 配置窗口，检查当前搜索提供商的密钥和余额。';
-      }
-      function escapeSearchHtml(s) {
-        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      }
-      function fetchBocha(query) {
-        return fetch('https://api.bochaai.com/v1/web-search', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + currentSearchKey(),
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            query: query,
-            freshness: (function () {
-              var f = searchFreshness();
-              if (f === 'day') return 'oneDay';
-              if (f === 'week') return 'oneWeek';
-              if (f === 'month') return 'oneMonth';
-              return 'noLimit';
-            })(),
-            summary: !(document.getElementById('aiSearchSummary') && document.getElementById('aiSearchSummary').checked === false),
-            count: searchCount()
-          }),
-          signal: AbortSignal.timeout(30000)
-        }).then(function (sRes) {
-          if (!sRes.ok) {
-            return sRes.text().then(function (t) {
-              var err = new Error('搜索API HTTP ' + sRes.status);
-              err.httpStatus = sRes.status;
-              err.body = String(t || '').slice(0, 500);
-              throw err;
-            });
-          }
-          return sRes.json();
-        }).then(function (sData) {
-          var searchContext = '', resultCount = 0;
-          try {
-            var webPages = sData.data && sData.data.webPages;
-            if (webPages && webPages.value && webPages.value.length > 0) {
-              var items = webPages.value.slice(0, searchCount());
-              resultCount = items.length;
-              for (var i = 0; i < items.length; i++) {
-                var p = items[i];
-                searchContext += '【' + (i + 1) + '】' + (p.name || '') + '\n';
-                searchContext += '链接：' + (p.url || '') + '\n';
-                searchContext += (p.snippet || p.summary || '') + '\n\n';
-              }
-            }
-          } catch (e) {}
-          return { searchContext: searchContext, resultCount: resultCount, failed: false };
-        }).catch(function (sErr) {
-          return { searchContext: '', resultCount: 0, failed: true, error: sErr };
-        });
-      }
-      function normalizeSearchItem(p) {
-        p = p || {};
-        var snippet = p.summary || p.snippet || p.content || p.text || p.description || p.passage || p.Text || '';
-        if (!snippet && Array.isArray(p.snippets)) snippet = p.snippets.join('\n');
-        if (!snippet && Array.isArray(p.chunks)) {
-          snippet = p.chunks.map(function (c) { return (c && (c.text || c.Text || c.content)) || ''; }).filter(Boolean).join('\n');
-        }
-        if (!snippet && Array.isArray(p.Snippet)) {
-          snippet = p.Snippet.map(function (c) { return (c && (c.Text || c.text)) || ''; }).filter(Boolean).join('\n');
-        }
-        snippet = String(snippet);
-        if (snippet.length > 700) snippet = snippet.slice(0, 700);
-        return {
-          title: p.title || p.name || p.Title || '',
-          url: p.url || p.link || p.Url || '',
-          snippet: snippet
-        };
-      }
-      function searchItemsToContext(items) {
-        var searchContext = '';
-        var list = (items || []).slice(0, searchCount()).map(normalizeSearchItem);
-        for (var i = 0; i < list.length; i++) {
-          var p = list[i];
-          searchContext += '【' + (i + 1) + '】' + p.title + '\n';
-          searchContext += '链接：' + p.url + '\n';
-          searchContext += p.snippet + '\n\n';
-        }
-        return { searchContext: searchContext, resultCount: list.length, failed: false };
-      }
-      function fetchSearchPost(url, headers, body, pickItems) {
-        return fetch(url, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(30000)
-        }).then(function (sRes) {
-          if (!sRes.ok) {
-            return sRes.text().then(function (t) {
-              var err = new Error('搜索API HTTP ' + sRes.status);
-              err.httpStatus = sRes.status;
-              err.body = String(t || '').slice(0, 500);
-              throw err;
-            });
-          }
-          return sRes.json();
-        }).then(function (data) {
-          return searchItemsToContext(pickItems(data));
-        }).catch(function (sErr) {
-          return { searchContext: '', resultCount: 0, failed: true, error: sErr };
-        });
-      }
-      function fetchTavily(query) {
-        var fresh = searchFreshness();
-        var body = {
-          api_key: currentSearchKey(),
-          query: query,
-          max_results: searchCount(),
-          include_answer: false,
-          search_depth: 'basic'
-        };
-        if (fresh === 'day' || fresh === 'week' || fresh === 'month') body.time_range = fresh;
-        return fetchSearchPost('https://api.tavily.com/search', { 'Content-Type': 'application/json' }, body, function (data) {
-          return (data && data.results) || [];
-        });
-      }
-      function fetchCustomSearch(query) {
-        var headers = { 'Content-Type': 'application/json' };
-        var customKey = currentSearchKey();
-        if (customKey) headers.Authorization = 'Bearer ' + customKey;
-        return fetchSearchPost(fieldValue('aiCustomUrl'), headers, {
-          query: query,
-          count: searchCount(),
-          freshness: searchFreshness()
-        }, function (data) {
-          if (!data) return [];
-          if (data.data && data.data.webPages && data.data.webPages.value) return data.data.webPages.value;
-          if (Array.isArray(data.results)) return data.results;
-          if (Array.isArray(data.data)) return data.data;
-          if (Array.isArray(data)) return data;
-          return [];
-        });
-      }
-      function fetchDeepSeekSearch(query) {
-        var fresh = searchFreshness();
-        var q = clipText(query, fresh === 'noLimit' ? 128 : 110);
-        if (fresh === 'day') q += ' after:' + isoDaysAgo(1);
-        else if (fresh === 'week') q += ' after:' + isoDaysAgo(7);
-        else if (fresh === 'month') q += ' after:' + isoDaysAgo(30);
-        return fetchSearchPost('https://api.deepseek.com/v1/tools/search', {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + currentSearchKey()
-        }, { query: q, count: searchCount(), need_content: false }, function (data) {
-          return (data && data.results) || [];
-        });
-      }
-      function fetchZhipu(query) {
-        var engine = fieldValue('aiZhipuEngine') || 'search_pro';
-        var fresh = searchFreshness();
-        var body = {
-          search_query: clipText(query, 70),
-          search_engine: engine,
-          search_intent: false,
-          search_recency_filter: fresh === 'day' ? 'oneDay' : fresh === 'week' ? 'oneWeek' : fresh === 'month' ? 'oneMonth' : 'noLimit'
-        };
-        if (engine !== 'search_pro_quark') body.count = searchCount();
-        return fetchSearchPost('https://open.bigmodel.cn/api/paas/v4/web_search', {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + currentSearchKey()
-        }, body, function (data) {
-          return (data && (data.search_result || data.search_results)) || [];
-        });
-      }
-      function fetchKimi(query) {
-        var tier = fieldValue('aiKimiTier') || 'pro';
-        var fresh = searchFreshness();
-        var path = tier === 'basic' ? '/v1/tools/search' : '/v1/tools/search_pro';
-        var body = { text_query: query, limit: searchCount() };
-        if (tier === 'basic') {
-          var sum = document.getElementById('aiSearchSummary');
-          body.include_content = !(sum && sum.checked === false);
-        } else if (fresh === 'day' || fresh === 'week' || fresh === 'month') {
-          var days = fresh === 'day' ? 1 : fresh === 'week' ? 7 : 30;
-          body.time_window = { start: isoDaysAgo(days), end: isoDaysAgo(0) };
-        }
-        return fetchSearchPost('https://api.moonshot.ai' + path, {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + currentSearchKey()
-        }, body, function (data) {
-          return (data && data.search_results) || [];
-        });
-      }
-      function qianfanQuery(query) {
-        var s = String(query || '');
-        var n = 0;
-        var out = '';
-        for (var i = 0; i < s.length; i++) {
-          var add = s.charCodeAt(i) > 255 ? 2 : 1;
-          if (n + add > 72) break;
-          n += add;
-          out += s.charAt(i);
-        }
-        return out || clipText(s, 36);
-      }
-      function fetchQianfan(query) {
-        var fresh = searchFreshness();
-        var body = {
-          messages: [{ role: 'user', content: qianfanQuery(query) }],
-          search_source: 'baidu_search_v2',
-          edition: 'standard',
-          resource_type_filter: [{ type: 'web', top_k: searchCount() }]
-        };
-        if (fresh === 'day' || fresh === 'week') body.search_recency_filter = 'week';
-        else if (fresh === 'month') body.search_recency_filter = 'month';
-        return fetchSearchPost('https://qianfan.baidubce.com/v2/ai_search/web_search', {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + currentSearchKey()
-        }, body, function (data) {
-          return (data && data.references) || [];
-        });
-      }
-      function fetchDoubao(query) {
-        return fetchSearchPost('https://open.feedcoopapi.com/search_api/global_search', {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + currentSearchKey()
-        }, {
-          SearchType: 'web',
-          Query: clipText(query, 100),
-          DocCount: searchCount(),
-          MaxSnippetLength: 500
-        }, function (data) {
-          if (data && data.ResponseMetadata && data.ResponseMetadata.Error) {
-            var metaErr = new Error('搜索API ' + (data.ResponseMetadata.Error.Message || data.ResponseMetadata.Error.Code || '调用失败'));
-            metaErr.body = JSON.stringify(data.ResponseMetadata.Error).slice(0, 500);
-            throw metaErr;
-          }
-          if (data && data.Result && data.Result.ErrorCode) {
-            var err = new Error('搜索API ' + data.Result.ErrorCode + ' ' + (data.Result.ErrorMsg || ''));
-            err.body = data.Result.ErrorMsg || '';
-            throw err;
-          }
-          return (data && data.Result && data.Result.Documents) || [];
-        });
-      }
-      function fetchYou(query) {
-        var body = { query: query, count: searchCount() };
-        var fresh = searchFreshness();
-        if (fresh === 'day' || fresh === 'week' || fresh === 'month') body.freshness = fresh;
-        return fetchSearchPost('https://ydc-index.io/v1/search', {
-          'Content-Type': 'application/json',
-          'X-API-Key': currentSearchKey()
-        }, body, function (data) {
-          if (data && data.results && Array.isArray(data.results.web)) return data.results.web;
-          if (data && Array.isArray(data.results)) return data.results;
-          return [];
-        });
-      }
-      function parseMcpPayload(text) {
-        var raw = String(text || '').trim();
-        if (!raw) return null;
-        if (raw.charAt(0) === '{' || raw.charAt(0) === '[') {
-          try { return JSON.parse(raw); } catch (e) {}
-        }
-        var last = null;
-        var lines = raw.split('\n');
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i].trim();
-          if (line.indexOf('data:') !== 0) continue;
-          var payload = line.slice(5).trim();
-          if (!payload || payload === '[DONE]') continue;
-          try { last = JSON.parse(payload); } catch (e2) {}
-        }
-        return last;
-      }
-      function mcpRequest(url, session, body) {
-        var headers = {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json, text/event-stream',
-          'Authorization': 'Bearer ' + currentSearchKey()
-        };
-        if (session) headers['Mcp-Session-Id'] = session;
-        return fetch(url, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(30000)
-        }).then(function (res) {
-          var next = session || '';
-          try {
-            if (res.headers && res.headers.get) next = res.headers.get('mcp-session-id') || res.headers.get('Mcp-Session-Id') || next;
-          } catch (e) {}
-          return res.text().then(function (t) {
-            if (!res.ok) {
-              var err = new Error('搜索API HTTP ' + res.status);
-              err.httpStatus = res.status;
-              err.body = String(t || '').slice(0, 500);
-              throw err;
-            }
-            return { session: next, json: parseMcpPayload(t), raw: String(t || '') };
-          });
-        });
-      }
-      function pickMcpTool(tools, preferred) {
-        var list = tools || [];
-        var i;
-        if (preferred) {
-          for (i = 0; i < list.length; i++) if (list[i] && list[i].name === preferred) return list[i];
-        }
-        var order = ['search_pro', 'SearchPro', 'web_search', 'search'];
-        for (var n = 0; n < order.length; n++) {
-          for (i = 0; i < list.length; i++) if (list[i] && list[i].name === order[n]) return list[i];
-        }
-        for (i = 0; i < list.length; i++) {
-          if (list[i] && /search/i.test(list[i].name || '')) return list[i];
-        }
-        return list[0] || null;
-      }
-      function mcpProp(props, names) {
-        for (var i = 0; i < names.length; i++) if (props[names[i]]) return names[i];
-        return '';
-      }
-      function fillMcpArgs(tool, query, fallbackArgs) {
-        var schema = (tool && (tool.inputSchema || tool.input_schema)) || {};
-        var props = schema.properties || {};
-        var names = Object.keys(props);
-        if (!names.length) return fallbackArgs ? fallbackArgs() : { query: query };
-        var args = {};
-        var qKey = mcpProp(props, ['query', 'Query', 'text_query', 'search_query', 'q']);
-        args[qKey || names[0]] = qKey === 'Query' ? clipText(query, 500) : query;
-        var countKey = mcpProp(props, ['count', 'Count', 'Cnt', 'limit', 'top_k']);
-        if (countKey) args[countKey] = countKey === 'Cnt' ? 10 : searchCount();
-        var timeKey = mcpProp(props, ['Freshness', 'freshness', 'search_recency_filter', 'time_range']);
-        var fresh = searchFreshness();
-        if (timeKey && fresh !== 'noLimit') {
-          if (timeKey === 'Freshness') args[timeKey] = fresh === 'day' ? 'd1' : fresh === 'week' ? 'd7' : 'm1';
-          else if (timeKey === 'search_recency_filter') args[timeKey] = fresh === 'day' ? 'oneDay' : fresh === 'week' ? 'oneWeek' : 'oneMonth';
-          else args[timeKey] = fresh;
-        }
-        return args;
-      }
-      function mcpResultText(result) {
-        if (!result) return '';
-        if (typeof result === 'string') return result;
-        var content = result.content;
-        if (typeof content === 'string') return content;
-        if (Array.isArray(content)) {
-          return content.map(function (c) { return (c && (c.text || c.content)) || ''; }).join('\n');
-        }
-        return JSON.stringify(result);
-      }
-      function itemsFromUnknown(data) {
-        if (!data) return [];
-        if (typeof data === 'string') {
-          var trimmed = data.trim();
-          if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
-            try { return itemsFromUnknown(JSON.parse(trimmed)); } catch (e) { return [{ snippet: trimmed.slice(0, 700) }]; }
-          }
-          return trimmed ? [{ snippet: trimmed.slice(0, 700) }] : [];
-        }
-        if (Array.isArray(data)) {
-          if (data.length && typeof data[0] === 'string') {
-            return data.map(function (s) {
-              try { return JSON.parse(s); } catch (e) { return { snippet: s }; }
-            });
-          }
-          return data;
-        }
-        if (Array.isArray(data.Pages)) return itemsFromUnknown(data.Pages);
-        if (data.Response && Array.isArray(data.Response.Pages)) return itemsFromUnknown(data.Response.Pages);
-        if (Array.isArray(data.search_result)) return data.search_result;
-        if (Array.isArray(data.search_results)) return data.search_results;
-        if (Array.isArray(data.references)) return data.references;
-        if (Array.isArray(data.results)) return data.results;
-        if (data.results && Array.isArray(data.results.web)) return data.results.web;
-        if (data.Result && Array.isArray(data.Result.Documents)) return data.Result.Documents;
-        if (data.data && data.data.webPages && Array.isArray(data.data.webPages.value)) return data.data.webPages.value;
-        return [];
-      }
-      function fetchMcpSearch(url, preferred, query, fallbackArgs) {
-        return mcpRequest(url, '', {
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'initialize',
-          params: {
-            protocolVersion: '2025-06-18',
-            capabilities: {},
-            clientInfo: { name: 'motuo-tab', version: '0.8.12' }
-          }
-        }).then(function (init) {
-          if (init.json && init.json.error) {
-            var err = new Error('搜索API ' + (init.json.error.message || 'initialize 失败'));
-            err.body = JSON.stringify(init.json.error).slice(0, 500);
-            throw err;
-          }
-          return mcpRequest(url, init.session, { jsonrpc: '2.0', method: 'notifications/initialized' }).then(function () {
-            return init.session;
-          }, function () { return init.session; });
-        }).then(function (session) {
-          return mcpRequest(url, session, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }).then(function (listed) {
-            return { session: listed.session || session, listed: listed };
-          }, function () {
-            return { session: session, listed: null };
-          });
-        }).then(function (state) {
-          var tools = state.listed && state.listed.json && state.listed.json.result && state.listed.json.result.tools;
-          var tool = pickMcpTool(tools, preferred);
-          var args = fillMcpArgs(tool, query, fallbackArgs);
-          return mcpRequest(url, state.session, {
-            jsonrpc: '2.0',
-            id: 3,
-            method: 'tools/call',
-            params: { name: (tool && tool.name) || preferred, arguments: args }
-          });
-        }).then(function (called) {
-          if (called.json && called.json.error) {
-            var err = new Error('搜索API ' + (called.json.error.message || 'tools/call 失败'));
-            err.body = JSON.stringify(called.json.error).slice(0, 500);
-            throw err;
-          }
-          var result = called.json && called.json.result;
-          if (result && result.isError) {
-            var err2 = new Error('搜索API 工具返回错误');
-            err2.body = mcpResultText(result).slice(0, 500);
-            throw err2;
-          }
-          var text = mcpResultText(result);
-          var items = itemsFromUnknown(text);
-          if (!items.length) items = itemsFromUnknown(result);
-          return searchItemsToContext(items);
-        }).catch(function (sErr) {
-          return { searchContext: '', resultCount: 0, failed: true, error: sErr };
-        });
-      }
-      function fetchBailian(query) {
-        return fetchMcpSearch('https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp', 'search_pro', query, function () {
-          return { query: query };
-        });
-      }
-      function fetchTencent(query) {
-        return fetchMcpSearch('https://api.wsa.cloud.tencent.com/Mcp', 'SearchPro', query, function () {
-          var args = { Query: clipText(query, 500), Mode: 0, Cnt: 10 };
-          var fresh = searchFreshness();
-          if (fresh === 'day') args.Freshness = 'd1';
-          else if (fresh === 'week') args.Freshness = 'd7';
-          else if (fresh === 'month') args.Freshness = 'm1';
-          return args;
-        });
-      }
+      // 搜索报错格式化与提供商适配器已拆至 scripts/ai-search.js（T23）
+      var aiSearchMod = window.__motuoAISearch || {};
+      var clipText = aiSearchMod.clipText;
+      var describeSearchError = aiSearchMod.describeSearchError;
+      var searchFailurePrompt = aiSearchMod.searchFailurePrompt;
+      var escapeSearchHtml = aiSearchMod.escapeSearchHtml;
+      var searchClient = aiSearchMod.createSearchClient({
+        getProvider: searchProvider,
+        getKey: currentSearchKey,
+        getFreshness: searchFreshness,
+        getCount: searchCount,
+        getSummary: function () {
+          var el = document.getElementById('aiSearchSummary');
+          return !(el && el.checked === false);
+        },
+        getCustomUrl: function () { return fieldValue('aiCustomUrl'); },
+        getZhipuEngine: function () { return fieldValue('aiZhipuEngine') || 'search_pro'; },
+        getKimiTier: function () { return fieldValue('aiKimiTier') || 'pro'; }
+      });
       function fetchWebSearch(query) {
-        var p = searchProvider();
-        if (p === 'deepseek') return fetchDeepSeekSearch(query);
-        if (p === 'zhipu') return fetchZhipu(query);
-        if (p === 'kimi') return fetchKimi(query);
-        if (p === 'bailian') return fetchBailian(query);
-        if (p === 'doubao') return fetchDoubao(query);
-        if (p === 'qianfan') return fetchQianfan(query);
-        if (p === 'you') return fetchYou(query);
-        if (p === 'tencent') return fetchTencent(query);
-        if (p === 'tavily') return fetchTavily(query);
-        if (p === 'custom') return fetchCustomSearch(query);
-        return fetchBocha(query);
+        return searchClient.fetchWebSearch(query);
       }
 
       function saveAIConfig(quiet) {
@@ -2465,7 +1975,7 @@
           });
         }
       });
-      var configNav = document.querySelector('.ai-config-nav');
+      var configNav = document.querySelector('#aiConfigModal .ai-config-nav');
       if (configNav) {
         configNav.addEventListener('click', function (e) {
           var btn = e.target.closest ? e.target.closest('button[data-pane]') : null;
@@ -2475,9 +1985,11 @@
           configNav.querySelectorAll('button').forEach(function (b) {
             b.classList.toggle('active', b === btn);
           });
-          document.querySelectorAll('.ai-config-pane').forEach(function (pane) {
+          document.querySelectorAll('#aiConfigModal .ai-config-pane').forEach(function (pane) {
             pane.classList.toggle('active', pane.getAttribute('data-pane') === id);
           });
+          var panes = document.querySelector('#aiConfigModal .ai-config-panes');
+          if (panes) panes.scrollTop = 0;
         });
       }
       var varRow = document.querySelector('.ai-var-row');
@@ -3141,6 +2653,9 @@
         if (obj.reorder !== undefined) {
           out.reorder = Array.isArray(obj.reorder) ? obj.reorder : [obj.reorder];
         }
+        if (obj.moveToFolder !== undefined) {
+          out.moveToFolder = Array.isArray(obj.moveToFolder) ? obj.moveToFolder : [obj.moveToFolder];
+        }
         return Object.keys(out).length ? out : null;
       }
 
@@ -3326,7 +2841,14 @@
         // 从当前 list 出发，按 ops 应用 diff（没提到的字段原样保留）
         // 注意：必须逐项拷贝，浅拷贝 slice() 会让 update 原地改到 list 共享对象，
         // 进而污染下方用于撤销的快照（update 类操作将无法正确撤销）。
-        var newList = cards.list.map(function (it) { return Object.assign({}, it); });
+        function cloneItemDeep(it) {
+          if (!it || typeof it !== 'object') return it;
+          if (it.type === 'folder') {
+            return Object.assign({}, it, { children: Array.isArray(it.children) ? it.children.map(function (c) { return Object.assign({}, c); }) : [] });
+          }
+          return Object.assign({}, it);
+        }
+        var newList = cards.list.map(cloneItemDeep);
         var nameIndex = {};
         function reindex() {
           nameIndex = {};
@@ -3375,6 +2897,25 @@
           reindex();
         });
 
+        // moveToFolder: 把已有卡片移入指定分组（不存在则自动建组）
+        var moveArr = Array.isArray(ops.moveToFolder) ? ops.moveToFolder : [];
+        moveArr.forEach(function (mv) {
+          if (!mv || !mv.card || !mv.folder) return;
+          var cIdx = nameIndex[mv.card];
+          if (cIdx === undefined || newList[cIdx].type === 'folder') return;
+          var cardObj = newList.splice(cIdx, 1)[0];
+          reindex();
+          var fIdx = nameIndex[mv.folder];
+          var fld = (fIdx !== undefined && newList[fIdx].type === 'folder') ? newList[fIdx] : null;
+          if (!fld) {
+            fld = { type: 'folder', id: 'fld_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(mv.folder).slice(0, 20), children: [] };
+            newList.push(fld);
+            reindex();
+          }
+          if (!Array.isArray(fld.children)) fld.children = [];
+          fld.children.push(cardObj);
+        });
+
         // reorder: 按给定名字顺序重排（不重命名，只重排现有项；新加的不在列表里时自动忽略）
         if (reorderArr && reorderArr.length > 0) {
           var orderMap = {};
@@ -3412,7 +2953,7 @@
 
         // 每条操作一份快照；同时写旧键，兼容只认 newtab.ai.snapshot.v1 的撤销
         var snapId = '';
-        var before = cards.list.map(function (it) { return Object.assign({}, it); });
+        var before = cards.list.map(cloneItemDeep);
         var snap = { list: before, time: Date.now() };
         try {
           var map = {};
@@ -3609,8 +3150,171 @@
         aiHistory.push(msg);
       }
 
+      function consumeChatResponse(res, opts) {
+        return aiSearchMod.consumeChatResponse(res, opts, isStreamEnabled());
+      }
+
+      // P1：格式纠错——问模型要一次"只给 <ops> 块"。仅修改意图且首次没解析到 ops 时调用。
+      function runRetryOpsOnce(ctx) {
+        ctx.opsRetried = true;
+        var correctionMsg = {
+          role: 'user', hidden: true,
+          content: '【系统校验】你上一条回复没有包含可解析的 <ops> 操作块。' +
+            (ctx.accumulated ? '你上一条的原文是：\n' + String(ctx.accumulated).slice(0, 1500) + '\n' : '') +
+            '如果确实需要修改卡片，请只输出一个可解析的 <ops>{"add":[],"remove":[],"update":[],"reorder":[]}</ops>，放在回复末尾；' +
+            '如果不需要改动卡片（例如卡片已存在、缺少网址、指令不清），只回复“无需改动”，不要输出 <ops>。不要解释、不要代码块、不要裸 JSON。'
+        };
+        aiHistory.push(correctionMsg);
+        saveAIHistory();
+
+        var retryBody = buildChatBody(ctx.model, toApiMessages(aiHistory), ctx.endpoint);
+        var retryAccum = '';
+        return fetch(ctx.url, {
+          method: 'POST',
+          headers: buildChatHeaders(ctx.key),
+          body: JSON.stringify(retryBody),
+          signal: AbortSignal.timeout(timeoutMs())
+        }).then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error('HTTP ' + res.status + '：' + String(t).slice(0, 200)); });
+          return consumeChatResponse(res, {
+            onContent: function (c) { retryAccum += c; }
+          });
+        }).then(function () {
+          var idx = aiHistory.indexOf(correctionMsg);
+          if (idx !== -1) aiHistory.splice(idx, 1);
+          saveAIHistory();
+
+          var normalized = normalizeOpsTags(retryAccum);
+          if (extractOps(normalized)) {
+            ctx.accumulated = normalized;
+            renderStreamBubble(ctx.bubble, ctx.accumulated, false);
+            applyOpsFromContent(ctx.accumulated, ctx.bubble);
+            if (window.console && console.log) console.log('[AI] ← 纠错重试结果:', ctx.accumulated);
+          }
+        });
+      }
+
+      // 基于当前 aiHistory 发起后续请求并读入 ctx.accumulated（含第二轮思考展示）
+      function runStreamFollowUp(ctx) {
+        var body = buildChatBody(ctx.model, toApiMessages(aiHistory), ctx.endpoint);
+        return fetch(ctx.url, {
+          method: 'POST',
+          headers: buildChatHeaders(ctx.key),
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(timeoutMs())
+        }).then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error('后续请求 HTTP ' + res.status + '：' + String(t).slice(0, 200)); });
+          return consumeChatResponse(res, {
+            onContent: function (c) {
+              ctx.accumulated += c;
+              renderStreamBubble(ctx.bubble, ctx.accumulated, true);
+              aiMessages.scrollTop = aiMessages.scrollHeight;
+            },
+            onReasoning: function (rc) {
+              ctx.followReasoningAccum += rc;
+              if (ctx.deepThinkingOn) {
+                var th = ctx.bubble.querySelector('.ai-thinking');
+                if (th) {
+                  if (!ctx.followReasoningTextEl) {
+                    var st = addThinkingStep(th, 'reasoning', '<span class="ai-spinner"></span> <span class="ai-reasoning-text"></span>');
+                    if (st) ctx.followReasoningTextEl = st.querySelector('.ai-reasoning-text');
+                  }
+                  if (ctx.followReasoningTextEl) ctx.followReasoningTextEl.textContent = ctx.followReasoningAccum;
+                  aiMessages.scrollTop = aiMessages.scrollHeight;
+                }
+              }
+            }
+          });
+        });
+      }
+
+      // 执行一轮"搜索 + 让模型基于结果作答"，可递归支持多轮搜索
+      function runSearchRoundFlow(ctx, query, round) {
+        lastSearchQuery = String(query || '');
+        try { localStorage.setItem('newtab.ai.lastQuery.v1', lastSearchQuery); } catch (e) {}
+        if (window.console && console.log) console.log('[AI] 搜索第 ' + round + ' 轮：', query);
+        var qEsc = String(query).replace(/</g, '&lt;');
+        var searchStepEl = null;
+        if (ctx.deepThinkingOn) {
+          var th = ctx.bubble.querySelector('.ai-thinking');
+          if (!th) { th = createThinkingEl(); ctx.bubble.appendChild(th); }
+          ctx.bubble.style.whiteSpace = 'normal';
+          searchStepEl = addThinkingStep(th, 'search', '<span class="ai-spinner"></span> 搜索：<strong>' + qEsc + '</strong>');
+        } else {
+          ctx.bubble.style.whiteSpace = 'normal';
+          var ss = document.createElement('div');
+          ss.className = 'ai-ops-placeholder';
+          ss.innerHTML = '<span class="ai-spinner"></span> 正在搜索: ' + qEsc + '…';
+          ctx.bubble.appendChild(ss);
+        }
+        aiMessages.scrollTop = aiMessages.scrollHeight;
+
+        return fetchWebSearch(query).then(function (r) {
+          if (r.failed) {
+            var detail = describeSearchError(r.error);
+            var safe = escapeSearchHtml(detail);
+            if (searchStepEl) {
+              var t1 = searchStepEl.querySelector('.step-text');
+              if (t1) t1.innerHTML = '搜索失败：' + safe;
+            }
+            var searching = ctx.bubble.querySelector('.ai-ops-placeholder');
+            if (searching) searching.innerHTML = '搜索失败：' + safe;
+            var failNote = ctx.bubble.querySelector('.ai-search-fail');
+            if (!failNote) {
+              failNote = document.createElement('div');
+              failNote.className = 'ai-search-fail ai-thinking-step';
+              ctx.bubble.appendChild(failNote);
+            }
+            failNote.textContent = '搜索失败：' + detail;
+          } else {
+            var oldFail = ctx.bubble.querySelector('.ai-search-fail');
+            if (oldFail) oldFail.remove();
+            ctx.searchResultCount = r.resultCount;
+            var thCur = ctx.bubble ? ctx.bubble.querySelector('.ai-thinking') : null;
+            if (searchStepEl) {
+              var t2 = searchStepEl.querySelector('.step-text');
+              if (t2) t2.innerHTML = '搜索：<strong>' + qEsc + '</strong>（<strong>' + r.resultCount + '</strong> 个结果）';
+            } else if (thCur) {
+              addThinkingStep(thCur, 'result', '搜索完成，找到 <strong>' + r.resultCount + '</strong> 条相关结果');
+            }
+          }
+          ctx.searchChipParts.push(JSON.stringify({ type: 'web_search', query: String(query), count: r.resultCount }));
+
+          aiHistory.push({
+            role: 'user',
+            hidden: true,
+            content: r.failed
+              ? searchFailurePrompt(describeSearchError(r.error))
+              : '【联网搜索结果】\n搜索词：' + query + '\n' + (r.searchContext || '未找到相关搜索结果。') +
+                '\n请基于以上搜索结果回答。若用户还要求添加或修改快捷方式，在回答末尾给出 <ops>。' + (shouldCiteSources() ? '引用处标注来源编号（如 [1]）；' : '') + '不要编造。'
+          });
+          saveAIHistory();
+
+          var savedThinking = ctx.bubble.querySelector('.ai-thinking');
+          var savedFail = ctx.bubble.querySelector('.ai-search-fail');
+          ctx.accumulated = '';
+          ctx.pendingToolCallId = null;
+          ctx.pendingToolCallName = null;
+          ctx.pendingToolCallArgs = '';
+          ctx.bubble.innerHTML = '';
+          if (savedThinking) ctx.bubble.appendChild(savedThinking);
+          if (savedFail) ctx.bubble.appendChild(savedFail);
+          var tidy = document.createElement('div');
+          tidy.className = 'ai-ops-placeholder';
+          tidy.innerHTML = '<span class="ai-spinner"></span> 正在整理回答…';
+          ctx.bubble.appendChild(tidy);
+
+          return runStreamFollowUp(ctx).then(function () {
+            var more = normalizeDSML(ctx.accumulated).match(/<web_search>\s*([\s\S]*?)\s*<\/web_search>/i);
+            if (more && more[1] && round < ctx.maxRounds) {
+              ctx.accumulated = stripToolMarkup(ctx.accumulated);
+              return runSearchRoundFlow(ctx, more[1].trim(), round + 1);
+            }
+          });
+        });
+      }
+
       function sendAI() {
-        // 并发门禁：处理中忽略再次发送（含 Enter 连按），避免两条流水线互相踩状态
         if (aiSending) return;
         var text = aiInput.value.trim();
         if (!text) return;
@@ -3625,518 +3329,235 @@
         }
         pendingSnapshotId = null;
 
-        var self = this;
-
-        function doSend(searchContext) {
-        // 更新 system prompt 中的卡片列表
-        aiHistory[0].content = buildSystemPrompt();
-
-        var userContent = searchContext ? text + '\n\n【联网搜索结果】\n' + searchContext : text;
-
-        // 加入用户消息
-        aiHistory.push({ role: 'user', content: userContent });
-        saveAIHistory();
-
-        // 渲染用户消息
-        var userDiv = document.createElement('div');
-        userDiv.className = 'ai-msg ai-msg-user';
-        userDiv.textContent = text;
-        aiMessages.appendChild(userDiv);
-        aiMessages.scrollTop = aiMessages.scrollHeight;
-
-        aiInput.value = '';
-        aiInput.style.height = 'auto';
-
-        aiSending = true;
-        aiSend.disabled = true;
-        aiSend.textContent = '处理中…';
-
-        // 智能拼接 API URL：
-        //   - 完整路径（含 /chat/completions）→ 直接用
-        //   - 路径里已有 /v1、/v4 等版本号 → 只补 /chat/completions
-        //   - 只有域名 → 补 /v1/chat/completions（OpenAI 风格）
-        var url = buildChatUrl(endpoint);
-
-        // 联网搜索：工具调用相关
-        var deepThinkingOn = aiDeepSearch && aiDeepSearch.checked;
-        var webSearchEnabled = aiWebSearch && aiWebSearch.checked && providerReady();
-        var pendingToolCallId = null;
-        var pendingToolCallName = null;
-        var pendingToolCallArgs = '';
-        var reasoningAccum = '';          // 深度思考：推理内容累积（局部变量，避免竞态）
-        var followReasoningAccum = '';    // 联网搜索后续请求的推理内容（需在外层作用域，供收尾 .then 使用）
-        var reasoningTextEl = null;       // 深度思考：缓存推理文本 DOM 引用
-        var followReasoningTextEl = null; // 联网搜索后第二轮推理文本 DOM 引用
-        var searchResultCount = 0;        // 本轮联网搜索命中的结果数（写入历史用于回显）
-        var streamFailed = false;         // 首轮流式是否已失败（失败后不再走后续流程，避免错误气泡被覆盖）
-        var opsRetried = false;           // 是否已做过一次"格式纠错重试"
-        var searchChipParts = [];         // 多轮搜索产生的 chip JSON（写入历史）
-        var AI_MAX_SEARCH_ROUNDS = maxSearchRounds();     // 单轮对话最多搜索几次（防模型死循环）
-
-        function consumeChatResponse(res, opts) {
-          var ct = '';
-          try { if (res.headers && res.headers.get) ct = String(res.headers.get('content-type') || ''); } catch (e) {}
-          var canStream = isStreamEnabled() && res.body && typeof res.body.getReader === 'function' && !(/application\/json/i.test(ct));
-          if (!canStream) {
-            var jsonP = typeof res.json === 'function'
-              ? res.json()
-              : res.text().then(function (t) { return JSON.parse(t); });
-            return jsonP.then(function (data) {
-              if (data && data.error) {
-                var jErr = new Error('API 错误：' + (typeof data.error === 'string' ? data.error : JSON.stringify(data.error)));
-                jErr.apiError = true;
-                throw jErr;
-              }
-              var ch = data && data.choices && data.choices[0];
-              var msg = (ch && (ch.message || ch.delta)) || {};
-              if (msg.reasoning_content && opts.onReasoning) opts.onReasoning(msg.reasoning_content);
-              if (msg.content && opts.onContent) opts.onContent(msg.content);
-              if (msg.tool_calls && opts.onToolCalls) opts.onToolCalls(msg.tool_calls);
-            });
-          }
-          return new Promise(function (resolve, reject) {
-            var reader = res.body.getReader();
-            var dec = new TextDecoder();
-            var buf = '';
-            (function read() {
-              reader.read().then(function (r) {
-                if (r.done) return resolve();
-                buf += dec.decode(r.value, { stream: true });
-                var lines = buf.split('\n');
-                buf = lines.pop() || '';
-                for (var i = 0; i < lines.length; i++) {
-                  var ln = lines[i].trim();
-                  if (!ln || ln.indexOf(':') === 0 || ln === 'data: [DONE]') continue;
-                  if (ln.indexOf('data: ') === 0) {
-                    try {
-                      var ch = JSON.parse(ln.slice(6));
-                      if (ch && ch.error) {
-                        var _apiErr = new Error('API 流式错误：' + (typeof ch.error === 'string' ? ch.error : JSON.stringify(ch.error)));
-                        _apiErr.apiError = true;
-                        throw _apiErr;
-                      }
-                      var d = ch.choices && ch.choices[0] && ch.choices[0].delta;
-                      if (!d) continue;
-                      if (opts.onFirstDelta) { opts.onFirstDelta(d); opts.onFirstDelta = null; }
-                      if (d.content && opts.onContent) opts.onContent(d.content);
-                      if (d.reasoning_content && opts.onReasoning) opts.onReasoning(d.reasoning_content);
-                      if (d.tool_calls && opts.onToolCalls) opts.onToolCalls(d.tool_calls);
-                    } catch (e) { if (e && e.apiError) throw e; }
-                  }
-                }
-                read();
-              }, reject);
-            })();
-          });
-        }
-
-        // P1：格式纠错——问模型要一次"只给 <ops> 块"。仅修改意图且首次没解析到 ops 时调用。
-        // 完全内部化：用完即从历史移除，绝不污染后续轮次；若模型判断无需改动则整个作废、保留首轮回答。
-        function retryOpsOnce() {
-          opsRetried = true;
-          var correctionMsg = {
-            role: 'user', hidden: true,
-            content: '【系统校验】你上一条回复没有包含可解析的 <ops> 操作块。' +
-              (accumulated ? '你上一条的原文是：\n' + String(accumulated).slice(0, 1500) + '\n' : '') +
-              '如果确实需要修改卡片，请只输出一个可解析的 <ops>{"add":[],"remove":[],"update":[],"reorder":[]}</ops>，放在回复末尾；' +
-              '如果不需要改动卡片（例如卡片已存在、缺少网址、指令不清），只回复“无需改动”，不要输出 <ops>。不要解释、不要代码块、不要裸 JSON。'
-          };
-          aiHistory.push(correctionMsg);
+        try {
+          aiHistory[0].content = buildSystemPrompt();
+          aiHistory.push({ role: 'user', content: text });
           saveAIHistory();
 
-          var retryBody = buildChatBody(model, toApiMessages(aiHistory), endpoint);
+          var userDiv = document.createElement('div');
+          userDiv.className = 'ai-msg ai-msg-user';
+          userDiv.textContent = text;
+          aiMessages.appendChild(userDiv);
+          aiMessages.scrollTop = aiMessages.scrollHeight;
 
-          var retryAccum = '';
-          return fetch(url, {
+          aiInput.value = '';
+          aiInput.style.height = 'auto';
+
+          aiSending = true;
+          aiSend.disabled = true;
+          aiSend.textContent = '处理中…';
+
+          var url = buildChatUrl(endpoint);
+          var bubble = document.createElement('div');
+          bubble.className = 'ai-msg ai-msg-assistant';
+          aiMessages.appendChild(bubble);
+          aiMessages.scrollTop = aiMessages.scrollHeight;
+
+          var ctx = {
+            url: url,
+            key: key,
+            model: model,
+            endpoint: endpoint,
+            text: text,
+            bubble: bubble,
+            deepThinkingOn: !!(aiDeepSearch && aiDeepSearch.checked),
+            webSearchEnabled: !!(aiWebSearch && aiWebSearch.checked && providerReady()),
+            maxRounds: maxSearchRounds(),
+            pendingToolCallId: null,
+            pendingToolCallName: null,
+            pendingToolCallArgs: '',
+            accumulated: '',
+            reasoningAccum: '',
+            followReasoningAccum: '',
+            reasoningTextEl: null,
+            followReasoningTextEl: null,
+            searchResultCount: 0,
+            streamFailed: false,
+            opsRetried: false,
+            searchChipParts: []
+          };
+
+          var reqBody = buildChatBody(model, toApiMessages(aiHistory), endpoint);
+          if (window.console && console.log) {
+            console.log('[AI] →', url);
+            console.log('[AI] → body:', JSON.stringify(reqBody, null, 2));
+          }
+
+          if (ctx.deepThinkingOn === true) {
+            bubble.appendChild(createThinkingEl());
+            bubble.style.whiteSpace = 'normal';
+          }
+
+          fetch(url, {
             method: 'POST',
             headers: buildChatHeaders(key),
-            body: JSON.stringify(retryBody),
+            body: JSON.stringify(reqBody),
             signal: AbortSignal.timeout(timeoutMs())
           }).then(function (res) {
-            if (!res.ok) return res.text().then(function (t) { throw new Error('HTTP ' + res.status + '：' + String(t).slice(0, 200)); });
-            return consumeChatResponse(res, {
-              onContent: function (c) { retryAccum += c; }
-            });
-          }).then(function () {
-            // 关键：内部纠错消息用完即删，避免污染后续用户请求（否则下一轮会被"系统校验"带偏）
-            var idx = aiHistory.indexOf(correctionMsg);
-            if (idx !== -1) aiHistory.splice(idx, 1);
-            saveAIHistory();
-
-            // 只认 ops：没有 ops（含"无需改动"）就整个作废，保留首轮回答，不留下任何痕迹
-            var normalized = normalizeOpsTags(retryAccum);
-            if (extractOps(normalized)) {
-              accumulated = normalized;
-              renderStreamBubble(bubble, accumulated, false);
-              applyOpsFromContent(accumulated, bubble);
-              if (window.console && console.log) console.log('[AI] ← 纠错重试结果:', accumulated);
+            if (!res.ok) {
+              return res.text().then(function (t) { throw new Error('HTTP ' + res.status + ': ' + t); });
             }
-          });
-        }
-
-        // 基于当前 aiHistory 发起后续请求并读入 accumulated（含第二轮思考展示）
-        function streamFollowUp() {
-          var body = buildChatBody(model, toApiMessages(aiHistory), endpoint);
-          return fetch(url, {
-            method: 'POST',
-            headers: buildChatHeaders(key),
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(timeoutMs())
-          }).then(function (res) {
-            if (!res.ok) return res.text().then(function (t) { throw new Error('后续请求 HTTP ' + res.status + '：' + String(t).slice(0, 200)); });
             return consumeChatResponse(res, {
+              onFirstDelta: function (delta) {
+                if (window.console && console.log && !window.__aiLoggedFirst) {
+                  window.__aiLoggedFirst = true;
+                  console.log('[AI] ← first delta:', JSON.stringify(delta, null, 2));
+                }
+              },
               onContent: function (c) {
-                accumulated += c;
-                renderStreamBubble(bubble, accumulated, true);
+                ctx.accumulated += c;
+                renderStreamBubble(bubble, ctx.accumulated, true);
                 aiMessages.scrollTop = aiMessages.scrollHeight;
               },
               onReasoning: function (rc) {
-                followReasoningAccum += rc;
-                if (deepThinkingOn) {
-                  var th = bubble.querySelector('.ai-thinking');
-                  if (th) {
-                    if (!followReasoningTextEl) {
-                      var st = addThinkingStep(th, 'reasoning', '<span class="ai-spinner"></span> <span class="ai-reasoning-text"></span>');
-                      if (st) followReasoningTextEl = st.querySelector('.ai-reasoning-text');
+                ctx.reasoningAccum += rc;
+                if (ctx.deepThinkingOn) {
+                  var _rcEl = bubble.querySelector('.ai-thinking-body');
+                  if (_rcEl) {
+                    if (ctx.reasoningTextEl) {
+                      ctx.reasoningTextEl.textContent = ctx.reasoningAccum;
+                    } else {
+                      var _newStep = addThinkingStep(bubble.querySelector('.ai-thinking'), 'reasoning',
+                        '<span class="ai-spinner"></span> <span class="ai-reasoning-text">' + ctx.reasoningAccum.replace(/</g, '&lt;') + '</span>');
+                      if (_newStep) ctx.reasoningTextEl = _newStep.querySelector('.ai-reasoning-text');
                     }
-                    if (followReasoningTextEl) followReasoningTextEl.textContent = followReasoningAccum;
                     aiMessages.scrollTop = aiMessages.scrollHeight;
                   }
                 }
-              }
-            });
-          });
-        }
-
-        // 执行一轮"搜索 + 让模型基于结果作答"，可递归支持多轮搜索
-        function runSearchRound(query, round) {
-          lastSearchQuery = String(query || '');
-          try { localStorage.setItem('newtab.ai.lastQuery.v1', lastSearchQuery); } catch (e) {}
-          if (window.console && console.log) console.log('[AI] 搜索第 ' + round + ' 轮：', query);
-          var qEsc = String(query).replace(/</g, '&lt;');
-          var searchStepEl = null;
-          if (deepThinkingOn) {
-            var th = bubble.querySelector('.ai-thinking');
-            if (!th) { th = createThinkingEl(); bubble.appendChild(th); }
-            bubble.style.whiteSpace = 'normal';
-            searchStepEl = addThinkingStep(th, 'search', '<span class="ai-spinner"></span> 搜索：<strong>' + qEsc + '</strong>');
-          } else {
-            bubble.style.whiteSpace = 'normal';
-            var ss = document.createElement('div');
-            ss.className = 'ai-ops-placeholder';
-            ss.innerHTML = '<span class="ai-spinner"></span> 正在搜索: ' + qEsc + '…';
-            bubble.appendChild(ss);
-          }
-          aiMessages.scrollTop = aiMessages.scrollHeight;
-
-          return fetchWebSearch(query).then(function (r) {
-            if (r.failed) {
-              var detail = describeSearchError(r.error);
-              var safe = escapeSearchHtml(detail);
-              if (searchStepEl) {
-                var t1 = searchStepEl.querySelector('.step-text');
-                if (t1) t1.innerHTML = '搜索失败：' + safe;
-              }
-              var searching = bubble.querySelector('.ai-ops-placeholder');
-              if (searching) searching.innerHTML = '搜索失败：' + safe;
-              var failNote = bubble.querySelector('.ai-search-fail');
-              if (!failNote) {
-                failNote = document.createElement('div');
-                failNote.className = 'ai-search-fail ai-thinking-step';
-                bubble.appendChild(failNote);
-              }
-              failNote.textContent = '搜索失败：' + detail;
-            } else {
-              var oldFail = bubble.querySelector('.ai-search-fail');
-              if (oldFail) oldFail.remove();
-              searchResultCount = r.resultCount;
-              if (searchStepEl) {
-                var t2 = searchStepEl.querySelector('.step-text');
-                if (t2) t2.innerHTML = '搜索：<strong>' + qEsc + '</strong>（<strong>' + r.resultCount + '</strong> 个结果）';
-              } else if (thinkingElForRound()) {
-                addThinkingStep(thinkingElForRound(), 'result', '搜索完成，找到 <strong>' + r.resultCount + '</strong> 条相关结果');
-              }
-            }
-            // 记录搜索 chip（多轮时全部保留）
-            searchChipParts.push(JSON.stringify({ type: 'web_search', query: String(query), count: r.resultCount }));
-
-            aiHistory.push({
-              role: 'user',
-              hidden: true,
-              content: r.failed
-                ? searchFailurePrompt(describeSearchError(r.error))
-                : '【联网搜索结果】\n搜索词：' + query + '\n' + (r.searchContext || '未找到相关搜索结果。') +
-                  '\n请基于以上搜索结果回答。若用户还要求添加或修改快捷方式，在回答末尾给出 <ops>。' + (shouldCiteSources() ? '引用处标注来源编号（如 [1]）；' : '') + '不要编造。'
-            });
-            saveAIHistory();
-
-            // 保留思考容器，清空气泡正文，准备接收回答（后续轮次思考沿用同一容器/步骤）
-            var savedThinking = bubble.querySelector('.ai-thinking');
-            var savedFail = bubble.querySelector('.ai-search-fail');
-            accumulated = '';
-            pendingToolCallId = null;
-            pendingToolCallName = null;
-            pendingToolCallArgs = '';
-            bubble.innerHTML = '';
-            if (savedThinking) bubble.appendChild(savedThinking);
-            if (savedFail) bubble.appendChild(savedFail);
-            var tidy = document.createElement('div');
-            tidy.className = 'ai-ops-placeholder';
-            tidy.innerHTML = '<span class="ai-spinner"></span> 正在整理回答…';
-            bubble.appendChild(tidy);
-
-            return streamFollowUp().then(function () {
-              // 多轮：模型若继续要求搜索（含 <search> 等别名），且未超上限，则再来一轮
-              var more = normalizeDSML(accumulated).match(/<web_search>\s*([\s\S]*?)\s*<\/web_search>/i);
-              if (more && more[1] && round < AI_MAX_SEARCH_ROUNDS) {
-                accumulated = stripToolMarkup(accumulated);
-                return runSearchRound(more[1].trim(), round + 1);
-              }
-            });
-          });
-        }
-
-        function thinkingElForRound() { return bubble ? bubble.querySelector('.ai-thinking') : null; }
-
-        var reqBody = buildChatBody(model, toApiMessages(aiHistory), endpoint);
-        // 深度思考的请求字段由 buildChatBody 按厂商写入。界面上的思考容器仍看底栏开关。
-        // 联网搜索：刻意不使用 OpenAI 原生 tools。
-        // 原因：DeepSeek 在思考模式下时好时坏（有时返回结构化 tool_calls，有时把调用写成
-        // DSML/<tool_calls> 文本，还要求回传 reasoning_content，否则 400），极不稳定。
-        // 改为自有的文本协议 <web_search>关键词</web_search>（见 buildSystemPrompt），
-        // 由本地解析并执行搜索，前后端只认一种格式。
-        // Debug：F12 控制台能看到实际发的请求
-        if (window.console && console.log) {
-          console.log('[AI] →', url);
-          console.log('[AI] → body:', JSON.stringify(reqBody, null, 2));
-        }
-
-        // 创建助手气泡
-        var bubble = document.createElement('div');
-        bubble.className = 'ai-msg ai-msg-assistant';
-        aiMessages.appendChild(bubble);
-        aiMessages.scrollTop = aiMessages.scrollHeight;
-
-        // 深度思考：仅在开启时创建思考容器接收 reasoning_content
-        if (deepThinkingOn === true) {
-          var _dtEl = createThinkingEl();
-          bubble.appendChild(_dtEl);
-          bubble.style.whiteSpace = 'normal';
-        }
-
-        var accumulated = '';
-
-        fetch(url, {
-          method: 'POST',
-          headers: buildChatHeaders(key),
-          body: JSON.stringify(reqBody),
-          signal: AbortSignal.timeout(timeoutMs())
-        }).then(function (res) {
-          if (!res.ok) {
-            return res.text().then(function (t) { throw new Error('HTTP ' + res.status + ': ' + t); });
-          }
-          return consumeChatResponse(res, {
-            onFirstDelta: function (delta) {
-              if (window.console && console.log && !window.__aiLoggedFirst) {
-                window.__aiLoggedFirst = true;
-                console.log('[AI] ← first delta:', JSON.stringify(delta, null, 2));
-              }
-            },
-            onContent: function (c) {
-              if (!bubble) return;
-              accumulated += c;
-              renderStreamBubble(bubble, accumulated, true);
-              aiMessages.scrollTop = aiMessages.scrollHeight;
-            },
-            onReasoning: function (rc) {
-              reasoningAccum += rc;
-              if (deepThinkingOn && bubble) {
-                var _rcEl = bubble.querySelector('.ai-thinking-body');
-                if (_rcEl) {
-                  if (reasoningTextEl) {
-                    reasoningTextEl.textContent = reasoningAccum;
-                  } else {
-                    var _newStep = addThinkingStep(bubble.querySelector('.ai-thinking'), 'reasoning',
-                      '<span class="ai-spinner"></span> <span class="ai-reasoning-text">' + reasoningAccum.replace(/</g, '&lt;') + '</span>');
-                    if (_newStep) reasoningTextEl = _newStep.querySelector('.ai-reasoning-text');
+              },
+              onToolCalls: function (tcs) {
+                for (var tci = 0; tci < tcs.length; tci++) {
+                  var tc = tcs[tci];
+                  if (tc.id) ctx.pendingToolCallId = tc.id;
+                  if (tc.function) {
+                    if (tc.function.name) ctx.pendingToolCallName = tc.function.name;
+                    if (tc.function.arguments) ctx.pendingToolCallArgs += tc.function.arguments;
                   }
-                  aiMessages.scrollTop = aiMessages.scrollHeight;
                 }
               }
-            },
-            onToolCalls: function (tcs) {
-              for (var tci = 0; tci < tcs.length; tci++) {
-                var tc = tcs[tci];
-                if (tc.id) pendingToolCallId = tc.id;
-                if (tc.function) {
-                  if (tc.function.name) pendingToolCallName = tc.function.name;
-                  if (tc.function.arguments) pendingToolCallArgs += tc.function.arguments;
-                }
-              }
-            }
-          });
-        }).catch(function (err) {
-          streamFailed = true;
-          var errMsg = '对话请求失败：' + (err && err.message ? err.message : err);
-          if (bubble) {
-            // 清理深度思考容器
+            });
+          }).catch(function (err) {
+            ctx.streamFailed = true;
+            var errMsg = '对话请求失败：' + (err && err.message ? err.message : err);
             var _errThinking = bubble.querySelector('.ai-thinking');
             if (_errThinking) finishThinking(_errThinking);
-            reasoningTextEl = null;
+            ctx.reasoningTextEl = null;
             bubble.innerHTML = renderMarkdown(errMsg);
             bubble.style.whiteSpace = 'normal';
             bubble.className = 'ai-msg ai-msg-error';
-          }
-          aiHistory.push({ role: 'assistant', content: errMsg });
-          saveAIHistory();
-        }).then(function () {
-          // 首轮已失败：错误气泡与历史已写好，直接结束，不要再走搜索/正常流程覆盖它
-          if (streamFailed) { endAISend(); return; }
-          // 联网搜索：检测模型是否输出了 <web_search>关键词</web_search>，有则执行搜索。
-          // 兼容历史：若旧模型仍返回结构化 delta.tool_calls 或 DSML/<tool_calls> 文本，也一并识别。
-          if (webSearchEnabled && !(pendingToolCallName === 'web_search' && pendingToolCallArgs)) {
-            // 模型可能把标记写在 content，也可能写在 reasoning_content，两边都扫。
-            var _textTc = parseTextToolCall(accumulated) || parseTextToolCall(reasoningAccum);
-            if (_textTc && _textTc.name === 'web_search' && _textTc.query) {
-              pendingToolCallName = 'web_search';
-              pendingToolCallArgs = JSON.stringify({ query: _textTc.query });
-              // 从正文/思考中剔除原始标签，避免展示/保存原始代码
-              accumulated = stripToolMarkup(accumulated);
-              reasoningAccum = stripToolMarkup(reasoningAccum);
+            aiHistory.push({ role: 'assistant', content: errMsg });
+            saveAIHistory();
+          }).then(function () {
+            if (ctx.streamFailed) { endAISend(); return; }
+            if (ctx.webSearchEnabled && !(ctx.pendingToolCallName === 'web_search' && ctx.pendingToolCallArgs)) {
+              var _textTc = parseTextToolCall(ctx.accumulated) || parseTextToolCall(ctx.reasoningAccum);
+              if (_textTc && _textTc.name === 'web_search' && _textTc.query) {
+                ctx.pendingToolCallName = 'web_search';
+                ctx.pendingToolCallArgs = JSON.stringify({ query: _textTc.query });
+                ctx.accumulated = stripToolMarkup(ctx.accumulated);
+                ctx.reasoningAccum = stripToolMarkup(ctx.reasoningAccum);
+              }
             }
-          }
-          if (webSearchEnabled && pendingToolCallName === 'web_search' && pendingToolCallArgs) {
-            var _tcArgs = null;
-            try { _tcArgs = JSON.parse(pendingToolCallArgs); } catch (e) { console.warn('[AI] 工具参数解析失败:', e); }
-            if (_tcArgs) {
-              return runSearchRound(_tcArgs.query || text, 1).then(function () {
-                // 收尾：规范化 ops、渲染、应用、落盘
-                accumulated = normalizeOpsTags(mergeReasoningOps(accumulated, reasoningAccum));
-                renderStreamBubble(bubble, accumulated, false);
-                var _bt = bubble.querySelector('.ai-thinking');
-                if (_bt) finishThinking(_bt);
-                applyOpsFromContent(accumulated, bubble);
+            if (ctx.webSearchEnabled && ctx.pendingToolCallName === 'web_search' && ctx.pendingToolCallArgs) {
+              var _tcArgs = null;
+              try { _tcArgs = JSON.parse(ctx.pendingToolCallArgs); } catch (e) { console.warn('[AI] 工具参数解析失败:', e); }
+              if (_tcArgs) {
+                return runSearchRoundFlow(ctx, _tcArgs.query || text, 1).then(function () {
+                  ctx.accumulated = normalizeOpsTags(mergeReasoningOps(ctx.accumulated, ctx.reasoningAccum));
+                  renderStreamBubble(bubble, ctx.accumulated, false);
+                  var _bt = bubble.querySelector('.ai-thinking');
+                  if (_bt) finishThinking(_bt);
+                  applyOpsFromContent(ctx.accumulated, bubble);
 
-                // 气泡里保留联网搜索记录（与重开面板时的 chip 一致）
-                if (bubble && searchChipParts.length) {
-                  var chipsWrap = document.createElement('div');
-                  chipsWrap.className = 'ai-search-chips';
-                  searchChipParts.forEach(function (p) {
-                    var obj = {};
-                    try { obj = JSON.parse(p); } catch (e) {}
-                    var chip = document.createElement('span');
-                    chip.className = 'ai-search-chip';
-                    chip.title = '已联网搜索「' + obj.query + '」' + (obj.count ? '，找到 ' + obj.count + ' 个结果' : '');
-                    chip.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.2"/><path d="M20.5 20.5l-4.3-4.3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span></span>';
-                    chip.querySelector('span').textContent = obj.query + (obj.count ? '（' + obj.count + ' 个结果）' : '');
-                    chipsWrap.appendChild(chip);
-                  });
-                  bubble.appendChild(chipsWrap);
-                }
+                  if (ctx.searchChipParts.length) {
+                    var chipsWrap = document.createElement('div');
+                    chipsWrap.className = 'ai-search-chips';
+                    ctx.searchChipParts.forEach(function (p) {
+                      var obj = {};
+                      try { obj = JSON.parse(p); } catch (e) {}
+                      var chip = document.createElement('span');
+                      chip.className = 'ai-search-chip';
+                      chip.title = '已联网搜索「' + obj.query + '」' + (obj.count ? '，找到 ' + obj.count + ' 个结果' : '');
+                      chip.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.2"/><path d="M20.5 20.5l-4.3-4.3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span></span>';
+                      chip.querySelector('span').textContent = obj.query + (obj.count ? '（' + obj.count + ' 个结果）' : '');
+                      chipsWrap.appendChild(chip);
+                    });
+                    bubble.appendChild(chipsWrap);
+                  }
 
-                // 思考记录：合并首轮推理与搜索后的推理，一起写入历史
-                var allReasoning = [reasoningAccum, followReasoningAccum].filter(Boolean).join('\n');
-                var finalContent = '';
-                if (allReasoning) finalContent += '<think>' + stripToolMarkup(allReasoning) + '</think>\n';
-                searchChipParts.forEach(function (chip) { finalContent += '<tool_call>' + chip + '</tool_call>\n'; });
-                finalContent += stripToolMarkup(accumulated)
-                  .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
-                  .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
-                pushAssistant(finalContent);
-                saveAIHistory();
-                endAISend();
-              }).catch(function (fErr) {
-                var fErrMsg = '联网搜索后回答失败：' + (fErr && fErr.message ? fErr.message : fErr);
-                if (bubble) {
+                  var allReasoning = [ctx.reasoningAccum, ctx.followReasoningAccum].filter(Boolean).join('\n');
+                  var finalContent = '';
+                  if (allReasoning) finalContent += '<think>' + stripToolMarkup(allReasoning) + '</think>\n';
+                  ctx.searchChipParts.forEach(function (chip) { finalContent += '<tool_call>' + chip + '</tool_call>\n'; });
+                  finalContent += stripToolMarkup(ctx.accumulated)
+                    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+                    .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
+                  pushAssistant(finalContent);
+                  saveAIHistory();
+                  endAISend();
+                }).catch(function (fErr) {
+                  var fErrMsg = '联网搜索后回答失败：' + (fErr && fErr.message ? fErr.message : fErr);
                   bubble.innerHTML = renderMarkdown(fErrMsg);
                   bubble.style.whiteSpace = 'normal';
                   bubble.className = 'ai-msg ai-msg-error';
-                }
-                reasoningTextEl = null;
-                var _et = bubble.querySelector('.ai-thinking');
-                if (_et) finishThinking(_et);
-                aiHistory.push({ role: 'assistant', content: fErrMsg });
-                saveAIHistory();
-                endAISend();
-              });
+                  ctx.reasoningTextEl = null;
+                  var _et = bubble.querySelector('.ai-thinking');
+                  if (_et) finishThinking(_et);
+                  aiHistory.push({ role: 'assistant', content: fErrMsg });
+                  saveAIHistory();
+                  endAISend();
+                });
+              }
             }
-          }
 
-          // 正常流程（无工具调用）
-          // 思考完成收起：同时覆盖 reasoning_content 与内联 <think> 两种来源
-          if (bubble) {
             var _dtDone = bubble.querySelector('.ai-thinking');
             if (_dtDone) finishThinking(_dtDone);
-          }
 
-          // 深度思考兜底：ops 若只出现在 reasoning_content 里，也要能应用
-          accumulated = mergeReasoningOps(accumulated, reasoningAccum);
-
-          if (!accumulated) {
-            aiSending = false;
-            aiSend.disabled = false;
-            aiSend.textContent = '发送';
-            return;
-          }
-
-          // Debug：原始输出（排查格式问题时看这一行）
-          if (window.console && console.log) console.log('[AI] ← final content:', accumulated);
-
-          // 模型若没按 <ops> 包裹、直接吐 JSON，先规范成 <ops> 再渲染/应用
-          accumulated = normalizeOpsTags(accumulated);
-
-          // 重新渲染气泡（流式结束，折叠区设为收起状态）
-          renderStreamBubble(bubble, accumulated, false);
-
-          // 提取 <ops> 并应用 diff（不是重写整张列表，模型只描述"做了什么改动"）
-          var opsApplied = applyOpsFromContent(accumulated, bubble);
-
-          // 保存 AI 回复到历史：只存纯文本 + 语义标签，不存渲染后的 HTML 快照，
-          // 这样样式改动后旧消息也会用最新样式重新渲染。
-          var finalizeNormal = function () {
-            var finalContent = stripToolMarkup(accumulated)
-              .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
-              .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
-            if (reasoningAccum) {
-              finalContent = '<think>' + stripToolMarkup(reasoningAccum) + '</think>\n' + finalContent;
+            ctx.accumulated = mergeReasoningOps(ctx.accumulated, ctx.reasoningAccum);
+            if (!ctx.accumulated) {
+              endAISend();
+              return;
             }
-            // 注意：普通（无工具调用）回复不回传 reasoning_content —— 旧版 reasoner 会因此 400
-            pushAssistant(finalContent);
-            saveAIHistory();
+            if (window.console && console.log) console.log('[AI] ← final content:', ctx.accumulated);
+            ctx.accumulated = normalizeOpsTags(ctx.accumulated);
+            renderStreamBubble(bubble, ctx.accumulated, false);
+            var opsApplied = applyOpsFromContent(ctx.accumulated, bubble);
+
+            var finalizeNormal = function () {
+              var finalContent = stripToolMarkup(ctx.accumulated)
+                .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+                .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
+              if (ctx.reasoningAccum) {
+                finalContent = '<think>' + stripToolMarkup(ctx.reasoningAccum) + '</think>\n' + finalContent;
+              }
+              pushAssistant(finalContent);
+              saveAIHistory();
+              endAISend();
+            };
+
+            if (!opsApplied && !ctx.opsRetried && wantsCardChange(text) && looksLikeOpsAttempt(ctx.accumulated)) {
+              if (window.console && console.log) console.log('[AI] 未解析到 ops，触发一次纠错重试');
+              return runRetryOpsOnce(ctx).then(finalizeNormal).catch(function (e) {
+                console.warn('[AI] 纠错重试失败:', e);
+                finalizeNormal();
+              });
+            }
+            finalizeNormal();
+          }).catch(function (lateErr) {
+            console.warn('[AI] 处理异常:', lateErr);
+            if (bubble && !bubble.querySelector('.ai-undo-btn')) {
+              var lateTag = document.createElement('div');
+              lateTag.className = 'ai-cancel-tag';
+              lateTag.textContent = '操作应用失败：' + lateErr.message;
+              bubble.appendChild(lateTag);
+            }
             endAISend();
-          };
-
-          // P1：修改意图但第一次没解析到 ops → 自动纠错重试一轮（最多一次）
-          if (!opsApplied && !opsRetried && wantsCardChange(text) && looksLikeOpsAttempt(accumulated)) {
-            if (window.console && console.log) console.log('[AI] 未解析到 ops，触发一次纠错重试');
-            return retryOpsOnce().then(finalizeNormal).catch(function (e) {
-              console.warn('[AI] 纠错重试失败:', e);
-              finalizeNormal();
-            });
-          }
-          finalizeNormal();
-        }).catch(function (lateErr) {
-          // 兜底：后段异常（如 ops JSON 解析失败）不应让发送按钮卡死在"处理中"
-          console.warn('[AI] 处理异常:', lateErr);
-          if (bubble && !bubble.querySelector('.ai-undo-btn')) {
-            var lateTag = document.createElement('div');
-            lateTag.className = 'ai-cancel-tag';
-            lateTag.textContent = '操作应用失败：' + lateErr.message;
-            bubble.appendChild(lateTag);
-          }
-          endAISend();
-        });
-      } // end of doSend
-
-        try {
-          doSend('');
+          });
         } catch (e) {
           console.warn('[AI] 发送异常:', e);
           addAIMessage('发送失败：' + e.message, 'error');
           endAISend();
         }
       }
-
-
   window.__motuo.toggleAI = toggleAI;
 })();

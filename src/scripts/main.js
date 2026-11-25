@@ -23,6 +23,8 @@
       var AI_SNAPSHOT_KEY    = 'newtab.ai.snapshot.v1';    // AI 操作前的快照（用于撤销）
       var SCRATCHPAD_KEY     = 'newtab.scratchpad.v1';     // 速记本内容
       var THEME_KEY          = 'newtab.theme.v1';          // 主题模式：light / dark / auto
+      var GREETING_KEY       = 'newtab.greeting.v1';       // T1 时段问候语开关（默认开）
+      var WEBDAV_KEY         = 'newtab.webdav.v1';         // T7b WebDAV 云同步配置
       var BACKUP_META_KEY    = 'newtab.backupMeta.v1';     // 备份提醒状态
       var BACKUP_REMIND_MS   = 30 * 86400000;
       var BACKUP_DISMISS_MS  = 7 * 86400000;
@@ -37,10 +39,12 @@
       var iconCacheMem       = Object.create(null);
       var iconCacheReadyPromise = null;
       function getCachedIconSync(url) {
-        if (!url || !/^https?:/i.test(url)) return '';
+        if (!url || !/^(?:https?:|bmicon:)/i.test(url)) return '';
         var entry = iconCacheMem[url];
         return (entry && entry.dataUrl) ? entry.dataUrl : '';
       }
+      function isFolderItem(it) { return !!(it && it.type === 'folder'); }
+      function makeFolderId() { return 'fld_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
       var STORE_NAME         = 'wallpapers';
       // favicon 自动抓取候选（按顺序尝试，第一个成功即用）
       var RANDOM_COLORS      = ['blue', 'pink', 'orange', 'purple', 'sky', 'green', 'amber'];
@@ -296,20 +300,80 @@
         tile.textContent = ch;
       }
 
+      function resolveItemIconSrc(icon) {
+        if (!icon) return '';
+        if (/^(?:https?:|bmicon:)/i.test(icon)) {
+          var hit = getCachedIconSync(icon);
+          if (hit) return hit;
+          if (/^bmicon:/i.test(icon)) return '';
+        }
+        return icon;
+      }
+
+      function fillMiniTile(mini, child) {
+        mini.className = 'folder-mini-tile';
+        if (child.iconSrc === 'image' && child.icon) {
+          var resolved = resolveItemIconSrc(child.icon);
+          if (resolved) {
+            var img = document.createElement('img');
+            img.src = resolved;
+            if (/^https?:/i.test(child.icon)) img.dataset.iconUrl = child.icon;
+            img.alt = '';
+            img.onerror = function () {
+              if (img.dataset.iconUrl && !img.dataset.retriedRemote && img.src !== img.dataset.iconUrl) {
+                img.dataset.retriedRemote = '1';
+                img.src = img.dataset.iconUrl;
+                return;
+              }
+              mini.textContent = (child.letter || (child.name || '').trim().charAt(0).toUpperCase()) || '?';
+            };
+            mini.appendChild(img);
+            return;
+          }
+        }
+        mini.textContent = (child.letter || (child.name || '').trim().charAt(0).toUpperCase()) || '?';
+        if (child.color && PRESET_COLORS.indexOf(child.color) !== -1) mini.classList.add(child.color);
+      }
+
+      function fillFolderTile(tile, folder) {
+        while (tile.firstChild) tile.removeChild(tile.firstChild);
+        tile.removeAttribute('style');
+        tile.className = 'tile folder-tile';
+        var kids = Array.isArray(folder.children) ? folder.children : [];
+        if (!kids.length) {
+          var em = document.createElement('div');
+          em.className = 'folder-empty-glyph';
+          em.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
+          tile.appendChild(em);
+          return;
+        }
+        kids.slice(0, 4).forEach(function (child) {
+          var mini = document.createElement('div');
+          fillMiniTile(mini, child);
+          tile.appendChild(mini);
+        });
+      }
+
       function fillTile(tile, item) {
+        if (isFolderItem(item)) {
+          fillFolderTile(tile, item);
+          return;
+        }
         while (tile.firstChild) tile.removeChild(tile.firstChild);
         tile.removeAttribute('style');
         tile.className = 'tile';
 
         if (item.iconSrc === 'image' && item.icon) {
+          var cachedSrc = '';
+          if (/^(?:https?:|bmicon:)/i.test(item.icon)) cachedSrc = getCachedIconSync(item.icon);
+          if (/^bmicon:/i.test(item.icon) && !cachedSrc) {
+            fillFallbackTile(tile, item);
+            return;
+          }
           // 背景用主题变量：深色模式为深色，自动模式为透明（背景由 CSS 反色层提供）
           tile.style.background = 'var(--tile-img-bg)';
           var img = document.createElement('img');
-          var cachedSrc = '';
-          if (/^https?:/i.test(item.icon)) {
-            img.dataset.iconUrl = item.icon;
-            cachedSrc = getCachedIconSync(item.icon);
-          }
+          if (/^(?:https?:|bmicon:)/i.test(item.icon)) img.dataset.iconUrl = item.icon;
           img.src = cachedSrc || item.icon;
           img.alt = item.name || '';
           img.style.width = '100%';
@@ -319,7 +383,7 @@
           img.style.boxSizing = 'border-box';
           img.style.borderRadius = '16px';
           img.onerror = function () {
-            if (img.dataset.iconUrl && !img.dataset.retriedRemote && img.src !== img.dataset.iconUrl) {
+            if (img.dataset.iconUrl && /^https?:/i.test(img.dataset.iconUrl) && !img.dataset.retriedRemote && img.src !== img.dataset.iconUrl) {
               img.dataset.retriedRemote = '1';
               img.src = img.dataset.iconUrl;
               return;
@@ -339,12 +403,14 @@
         }
       }
 
-      // 创建一张未挂载的快捷方式 DOM 节点
+      // 创建一张未挂载的快捷方式或分组 DOM 节点
       function buildCard(item) {
         var a = document.createElement('a');
-        a.className = 'shortcut';
-        a.href = item.url || '#';
-        a.dataset.iconSrc = item.iconSrc || 'color';
+        var folder = isFolderItem(item);
+        a.className = 'shortcut' + (folder ? ' shortcut-folder' : '');
+        a.href = folder ? '#' : (item.url || '#');
+        a.dataset.iconSrc = folder ? 'folder' : (item.iconSrc || 'color');
+        if (folder && item.id) a.dataset.folderId = item.id;
 
         var tile = document.createElement('div');
         fillTile(tile, item);
@@ -371,8 +437,12 @@
       // 就地更新某张卡片的内容（编辑后用，不重绘避免闪烁）
       function updateCardContent(card, item) {
         cardItemMap.set(card, item);
-        card.href = item.url || '#';
-        card.dataset.iconSrc = item.iconSrc || 'color';
+        var folder = isFolderItem(item);
+        card.className = 'shortcut' + (folder ? ' shortcut-folder' : '');
+        card.href = folder ? '#' : (item.url || '#');
+        card.dataset.iconSrc = folder ? 'folder' : (item.iconSrc || 'color');
+        if (folder && item.id) card.dataset.folderId = item.id;
+        else card.removeAttribute('data-folder-id');
         var tile = card.querySelector('.tile');
         var label = card.querySelector('.label');
         fillTile(tile, item);
@@ -753,9 +823,18 @@
          });
        }
 
-      // 打开添加弹窗
+      // 打开添加弹窗（支持主页或指定文件夹内添加/编辑）
       var editingIndex = -1; // ≥0 表示编辑模式
-      function openAddModal() {
+      var targetFolderId = null;
+      var openFolderId = null;
+      function findFolderById(fid) {
+        if (!fid) return null;
+        for (var i = 0; i < list.length; i++) {
+          if (isFolderItem(list[i]) && list[i].id === fid) return list[i];
+        }
+        return null;
+      }
+      function openAddModal(folderId) {
         addForm.reset();
         editingIndex = -1;
         addImageField.style.display = 'none';
@@ -772,13 +851,28 @@
         setTimeout(function () { addName.focus(); }, 50);
       }
 
-      slot.addEventListener('click', openAddModal);
+      slot.addEventListener('click', function () { targetFolderId = null; openAddModal(null); });
       slot.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          openAddModal();
+          targetFolderId = null;
+          openAddModal(null);
         }
       });
+      var addCreateFolderBtn = document.getElementById('addCreateFolderBtn');
+      if (addCreateFolderBtn) {
+        addCreateFolderBtn.addEventListener('click', function () {
+          var folderName = (addName.value || '').trim();
+          if (!folderName) folderName = (prompt('输入新分组名称：', '新建分组') || '').trim();
+          if (!folderName) return;
+          var folder = { type: 'folder', id: makeFolderId(), name: folderName.slice(0, 20), children: [] };
+          list.push(folder);
+          save(list);
+          appendCard(folder);
+          closeModal(addModal);
+          openFolderModal(folder.id);
+        });
+      }
 
       // 提交添加
       addForm.addEventListener('submit', function (e) {
@@ -805,12 +899,27 @@
           item.color = pickRandomColor();
         }
 
-        if (editingIndex >= 0) {
+        var targetFolder = findFolderById(targetFolderId);
+        if (targetFolder) {
+          if (!Array.isArray(targetFolder.children)) targetFolder.children = [];
+          if (editingIndex >= 0 && editingIndex < targetFolder.children.length) {
+            targetFolder.children[editingIndex] = item;
+          } else {
+            targetFolder.children.push(item);
+          }
+          editingIndex = -1;
+          targetFolderId = null;
+          save(list);
+          var rootFolderEl = nav.querySelector('.shortcut-folder[data-folder-id="' + targetFolder.id + '"]');
+          if (rootFolderEl) updateCardContent(rootFolderEl, targetFolder);
+          if (openFolderId === targetFolder.id) renderFolderGrid(targetFolder);
+        } else if (editingIndex >= 0) {
           // 编辑模式：就地更新，不重绘避免闪烁
           list[editingIndex] = item;
           var existing = nav.querySelectorAll('.shortcut')[editingIndex];
           if (existing) updateCardContent(existing, item);
           editingIndex = -1;
+          save(list);
         } else {
           // 添加模式：追加单卡（带入场动画），不重绘已有卡片
           list.push(item);
@@ -818,8 +927,8 @@
           if (mode === 'auto') {
             applyAutoIcon(newCard, list.length - 1, item.color);
           }
+          save(list);
         }
-        save(list);
 
         closeModal(addModal);
       });
@@ -976,21 +1085,48 @@
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         var card = e.target.closest('.shortcut');
+        nav.querySelectorAll('.shortcut.drop-target').forEach(function (el) { el.classList.remove('drop-target'); });
+        nav.querySelectorAll('.shortcut.drop-into-folder').forEach(function (el) { el.classList.remove('drop-into-folder'); });
         if (card && card !== dragSrc) {
-          nav.querySelectorAll('.shortcut.drop-target').forEach(function (el) { el.classList.remove('drop-target'); });
-          card.classList.add('drop-target');
+          var srcData = cardItemMap.get(dragSrc);
+          var dstData = cardItemMap.get(card);
+          var rect = card.getBoundingClientRect ? card.getBoundingClientRect() : null;
+          var ratio = (rect && rect.width > 0) ? (e.clientX - rect.left) / rect.width : 0;
+          if (dstData && isFolderItem(dstData) && srcData && !isFolderItem(srcData) && ratio >= 0.22 && ratio <= 0.78) {
+            card.classList.add('drop-into-folder');
+          } else {
+            card.classList.add('drop-target');
+          }
         }
       });
 
       nav.addEventListener('dragleave', function (e) {
         var card = e.target.closest('.shortcut');
-        if (card) card.classList.remove('drop-target');
+        if (card) {
+          card.classList.remove('drop-target');
+          card.classList.remove('drop-into-folder');
+        }
       });
 
       nav.addEventListener('drop', function (e) {
         if (!editing || !dragSrc) return;
         e.preventDefault();
         var target = e.target.closest('.shortcut');
+        if (target && target !== dragSrc && target.classList.contains('drop-into-folder')) {
+          target.classList.remove('drop-into-folder');
+          var srcItem = cardItemMap.get(dragSrc);
+          var dstFolder = cardItemMap.get(target);
+          var srcIdx = list.indexOf(srcItem);
+          if (srcItem && !isFolderItem(srcItem) && dstFolder && isFolderItem(dstFolder) && srcIdx !== -1) {
+            list.splice(srcIdx, 1);
+            if (!Array.isArray(dstFolder.children)) dstFolder.children = [];
+            dstFolder.children.push(srcItem);
+            save(list);
+            render(list);
+            return;
+          }
+        }
+        nav.querySelectorAll('.shortcut.drop-into-folder').forEach(function (el) { el.classList.remove('drop-into-folder'); });
 
         // 用 FLIP 包住整个 DOM 变更，让其他卡片平滑滑动
         animateReorder(function () {
@@ -1093,73 +1229,310 @@
         refreshDraggable();
       };
 
-      // 卡片右键菜单
-      var ctxMenu = document.getElementById('ctxMenu');
-      var ctxCard = null; // 当前右键的卡片对应的 list 索引
+      // ========== T5 卡片分组弹窗与右键菜单 ==========
+      var folderModal = document.getElementById('folderModal');
+      var folderTitleInput = document.getElementById('folderTitleInput');
+      var folderGrid = document.getElementById('folderGrid');
+      var folderAddItemBtn = document.getElementById('folderAddItemBtn');
+      var folderDissolveBtn = document.getElementById('folderDissolveBtn');
+      var editNewFolderBtn = document.getElementById('editNewFolderBtn');
 
-      // 在 nav 上委托 contextmenu 事件
+      function renderFolderGrid(folder) {
+        if (!folderGrid) return;
+        folderGrid.innerHTML = '';
+        var kids = Array.isArray(folder && folder.children) ? folder.children : [];
+        if (!kids.length) {
+          var em = document.createElement('div');
+          em.className = 'folder-grid-empty';
+          em.textContent = '该分组暂无卡片，点击右上角「+ 添加卡片」或右键主页卡片「移入分组」';
+          folderGrid.appendChild(em);
+          return;
+        }
+        kids.forEach(function (child) {
+          folderGrid.appendChild(buildCard(child));
+        });
+      }
+
+      function openFolderModal(fid) {
+        var folder = findFolderById(fid);
+        if (!folder || !folderModal) return;
+        openFolderId = folder.id;
+        if (folderTitleInput) folderTitleInput.value = folder.name || '';
+        renderFolderGrid(folder);
+        openModal(folderModal);
+      }
+
+      function dissolveFolderAt(idx) {
+        var folder = list[idx];
+        if (!folder || !isFolderItem(folder)) return;
+        var kids = Array.isArray(folder.children) ? folder.children : [];
+        Array.prototype.splice.apply(list, [idx, 1].concat(kids));
+        if (openFolderId === folder.id && folderModal) {
+          openFolderId = null;
+          closeModal(folderModal);
+        }
+        save(list);
+        render(list);
+      }
+
+      function commitFolderRename() {
+        var folder = findFolderById(openFolderId);
+        if (!folder || !folderTitleInput) return;
+        var next = folderTitleInput.value.trim();
+        if (!next) { folderTitleInput.value = folder.name || '新建分组'; return; }
+        if (next !== folder.name) {
+          folder.name = next.slice(0, 20);
+          save(list);
+          var el = nav.querySelector('.shortcut-folder[data-folder-id="' + folder.id + '"]');
+          if (el) updateCardContent(el, folder);
+        }
+      }
+      if (folderTitleInput) {
+        folderTitleInput.addEventListener('blur', commitFolderRename);
+        folderTitleInput.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); folderTitleInput.blur(); }
+        });
+      }
+      if (folderAddItemBtn) {
+        folderAddItemBtn.addEventListener('click', function () {
+          if (!openFolderId) return;
+          targetFolderId = openFolderId;
+          openAddModal(openFolderId);
+        });
+      }
+      if (folderDissolveBtn) {
+        folderDissolveBtn.addEventListener('click', function () {
+          if (!openFolderId) return;
+          var idx = list.findIndex(function (it) { return isFolderItem(it) && it.id === openFolderId; });
+          if (idx !== -1) dissolveFolderAt(idx);
+        });
+      }
+      if (editNewFolderBtn) {
+        editNewFolderBtn.addEventListener('click', function () {
+          var name = (prompt('输入新分组名称：', '新建分组') || '').trim();
+          if (!name) return;
+          var folder = { type: 'folder', id: makeFolderId(), name: name.slice(0, 20), children: [] };
+          list.push(folder);
+          save(list);
+          appendCard(folder);
+        });
+      }
+
+      // 主页点击分组卡片打开分组弹窗（编辑模式阻止点击跳转）
+      nav.addEventListener('click', function (e) {
+        var folderEl = e.target.closest('.shortcut-folder');
+        if (!folderEl) return;
+        e.preventDefault();
+        if (editing) return;
+        var item = cardItemMap.get(folderEl);
+        if (item && isFolderItem(item)) openFolderModal(item.id);
+      });
+
+      // 卡片 / 分组右键菜单
+      var ctxMenu = document.getElementById('ctxMenu');
+      var moveFolderMenu = document.getElementById('moveFolderMenu');
+      var ctxCard = null;        // root 索引（或 folder 内索引）
+      var ctxFolderId = null;    // 非 null 表示来自 folderModal 内部子卡
+      var lastCtxPos = { x: 80, y: 80 };
+
+      function configureCtxMenu(item, inFolderModal) {
+        var isFld = isFolderItem(item);
+        var setShow = function (act, visible) {
+          var b = ctxMenu.querySelector('[data-action="' + act + '"]');
+          if (b) b.hidden = !visible;
+        };
+        setShow('newtab', !isFld);
+        setShow('openfolder', isFld);
+        setShow('edit', true);
+        var editBtnCtx = ctxMenu.querySelector('[data-action="edit"]');
+        if (editBtnCtx) editBtnCtx.textContent = isFld ? '重命名分组' : '编辑';
+        setShow('movetofolder', !isFld && !inFolderModal);
+        setShow('moveout', !isFld && !!inFolderModal);
+        setShow('dissolvefolder', isFld);
+        setShow('delete', true);
+        var sep = ctxMenu.querySelector('[data-ctx-sep]');
+        if (sep) sep.hidden = isFld;
+        setShow('copy', !isFld);
+        setShow('copymd', !isFld);
+      }
+
       nav.addEventListener('contextmenu', function (e) {
         var card = e.target.closest('.shortcut');
         if (!card) return;
         e.preventDefault();
-        // 找对应 list 索引
         var cards = nav.querySelectorAll('.shortcut');
         var idx = Array.prototype.indexOf.call(cards, card);
         if (idx < 0 || idx >= list.length) return;
         ctxCard = idx;
-        // 定位菜单
-        ctxMenu.style.left = Math.min(e.clientX, window.innerWidth - 160) + 'px';
-        ctxMenu.style.top = Math.min(e.clientY, window.innerHeight - 180) + 'px';
+        ctxFolderId = null;
+        configureCtxMenu(list[idx], false);
+        lastCtxPos = { x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 230) };
+        ctxMenu.style.left = lastCtxPos.x + 'px';
+        ctxMenu.style.top = lastCtxPos.y + 'px';
+        if (moveFolderMenu) moveFolderMenu.classList.remove('open');
         ctxMenu.classList.add('open');
       });
 
-      // 菜单项点击处理
+      if (folderGrid) {
+        folderGrid.addEventListener('contextmenu', function (e) {
+          var card = e.target.closest('.shortcut');
+          if (!card || !openFolderId) return;
+          e.preventDefault();
+          var folder = findFolderById(openFolderId);
+          if (!folder || !Array.isArray(folder.children)) return;
+          var cards = folderGrid.querySelectorAll('.shortcut');
+          var idx = Array.prototype.indexOf.call(cards, card);
+          if (idx < 0 || idx >= folder.children.length) return;
+          ctxCard = idx;
+          ctxFolderId = openFolderId;
+          configureCtxMenu(folder.children[idx], true);
+          lastCtxPos = { x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 230) };
+          ctxMenu.style.left = lastCtxPos.x + 'px';
+          ctxMenu.style.top = lastCtxPos.y + 'px';
+          if (moveFolderMenu) moveFolderMenu.classList.remove('open');
+          ctxMenu.classList.add('open');
+        });
+      }
+
+      function fillAddFormFromItem(item) {
+        document.querySelector('#addTitle span').textContent = '编辑快捷方式';
+        addName.value = item.name || '';
+        addUrl.value = item.url || '';
+        if (item.iconSrc === 'image') {
+          document.querySelector('input[name="iconSrc"][value="image"]').checked = true;
+          addImageField.style.display = '';
+          addColorField.style.display = 'none';
+          addLetterField.style.display = 'none';
+          if (item.icon) addImage.value = item.icon;
+        } else if (item.iconSrc === 'color') {
+          document.querySelector('input[name="iconSrc"][value="color"]').checked = true;
+          addImageField.style.display = 'none';
+          addColorField.style.display = '';
+          addLetterField.style.display = '';
+          if (item.color) {
+            chosenColor = item.color;
+            addColorPicker.querySelectorAll('.color-dot').forEach(function (d) {
+              d.classList.toggle('selected', d.dataset.color === item.color);
+            });
+          }
+          if (item.letter) addLetter.value = item.letter;
+        }
+        updatePreview();
+      }
+
+      function openMoveToFolderPicker(cardIndex) {
+        if (!moveFolderMenu) return;
+        moveFolderMenu.innerHTML = '';
+        var folders = list.filter(isFolderItem);
+        folders.forEach(function (fld) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = fld.name + '（' + ((fld.children && fld.children.length) || 0) + '）';
+          b.addEventListener('click', function () {
+            moveFolderMenu.classList.remove('open');
+            var cardItem = list[cardIndex];
+            if (!cardItem || isFolderItem(cardItem)) return;
+            list.splice(cardIndex, 1);
+            if (!Array.isArray(fld.children)) fld.children = [];
+            fld.children.push(cardItem);
+            save(list);
+            render(list);
+          });
+          moveFolderMenu.appendChild(b);
+        });
+        if (folders.length) moveFolderMenu.appendChild(document.createElement('hr'));
+        var newBtn = document.createElement('button');
+        newBtn.type = 'button';
+        newBtn.textContent = '+ 新建分组并移入';
+        newBtn.addEventListener('click', function () {
+          moveFolderMenu.classList.remove('open');
+          var cardItem = list[cardIndex];
+          if (!cardItem || isFolderItem(cardItem)) return;
+          var fName = (prompt('输入新分组名称：', '新建分组') || '').trim();
+          if (!fName) return;
+          var newFld = { type: 'folder', id: makeFolderId(), name: fName.slice(0, 20), children: [cardItem] };
+          list.splice(cardIndex, 1, newFld);
+          save(list);
+          render(list);
+        });
+        moveFolderMenu.appendChild(newBtn);
+        moveFolderMenu.style.left = Math.min(lastCtxPos.x + 12, window.innerWidth - 190) + 'px';
+        moveFolderMenu.style.top = Math.min(lastCtxPos.y + 12, window.innerHeight - 200) + 'px';
+        moveFolderMenu.classList.add('open');
+      }
+
       ctxMenu.addEventListener('click', function (e) {
         var btn = e.target.closest('button');
         if (!btn || ctxCard === null) return;
         var action = btn.dataset.action;
-        var item = list[ctxCard];
+        var inFld = !!ctxFolderId;
+        var parentFolder = inFld ? findFolderById(ctxFolderId) : null;
+        var item = inFld ? (parentFolder && parentFolder.children && parentFolder.children[ctxCard]) : list[ctxCard];
         if (!item) return;
         ctxMenu.classList.remove('open');
+
+        if (isFolderItem(item)) {
+          var fIdx = ctxCard;
+          ctxCard = null;
+          if (action === 'openfolder') {
+            openFolderModal(item.id);
+          } else if (action === 'edit') {
+            openFolderModal(item.id);
+            if (folderTitleInput) setTimeout(function () { folderTitleInput.focus(); folderTitleInput.select(); }, 30);
+          } else if (action === 'dissolvefolder') {
+            dissolveFolderAt(fIdx);
+          } else if (action === 'delete') {
+            var count = Array.isArray(item.children) ? item.children.length : 0;
+            if (count > 0 && !confirm('确定删除分组「' + item.name + '」及其中的 ' + count + ' 张卡片吗？')) return;
+            var toRemF = nav.querySelectorAll('.shortcut')[fIdx];
+            list.splice(fIdx, 1);
+            save(list);
+            if (toRemF) removeCardWithAnim(toRemF);
+          }
+          return;
+        }
 
         switch (action) {
           case 'newtab':
             window.open(item.url, '_blank');
+            ctxCard = null;
             break;
           case 'edit':
-            // 打开编辑弹窗并预填数据
-            openAddModal();
+            targetFolderId = inFld ? ctxFolderId : null;
+            openAddModal(targetFolderId);
             editingIndex = ctxCard;
-            document.querySelector('#addTitle span').textContent = '编辑快捷方式';
-            addName.value = item.name;
-            addUrl.value = item.url;
-            if (item.iconSrc === 'image') {
-              document.querySelector('input[name="iconSrc"][value="image"]').checked = true;
-              addImageField.style.display = '';
-              addColorField.style.display = 'none';
-              addLetterField.style.display = 'none';
-              if (item.icon) addImage.value = item.icon;
-            } else if (item.iconSrc === 'color') {
-              document.querySelector('input[name="iconSrc"][value="color"]').checked = true;
-              addImageField.style.display = 'none';
-              addColorField.style.display = '';
-              addLetterField.style.display = '';
-              if (item.color) {
-                chosenColor = item.color;
-                addColorPicker.querySelectorAll('.color-dot').forEach(function (d) {
-                  d.classList.toggle('selected', d.dataset.color === item.color);
-                });
-              }
-              if (item.letter) addLetter.value = item.letter;
+            fillAddFormFromItem(item);
+            ctxCard = null;
+            break;
+          case 'movetofolder':
+            var moveIdx = ctxCard;
+            ctxCard = null;
+            openMoveToFolderPicker(moveIdx);
+            break;
+          case 'moveout':
+            if (parentFolder && Array.isArray(parentFolder.children)) {
+              parentFolder.children.splice(ctxCard, 1);
+              var pIdx = list.indexOf(parentFolder);
+              list.splice(pIdx >= 0 ? pIdx + 1 : list.length, 0, item);
+              save(list);
+              render(list);
+              renderFolderGrid(parentFolder);
             }
-            updatePreview();
             ctxCard = null;
             break;
           case 'delete':
-            var toRemove = nav.querySelectorAll('.shortcut')[ctxCard];
-            list.splice(ctxCard, 1);
-            save(list);
-            if (toRemove) removeCardWithAnim(toRemove);
+            if (inFld && parentFolder) {
+              parentFolder.children.splice(ctxCard, 1);
+              save(list);
+              renderFolderGrid(parentFolder);
+              var rootF = nav.querySelector('.shortcut-folder[data-folder-id="' + parentFolder.id + '"]');
+              if (rootF) updateCardContent(rootF, parentFolder);
+            } else {
+              var toRemove = nav.querySelectorAll('.shortcut')[ctxCard];
+              list.splice(ctxCard, 1);
+              save(list);
+              if (toRemove) removeCardWithAnim(toRemove);
+            }
             ctxCard = null;
             break;
           case 'copy':
@@ -1173,10 +1546,12 @@
         }
       });
 
-      // 点击其他位置关闭右键菜单
       document.addEventListener('click', function (e) {
         if (!ctxMenu.contains(e.target)) {
           ctxMenu.classList.remove('open');
+        }
+        if (moveFolderMenu && !moveFolderMenu.contains(e.target) && !ctxMenu.contains(e.target)) {
+          moveFolderMenu.classList.remove('open');
         }
       });
 
@@ -1206,17 +1581,82 @@
         return fetch(dataURL).then(function (r) { return r.blob(); });
       }
 
-      // 导出：打包快捷方式 + 壁纸图片 + AI 配置/历史 + 个性化配置
-      exportBtn.addEventListener('click', function () {
-        // 先读取壁纸（可能为 null），再组包下载；视频/超大壁纸不塞进备份（会让 JSON 巨大甚至失败）
-        var skippedWallpaper = false;
-        loadWallpaperFromDB().then(function (wpBlob) {
-          if (wpBlob && (wpBlob.size > 10 * 1024 * 1024 || /^video\//i.test(wpBlob.type || ''))) {
-            skippedWallpaper = true;
-            return null;
+      function sanitizeImportedCard(it) {
+        if (!it || typeof it.name !== 'string' || !it.name.trim()) return null;
+        if (it.type === 'folder') {
+          var kids = Array.isArray(it.children) ? it.children.map(sanitizeImportedCard).filter(function (c) { return c && !isFolderItem(c); }) : [];
+          return { type: 'folder', id: String(it.id || makeFolderId()), name: String(it.name).slice(0, 40), children: kids };
+        }
+        var clean = { name: String(it.name).slice(0, 40), url: it.url == null ? '' : String(it.url) };
+        if (it.iconSrc === 'image' && it.icon) { clean.iconSrc = 'image'; clean.icon = String(it.icon); }
+        else if (it.color) {
+          var src = it.iconSrc || 'color';
+          if (src !== 'image') {
+            clean.iconSrc = src; clean.color = String(it.color);
+            if (it.letter) clean.letter = String(it.letter);
           }
-          return blobToDataURL(wpBlob);
-        }).then(function (wallpaperDataUrl) {
+        }
+        return clean;
+      }
+
+      function mergeImportedItems(existing, incoming) {
+        var urlSet = {};
+        var folderMap = {};
+        existing.forEach(function (it) {
+          if (isFolderItem(it)) {
+            folderMap[it.name] = it;
+            (it.children || []).forEach(function (c) { if (c && c.url) urlSet[c.url] = true; });
+          } else if (it && it.url) {
+            urlSet[it.url] = true;
+          }
+        });
+        var merged = existing.map(function (it) {
+          return isFolderItem(it)
+            ? Object.assign({}, it, { children: (it.children || []).map(function (c) { return Object.assign({}, c); }) })
+            : Object.assign({}, it);
+        });
+        folderMap = {};
+        merged.forEach(function (it) { if (isFolderItem(it)) folderMap[it.name] = it; });
+        var added = 0;
+        incoming.forEach(function (it) {
+          if (isFolderItem(it)) {
+            var targetF = folderMap[it.name];
+            if (!targetF) {
+              targetF = { type: 'folder', id: it.id || makeFolderId(), name: it.name, children: [] };
+              merged.push(targetF);
+              folderMap[it.name] = targetF;
+            }
+            (it.children || []).forEach(function (c) {
+              if (c.url && urlSet[c.url]) return;
+              if (c.url) urlSet[c.url] = true;
+              targetF.children.push(c);
+              added++;
+            });
+          } else {
+            if (it.url && urlSet[it.url]) return;
+            if (it.url) urlSet[it.url] = true;
+            merged.push(it);
+            added++;
+          }
+        });
+        return { items: merged, added: added };
+      }
+
+      function buildBackupPayload(options) {
+        var opts = options || {};
+        var includeWallpaper = opts.includeWallpaper !== false;
+        var skippedWallpaper = false;
+        var wpPromise = includeWallpaper
+          ? loadWallpaperFromDB().then(function (wpBlob) {
+              if (wpBlob && (wpBlob.size > 10 * 1024 * 1024 || /^video\//i.test(wpBlob.type || ''))) {
+                skippedWallpaper = true;
+                return null;
+              }
+              return blobToDataURL(wpBlob);
+            }).catch(function () { return null; })
+          : Promise.resolve(null);
+
+        return wpPromise.then(function (wallpaperDataUrl) {
           var payload = {
             app: 'Motuo-Tab',
             version: 2,
@@ -1228,7 +1668,9 @@
                 customEngines: readLS('newtab.customEngines.v1'),
                 searchHistory: readLS('newtab.searchHistory.v1'),
                 sitedirect: readLS('newtab.sitedirect.v1'),
+                siteDirectList: readLS('newtab.sitedirect.list.v1'),
                 suggestOnline: readLS('newtab.suggestOnline.v1'),
+                greeting: readLS(GREETING_KEY),
                 solidColor: readLS('newtab.solidColor.v1'),
                 blur: readLS('newtab.blur.v1'),
                 alpha: readLS('newtab.alpha.v1'),
@@ -1246,7 +1688,78 @@
               wallpaper: wallpaperDataUrl
             }
           };
-          var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          return { payload: payload, skippedWallpaper: skippedWallpaper };
+        });
+      }
+
+      function applyBackupPayload(data, opts) {
+        opts = opts || {};
+        var mode = opts.mode === 'merge' ? 'merge' : 'overwrite';
+        var isFull = !!(data && data.data && data.version === 2);
+        var d = isFull ? data.data : null;
+
+        var rawItems = isFull
+          ? (Array.isArray(d.items) ? d.items : [])
+          : (Array.isArray(data) ? data : (Array.isArray(data && data.items) ? data.items : null));
+        var items = (rawItems || []).map(sanitizeImportedCard).filter(Boolean);
+        if (!isFull && !items.length) throw new Error('没有有效的快捷方式');
+
+        if (mode === 'merge') {
+          var resMerge = mergeImportedItems(list, items);
+          list = resMerge.items;
+          save(list);
+          render(list);
+          return { count: resMerge.added, isFull: isFull, merged: true };
+        }
+
+        if (isFull && d.settings) {
+          var st = d.settings;
+          writeLS('newtab.engine.v1', st.engine);
+          writeLS('newtab.customEngines.v1', st.customEngines);
+          writeLS('newtab.searchHistory.v1', st.searchHistory);
+          writeLS('newtab.sitedirect.v1', st.sitedirect);
+          if (st.siteDirectList !== undefined) writeLS('newtab.sitedirect.list.v1', st.siteDirectList);
+          writeLS('newtab.suggestOnline.v1', st.suggestOnline);
+          if (st.greeting !== undefined) writeLS(GREETING_KEY, st.greeting);
+          writeLS('newtab.solidColor.v1', st.solidColor);
+          writeLS('newtab.blur.v1', st.blur);
+          writeLS('newtab.alpha.v1', st.alpha);
+          writeLS('newtab.toggleImg.v1', st.toggleImg);
+          writeLS('newtab.toggleLtr.v1', st.toggleLtr);
+          writeLS('newtab.scratchpad.v1', st.scratchpad);
+          if (st.theme === 'light' || st.theme === 'dark' || st.theme === 'auto') {
+            writeLS(THEME_KEY, st.theme);
+            applyTheme(st.theme);
+          }
+        }
+
+        if (isFull && d.ai) {
+          writeLS('newtab.ai.config.v1', d.ai.config);
+          writeLS('newtab.ai.history.v1', d.ai.history);
+        }
+
+        list = items;
+        save(list);
+        render(list);
+        if (typeof renderGreeting === 'function') renderGreeting();
+        if (window.__motuo && window.__motuo.engines && window.__motuo.engines.reload) window.__motuo.engines.reload();
+        if (typeof renderSiteDirectRules === 'function') renderSiteDirectRules();
+
+        if (isFull && opts.applyWallpaper !== false && d.wallpaper !== undefined) {
+          dataURLToBlob(d.wallpaper).then(function (blob) {
+            return blob ? saveWallpaperToDB(blob) : removeWallpaperFromDB();
+          }).catch(function () {}).then(function () {
+            refreshBackground();
+            if (opts.reloadAfter) setTimeout(function () { location.reload(); }, 300);
+          });
+        }
+        return { count: items.length, isFull: isFull, merged: false };
+      }
+
+      // 导出：打包快捷方式 + 壁纸图片 + AI 配置/历史 + 个性化配置
+      exportBtn.addEventListener('click', function () {
+        buildBackupPayload({ includeWallpaper: true }).then(function (res) {
+          var blob = new Blob([JSON.stringify(res.payload, null, 2)], { type: 'application/json' });
           var url = URL.createObjectURL(blob);
           var a = document.createElement('a');
           a.href = url;
@@ -1256,7 +1769,7 @@
           a.remove();
           URL.revokeObjectURL(url);
           recordBackupExported();
-          if (skippedWallpaper) alert('当前是动态/超大壁纸，备份已跳过壁纸文件（卡片与配置已照常导出）。');
+          if (res.skippedWallpaper) alert('当前是动态/超大壁纸，备份已跳过壁纸文件（卡片与配置已照常导出）。');
         }).catch(function (err) {
           console.error('导出失败', err);
           alert('导出失败：' + (err && err.message ? err.message : '未知错误'));
@@ -1276,79 +1789,10 @@
         reader.onload = function () {
           try {
             var data = JSON.parse(reader.result);
-            // 识别新版备份（v2：含 settings / ai / wallpaper）与旧版（仅快捷方式）
-            var isFull = !!(data && data.data && data.version === 2);
-            var d = isFull ? data.data : null;
-
-            // ---- 快捷方式 ----
-            var items;
-            if (isFull) {
-              items = Array.isArray(d.items) ? d.items : [];
-            } else {
-              items = Array.isArray(data) ? data : (Array.isArray(data.items) ? data.items : null);
-            }
-            items = (items || [])
-              .filter(function (it) { return it && typeof it.name === 'string' && it.name.trim(); })
-              .map(function (it) {
-                var clean = { name: String(it.name).slice(0, 40), url: it.url == null ? '' : String(it.url) };
-                // 保留图标相关字段，避免导入后丢失自定义图标
-                if (it.iconSrc === 'image' && it.icon) { clean.iconSrc = 'image'; clean.icon = String(it.icon); }
-                else if (it.color) {
-                  // 颜色卡片：兼容旧格式（无 iconSrc，仅有 color/letter）
-                  var src = it.iconSrc || 'color';
-                  if (src !== 'image') {
-                    clean.iconSrc = src; clean.color = String(it.color);
-                    if (it.letter) clean.letter = String(it.letter);
-                  }
-                }
-                return clean;
-              });
-            if (!isFull && !items.length) throw new Error('没有有效的快捷方式');
-
-            // ---- 个性化 / 搜索配置 ----
-            if (isFull && d.settings) {
-              var s = d.settings;
-              writeLS('newtab.engine.v1', s.engine);
-              writeLS('newtab.customEngines.v1', s.customEngines);
-              writeLS('newtab.searchHistory.v1', s.searchHistory);
-              writeLS('newtab.sitedirect.v1', s.sitedirect);
-              writeLS('newtab.suggestOnline.v1', s.suggestOnline);
-              writeLS('newtab.solidColor.v1', s.solidColor);
-              writeLS('newtab.blur.v1', s.blur);
-              writeLS('newtab.alpha.v1', s.alpha);
-              writeLS('newtab.toggleImg.v1', s.toggleImg);
-              writeLS('newtab.toggleLtr.v1', s.toggleLtr);
-              writeLS('newtab.scratchpad.v1', s.scratchpad);
-              if (s.theme === 'light' || s.theme === 'dark' || s.theme === 'auto') {
-                writeLS(THEME_KEY, s.theme);
-                applyTheme(s.theme);
-              }
-            }
-
-            // ---- AI 配置 / 历史 ----
-            if (isFull && d.ai) {
-              writeLS('newtab.ai.config.v1', d.ai.config);
-              writeLS('newtab.ai.history.v1', d.ai.history);
-            }
-
-            // 立即应用快捷方式（其余配置刷新页面后生效）
-            list = items;
-            save(list);
-            render(list);
-
-            var summary = '导入成功：恢复 ' + items.length + ' 条快捷方式' +
-              (isFull ? '，以及壁纸与全部配置' : '');
+            var out = applyBackupPayload(data, { mode: 'overwrite', reloadAfter: true, applyWallpaper: true });
+            var summary = '导入成功：恢复 ' + out.count + ' 条快捷方式' +
+              (out.isFull ? '，以及壁纸与全部配置' : '');
             alert(summary);
-
-            if (isFull) {
-              // 恢复壁纸并刷新背景，随后刷新页面让引擎/AI 等启动期配置生效
-              dataURLToBlob(d.wallpaper).then(function (blob) {
-                return blob ? saveWallpaperToDB(blob) : removeWallpaperFromDB();
-              }).catch(function () {}).then(function () {
-                refreshBackground();
-                setTimeout(function () { location.reload(); }, 300);
-              });
-            }
           } catch (e) {
             alert('导入失败：' + e.message);
           }
@@ -1532,7 +1976,13 @@
       function applyCachedIconsToDom() {
         nav.querySelectorAll('.shortcut').forEach(function (card) {
           var item = cardItemMap.get(card);
-          if (!item || item.iconSrc !== 'image' || !item.icon || !/^https?:/i.test(item.icon)) return;
+          if (!item) return;
+          if (isFolderItem(item)) {
+            var ftile = card.querySelector('.tile');
+            if (ftile) fillFolderTile(ftile, item);
+            return;
+          }
+          if (item.iconSrc !== 'image' || !item.icon || !/^(?:https?:|bmicon:)/i.test(item.icon)) return;
           var cached = getCachedIconSync(item.icon);
           if (!cached) return;
           var tile = card.querySelector('.tile');
@@ -1551,6 +2001,26 @@
         if (eng && typeof eng.applyCachedIcons === 'function') eng.applyCachedIcons();
       }
 
+      function walkCards(items, fn) {
+        (items || []).forEach(function (it) {
+          if (!it) return;
+          if (isFolderItem(it)) walkCards(it.children, fn);
+          else fn(it);
+        });
+      }
+
+      function collectPinnedIconKeys() {
+        var keep = {};
+        walkCards(list, function (it) {
+          if (it.iconSrc === 'image' && typeof it.icon === 'string' && /^(?:https?:|bmicon:)/i.test(it.icon)) keep[it.icon] = true;
+        });
+        var eng = window.__motuo && window.__motuo.engines;
+        if (eng && typeof eng.getIconUrls === 'function') {
+          eng.getIconUrls().forEach(function (u) { keep[u] = true; });
+        }
+        return keep;
+      }
+
       function collectRemoteIconUrls() {
         var seen = {};
         var urls = [];
@@ -1560,8 +2030,8 @@
             urls.push(u);
           }
         }
-        list.forEach(function (item) {
-          if (item && item.iconSrc === 'image' && typeof item.icon === 'string') pushUrl(item.icon);
+        walkCards(list, function (item) {
+          if (item.iconSrc === 'image' && typeof item.icon === 'string') pushUrl(item.icon);
         });
         var eng = window.__motuo && window.__motuo.engines;
         if (eng && typeof eng.getIconUrls === 'function') {
@@ -1595,8 +2065,7 @@
             });
           })).then(function () {
             if (updated > 0) applyCachedIconsToDom();
-            var keepSet = {};
-            collectRemoteIconUrls().forEach(function (u) { keepSet[u] = true; });
+            var keepSet = collectPinnedIconKeys();
             return pruneIconCache(keepSet).then(function () {
               return { total: allUrls.length, attempted: targets.length, updated: updated, failed: failed, kept: kept };
             });
@@ -1730,9 +2199,14 @@
       }
       function applyTheme(mode) {
         var pref = (mode === 'dark' || mode === 'auto') ? mode : 'light';
+        var resolved = resolveTheme(pref);
         document.documentElement.setAttribute('data-theme-mode', pref);
-        document.documentElement.setAttribute('data-theme', resolveTheme(pref));
+        document.documentElement.setAttribute('data-theme', resolved);
         updateThemeButtons(pref);
+        var sideTxt = document.getElementById('sysSideThemeText');
+        if (sideTxt) {
+          sideTxt.textContent = pref === 'dark' ? '深色主题' : pref === 'auto' ? ('跟随系统（' + (resolved === 'dark' ? '深色' : '浅色') + '）') : '浅色主题';
+        }
       }
       function setTheme(mode, persist) {
         var pref = (mode === 'dark' || mode === 'auto') ? mode : 'light';
@@ -1786,6 +2260,8 @@
         var txt = document.getElementById('backupReminderText');
         fabBtn.classList.toggle('has-backup-dot', show);
         if (gBtn) gBtn.classList.toggle('has-backup-dot', show);
+        var navDotBtn = document.getElementById('sysDataNavBtn');
+        if (navDotBtn) navDotBtn.classList.toggle('has-backup-dot', show);
         if (bar) bar.hidden = !show;
         if (show && txt) {
           var days = Math.max(30, Math.floor((now - ref) / 86400000));
@@ -1815,21 +2291,76 @@
       refreshBackupReminder();
       setTheme(getTheme(), false);
 
-      // 个性化按钮：打开弹窗
-      personalizeBtn.addEventListener('click', function () {
-        toggleMenu(false);
-        openModal(document.getElementById('personalizeModal'));
-      });
+      // ========== 统一系统设置弹窗导航 + 旧入口直达 ==========
+      var sysSavedTimer = null;
+      function flashSysSaved(msg) {
+        var hint = document.getElementById('sysSavedHint');
+        if (!hint) return;
+        hint.textContent = msg || '已保存';
+        hint.classList.add('show');
+        clearTimeout(sysSavedTimer);
+        sysSavedTimer = setTimeout(function () { hint.classList.remove('show'); }, 1500);
+      }
 
-      document.getElementById('aboutBtn').addEventListener('click', function () {
-        toggleMenu(false);
-        openModal(document.getElementById('aboutModal'));
-      });
+      function switchSettingsPane(paneName) {
+        var modal = document.getElementById('generalConfigModal');
+        if (!modal) return;
+        var navEl = document.getElementById('sysConfigNav');
+        if (navEl) {
+          navEl.querySelectorAll('button[data-pane]').forEach(function (b) {
+            b.classList.toggle('active', b.getAttribute('data-pane') === paneName);
+          });
+        }
+        modal.querySelectorAll('.ai-config-pane').forEach(function (p) {
+          p.classList.toggle('active', p.getAttribute('data-pane') === paneName);
+        });
+        var panesEl = document.getElementById('sysConfigPanes');
+        if (panesEl) panesEl.scrollTop = 0;
+      }
 
-      document.getElementById('shortcutBtn').addEventListener('click', function () {
-        toggleMenu(false);
-        openModal(document.getElementById('shortcutModal'));
-      });
+      function openSettingsModal(paneName) {
+        switchSettingsPane(paneName || 'general');
+        renderSiteDirectRules();
+        openModal(document.getElementById('generalConfigModal'));
+      }
+
+      var sysConfigNav = document.getElementById('sysConfigNav');
+      if (sysConfigNav) {
+        sysConfigNav.addEventListener('click', function (e) {
+          var b = e.target.closest('button[data-pane]');
+          if (!b) return;
+          switchSettingsPane(b.getAttribute('data-pane'));
+        });
+      }
+
+      if (personalizeBtn) {
+        personalizeBtn.addEventListener('click', function () {
+          toggleMenu(false);
+          openSettingsModal('appearance');
+        });
+      }
+      var aboutBtn = document.getElementById('aboutBtn');
+      if (aboutBtn) {
+        aboutBtn.addEventListener('click', function () {
+          toggleMenu(false);
+          openSettingsModal('about');
+        });
+      }
+      var shortcutBtn = document.getElementById('shortcutBtn');
+      if (shortcutBtn) {
+        shortcutBtn.addEventListener('click', function () {
+          toggleMenu(false);
+          openSettingsModal('about');
+        });
+      }
+      var cfgOpenEngineBtn = document.getElementById('cfgOpenEngineBtn');
+      if (cfgOpenEngineBtn) {
+        cfgOpenEngineBtn.addEventListener('click', function () {
+          closeModal(document.getElementById('generalConfigModal'));
+          var engModal = document.getElementById('engineModal');
+          if (engModal) openModal(engModal);
+        });
+      }
 
       document.getElementById('helpBtn').addEventListener('click', function () {
         toggleMenu(false);
@@ -1871,8 +2402,39 @@
 
       document.getElementById('generalConfigBtn').addEventListener('click', function () {
         toggleMenu(false);
-        openModal(document.getElementById('generalConfigModal'));
+        openSettingsModal('general');
       });
+
+      // ========== T1 时段问候语（不显示时钟与日期） ==========
+      var pageTitleEl = document.getElementById('pageTitle') || document.querySelector('.page-title');
+      var toggleGreetingEl = document.getElementById('toggleGreeting');
+      function greetingForHour(h) {
+        if (h < 5) return '夜深了，早点休息';
+        if (h < 9) return '早上好，想干什么';
+        if (h < 12) return '上午好，今天顺顺利利';
+        if (h < 14) return '中午好，记得休息一下';
+        if (h < 18) return '下午好，继续手头的事吧';
+        if (h < 20) return '傍晚好，今天辛苦了';
+        return '晚上好，慢慢来';
+      }
+      function isGreetingEnabled() {
+        try { return localStorage.getItem(GREETING_KEY) !== '0'; } catch (e) { return true; }
+      }
+      function renderGreeting(hourOverride) {
+        var on = isGreetingEnabled();
+        if (toggleGreetingEl) toggleGreetingEl.checked = on;
+        if (!pageTitleEl) return;
+        var h = typeof hourOverride === 'number' ? hourOverride : new Date().getHours();
+        pageTitleEl.textContent = on ? greetingForHour(h) : 'Motuo Tab';
+      }
+      if (toggleGreetingEl) {
+        toggleGreetingEl.addEventListener('change', function () {
+          try { localStorage.setItem(GREETING_KEY, this.checked ? '1' : '0'); } catch (e) {}
+          renderGreeting();
+          flashSysSaved();
+        });
+      }
+      renderGreeting();
 
       // 手动刷新图标缓存（强制全量重抓，失败保留旧缓存）
       var refreshIconsBtn = document.getElementById('refreshIconsBtn');
@@ -1897,27 +2459,627 @@
         });
       }
 
-      // 站内搜索直达开关
+      // 站内搜索直达开关（菜单药丸 ↔ 系统设置双向同步）
       var siteDirectToggle = document.getElementById('toggleSiteDirect');
-      if (siteDirectToggle) {
-        try {
-          siteDirectToggle.checked = localStorage.getItem('newtab.sitedirect.v1') !== '0';
-        } catch (e) {}
-        siteDirectToggle.addEventListener('change', function () {
-          localStorage.setItem('newtab.sitedirect.v1', this.checked ? '1' : '0');
+      var cfgSiteDirectToggle = document.getElementById('cfgToggleSiteDirect');
+      function syncSiteDirectToggles(on) {
+        if (siteDirectToggle) siteDirectToggle.checked = on;
+        if (cfgSiteDirectToggle) cfgSiteDirectToggle.checked = on;
+      }
+      syncSiteDirectToggles(readLS('newtab.sitedirect.v1') !== '0');
+      [siteDirectToggle, cfgSiteDirectToggle].forEach(function (el) {
+        if (!el) return;
+        el.addEventListener('change', function () {
+          var on = !!this.checked;
+          writeLS('newtab.sitedirect.v1', on ? '1' : '0');
+          syncSiteDirectToggles(on);
+          flashSysSaved();
+        });
+      });
+
+      // 联网搜索建议开关（菜单药丸 ↔ 系统设置双向同步）
+      var suggestOnlineToggle = document.getElementById('toggleSuggestOnline');
+      var cfgSuggestOnlineToggle = document.getElementById('cfgToggleSuggestOnline');
+      function syncSuggestOnlineToggles(on) {
+        if (suggestOnlineToggle) suggestOnlineToggle.checked = on;
+        if (cfgSuggestOnlineToggle) cfgSuggestOnlineToggle.checked = on;
+      }
+      syncSuggestOnlineToggles(readLS('newtab.suggestOnline.v1') !== '0');
+      [suggestOnlineToggle, cfgSuggestOnlineToggle].forEach(function (el) {
+        if (!el) return;
+        el.addEventListener('change', function () {
+          var on = !!this.checked;
+          writeLS('newtab.suggestOnline.v1', on ? '1' : '0');
+          syncSuggestOnlineToggles(on);
+          flashSysSaved();
+        });
+      });
+
+      // ========== T3 站内搜索直达规则管理 ==========
+      var siteDirectListEl = document.getElementById('siteDirectList');
+      var sdKeyInput = document.getElementById('sdKeyInput');
+      var sdNameInput = document.getElementById('sdNameInput');
+      var sdUrlInput = document.getElementById('sdUrlInput');
+      var sdAddBtn = document.getElementById('sdAddBtn');
+      var sdResetBtn = document.getElementById('sdResetBtn');
+
+      function renderSiteDirectRules() {
+        var sd = window.__motuo && window.__motuo.siteDirect;
+        if (!siteDirectListEl || !sd) return;
+        var rules = sd.getList();
+        siteDirectListEl.innerHTML = '';
+        if (!rules.length) {
+          var em = document.createElement('div');
+          em.className = 'hist-empty';
+          em.textContent = '暂无站内直达规则，可上方添加或点击「恢复默认」';
+          siteDirectListEl.appendChild(em);
+          return;
+        }
+        rules.forEach(function (rule, idx) {
+          var row = document.createElement('div');
+          row.className = 'sys-sd-item';
+          var badge = document.createElement('span');
+          badge.className = 'sys-sd-badge';
+          badge.textContent = rule.key;
+          var nm = document.createElement('span');
+          nm.className = 'sys-sd-name-lbl';
+          nm.textContent = rule.name;
+          var ul = document.createElement('span');
+          ul.className = 'sys-sd-url-lbl';
+          ul.textContent = rule.url;
+          ul.title = rule.url;
+          var del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'sys-sd-del';
+          del.textContent = '×';
+          del.title = '删除该规则';
+          del.setAttribute('aria-label', '删除 ' + rule.key);
+          del.addEventListener('click', function () {
+            var cur = sd.getList();
+            cur.splice(idx, 1);
+            sd.saveList(cur);
+            renderSiteDirectRules();
+            flashSysSaved();
+          });
+          row.appendChild(badge);
+          row.appendChild(nm);
+          row.appendChild(ul);
+          row.appendChild(del);
+          siteDirectListEl.appendChild(row);
+        });
+      }
+      if (sdAddBtn) {
+        sdAddBtn.addEventListener('click', function () {
+          var sd = window.__motuo && window.__motuo.siteDirect;
+          if (!sd) return;
+          var k = (sdKeyInput ? sdKeyInput.value : '').trim().toLowerCase();
+          var n = (sdNameInput ? sdNameInput.value : '').trim();
+          var u = (sdUrlInput ? sdUrlInput.value : '').trim();
+          if (!k || /\s/.test(k)) { alert('请填写不含空格的触发词（如 wk）'); return; }
+          if (!u) { alert('请填写搜索网址'); return; }
+          if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+          var cur = sd.getList();
+          var dupIdx = cur.findIndex(function (r) { return String(r.key).toLowerCase() === k; });
+          var nextRule = { key: k, name: n || k, url: u };
+          if (dupIdx !== -1) cur[dupIdx] = nextRule;
+          else cur.push(nextRule);
+          sd.saveList(cur);
+          if (sdKeyInput) sdKeyInput.value = '';
+          if (sdNameInput) sdNameInput.value = '';
+          if (sdUrlInput) sdUrlInput.value = '';
+          renderSiteDirectRules();
+          flashSysSaved();
+        });
+      }
+      if (sdResetBtn) {
+        sdResetBtn.addEventListener('click', function () {
+          var sd = window.__motuo && window.__motuo.siteDirect;
+          if (!sd) return;
+          sd.resetDefault();
+          renderSiteDirectRules();
+          flashSysSaved('已恢复默认');
+        });
+      }
+      renderSiteDirectRules();
+
+      // ========== T6 浏览器书签 HTML 导入与预览 ==========
+      function hashString(str) {
+        var h = 2166136261;
+        for (var i = 0; i < str.length; i++) {
+          h ^= str.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return (h >>> 0).toString(36);
+      }
+
+      function parseBookmarkHtml(htmlText) {
+        var doc = new DOMParser().parseFromString(String(htmlText || ''), 'text/html');
+        var groups = [];
+        var rootBucket = { name: '', isRoot: true, items: [] };
+
+        function collectDl(dlEl, folderName) {
+          if (!dlEl) return;
+          var children = dlEl.children || [];
+          var currentBucket = folderName ? { name: folderName, isRoot: false, items: [] } : rootBucket;
+          for (var i = 0; i < children.length; i++) {
+            var node = children[i];
+            if (!node || !node.tagName) continue;
+            var tag = node.tagName.toUpperCase();
+            if (tag === 'DT') {
+              var h3 = null, a = null, subDl = null;
+              for (var k = 0; k < node.children.length; k++) {
+                var c = node.children[k];
+                var ct = c.tagName ? c.tagName.toUpperCase() : '';
+                if (!h3 && ct === 'H3') h3 = c;
+                else if (!a && ct === 'A') a = c;
+                else if (!subDl && ct === 'DL') subDl = c;
+              }
+              if (h3) {
+                if (!subDl && node.nextElementSibling && node.nextElementSibling.tagName && node.nextElementSibling.tagName.toUpperCase() === 'DL') {
+                  subDl = node.nextElementSibling;
+                }
+                collectDl(subDl, (h3.textContent || '').trim() || '未命名文件夹');
+              } else if (a) {
+                var href = (a.getAttribute('href') || '').trim();
+                if (/^https?:\/\//i.test(href)) {
+                  var icon = (a.getAttribute('icon') || '').trim();
+                  currentBucket.items.push({
+                    name: ((a.textContent || '').trim() || href).slice(0, 40),
+                    url: href,
+                    iconDataUrl: /^data:image\//i.test(icon) ? icon : ''
+                  });
+                }
+              } else if (subDl) {
+                collectDl(subDl, folderName);
+              }
+            } else if (tag === 'DL') {
+              collectDl(node, folderName);
+            }
+          }
+          if (folderName && currentBucket.items.length) groups.push(currentBucket);
+        }
+
+        var topDls = doc.querySelectorAll('body > dl');
+        if (topDls && topDls.length) {
+          for (var d = 0; d < topDls.length; d++) collectDl(topDls[d], '');
+        } else {
+          var firstDl = doc.querySelector('dl');
+          if (firstDl) collectDl(firstDl, '');
+          else {
+            // Fallback: flat <a> tags
+            doc.querySelectorAll('a[href]').forEach(function (aEl) {
+              var href = (aEl.getAttribute('href') || '').trim();
+              if (/^https?:\/\//i.test(href)) {
+                var ic = (aEl.getAttribute('icon') || '').trim();
+                rootBucket.items.push({
+                  name: ((aEl.textContent || '').trim() || href).slice(0, 40),
+                  url: href,
+                  iconDataUrl: /^data:image\//i.test(ic) ? ic : ''
+                });
+              }
+            });
+          }
+        }
+        if (rootBucket.items.length) groups.unshift(rootBucket);
+        return groups;
+      }
+
+      function collectExistingUrlSet() {
+        var set = {};
+        walkCards(list, function (it) {
+          if (it && it.url) set[it.url.replace(/\/+$/, '')] = true;
+        });
+        return set;
+      }
+
+      function applyParsedBookmarks(selectedGroups, opts) {
+        opts = opts || {};
+        var mapFolders = opts.mapFolders !== false;
+        var dedupUrl = opts.dedupUrl !== false;
+        var existingUrls = dedupUrl ? collectExistingUrlSet() : {};
+        var folderMap = {};
+        list.forEach(function (it) { if (isFolderItem(it)) folderMap[it.name] = it; });
+
+        var imported = 0, skipped = 0, iconPromises = [];
+        function toCard(bm) {
+          var normU = String(bm.url || '').trim().replace(/\/+$/, '');
+          if (dedupUrl && existingUrls[normU]) { skipped++; return null; }
+          if (normU) existingUrls[normU] = true;
+          imported++;
+          if (bm.iconDataUrl) {
+            var key = 'bmicon:' + hashString(bm.iconDataUrl);
+            iconPromises.push(putIconToDB(key, bm.iconDataUrl, Date.now()));
+            return { name: bm.name, url: bm.url, iconSrc: 'image', icon: key };
+          }
+          return { name: bm.name, url: bm.url, iconSrc: 'auto', color: pickRandomColor() };
+        }
+
+        (selectedGroups || []).forEach(function (grp) {
+          var cardsToAdd = (grp.items || []).map(toCard).filter(Boolean);
+          if (!cardsToAdd.length) return;
+          if (mapFolders && !grp.isRoot && grp.name) {
+            var fld = folderMap[grp.name];
+            if (!fld) {
+              fld = { type: 'folder', id: makeFolderId(), name: grp.name.slice(0, 20), children: [] };
+              list.push(fld);
+              folderMap[grp.name] = fld;
+            }
+            if (!Array.isArray(fld.children)) fld.children = [];
+            cardsToAdd.forEach(function (c) { fld.children.push(c); });
+          } else {
+            cardsToAdd.forEach(function (c) { list.push(c); });
+          }
+        });
+
+        save(list);
+        return Promise.all(iconPromises).then(function () {
+          render(list);
+          return { imported: imported, skipped: skipped };
         });
       }
 
-      // 联网搜索建议开关（百度公开接口；关闭后建议仅来自本地历史）
-      var suggestOnlineToggle = document.getElementById('toggleSuggestOnline');
-      if (suggestOnlineToggle) {
-        try {
-          suggestOnlineToggle.checked = localStorage.getItem('newtab.suggestOnline.v1') !== '0';
-        } catch (e) {}
-        suggestOnlineToggle.addEventListener('change', function () {
-          localStorage.setItem('newtab.suggestOnline.v1', this.checked ? '1' : '0');
+      var bookmarkImportBtn = document.getElementById('bookmarkImportBtn');
+      var bookmarkImportFile = document.getElementById('bookmarkImportFile');
+      var bookmarkModal = document.getElementById('bookmarkModal');
+      var bookmarkTreeEl = document.getElementById('bookmarkTree');
+      var bmSelectAllEl = document.getElementById('bmSelectAll');
+      var bmMapFoldersEl = document.getElementById('bmMapFolders');
+      var bmDedupUrlEl = document.getElementById('bmDedupUrl');
+      var bmSelectedCountEl = document.getElementById('bmSelectedCount');
+      var bmConfirmImportBtn = document.getElementById('bmConfirmImport');
+      var parsedBookmarkGroups = [];
+
+      function updateBmCount() {
+        if (!bookmarkTreeEl || !bmSelectedCountEl) return;
+        var checked = bookmarkTreeEl.querySelectorAll('.bm-item-check:checked').length;
+        bmSelectedCountEl.textContent = '已选 ' + checked + ' 条';
+        if (bmConfirmImportBtn) bmConfirmImportBtn.disabled = checked === 0;
+      }
+
+      function renderBookmarkPreview(groups) {
+        parsedBookmarkGroups = groups || [];
+        if (!bookmarkTreeEl) return;
+        bookmarkTreeEl.innerHTML = '';
+        if (!parsedBookmarkGroups.length) {
+          var em = document.createElement('div');
+          em.className = 'hist-empty';
+          em.textContent = '未在文件中识别到有效的 http/https 书签链接';
+          bookmarkTreeEl.appendChild(em);
+          updateBmCount();
+          return;
+        }
+        parsedBookmarkGroups.forEach(function (grp, gi) {
+          var wrap = document.createElement('div');
+          wrap.className = 'bm-folder';
+          var head = document.createElement('label');
+          head.className = 'bm-folder-head';
+          var gChk = document.createElement('input');
+          gChk.type = 'checkbox';
+          gChk.checked = true;
+          gChk.className = 'bm-folder-check';
+          var gTitle = document.createElement('span');
+          gTitle.textContent = (grp.isRoot ? '根目录书签' : grp.name) + '（' + grp.items.length + '）';
+          head.appendChild(gChk);
+          head.appendChild(gTitle);
+          wrap.appendChild(head);
+
+          var kids = document.createElement('div');
+          kids.className = 'bm-folder-children';
+          grp.items.forEach(function (item, ii) {
+            var row = document.createElement('label');
+            row.className = 'bm-item';
+            var iChk = document.createElement('input');
+            iChk.type = 'checkbox';
+            iChk.checked = true;
+            iChk.className = 'bm-item-check';
+            iChk.dataset.gi = String(gi);
+            iChk.dataset.ii = String(ii);
+            row.appendChild(iChk);
+            if (item.iconDataUrl) {
+              var ic = document.createElement('img');
+              ic.className = 'bm-item-icon';
+              ic.src = item.iconDataUrl;
+              ic.alt = '';
+              row.appendChild(ic);
+            } else {
+              var icPh = document.createElement('span');
+              icPh.className = 'bm-item-icon';
+              icPh.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg>';
+              row.appendChild(icPh);
+            }
+            var nm = document.createElement('span');
+            nm.className = 'bm-item-name';
+            nm.textContent = item.name;
+            var ul = document.createElement('span');
+            ul.className = 'bm-item-url';
+            ul.textContent = item.url;
+            row.appendChild(nm);
+            row.appendChild(ul);
+            kids.appendChild(row);
+          });
+          wrap.appendChild(kids);
+          gChk.addEventListener('change', function () {
+            var on = this.checked;
+            kids.querySelectorAll('.bm-item-check').forEach(function (c) { c.checked = on; });
+            updateBmCount();
+          });
+          kids.addEventListener('change', function () {
+            var all = kids.querySelectorAll('.bm-item-check');
+            var chk = kids.querySelectorAll('.bm-item-check:checked');
+            gChk.checked = chk.length > 0 && chk.length === all.length;
+            updateBmCount();
+          });
+          bookmarkTreeEl.appendChild(wrap);
+        });
+        if (bmSelectAllEl) bmSelectAllEl.checked = true;
+        updateBmCount();
+      }
+
+      if (bookmarkImportBtn && bookmarkImportFile) {
+        bookmarkImportBtn.addEventListener('click', function () {
+          bookmarkImportFile.value = '';
+          bookmarkImportFile.click();
+        });
+        bookmarkImportFile.addEventListener('change', function () {
+          var file = bookmarkImportFile.files && bookmarkImportFile.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function () {
+            var groups = parseBookmarkHtml(reader.result);
+            renderBookmarkPreview(groups);
+            if (bookmarkModal) openModal(bookmarkModal);
+          };
+          reader.onerror = function () { alert('书签文件读取失败'); };
+          reader.readAsText(file);
         });
       }
+      if (bmSelectAllEl && bookmarkTreeEl) {
+        bmSelectAllEl.addEventListener('change', function () {
+          var on = this.checked;
+          bookmarkTreeEl.querySelectorAll('input[type="checkbox"]').forEach(function (c) { c.checked = on; });
+          updateBmCount();
+        });
+      }
+      if (bmConfirmImportBtn && bookmarkTreeEl) {
+        bmConfirmImportBtn.addEventListener('click', function () {
+          var chosenMap = {};
+          bookmarkTreeEl.querySelectorAll('.bm-item-check:checked').forEach(function (chk) {
+            var gi = parseInt(chk.dataset.gi, 10);
+            var ii = parseInt(chk.dataset.ii, 10);
+            if (!parsedBookmarkGroups[gi] || !parsedBookmarkGroups[gi].items[ii]) return;
+            if (!chosenMap[gi]) {
+              chosenMap[gi] = { name: parsedBookmarkGroups[gi].name, isRoot: parsedBookmarkGroups[gi].isRoot, items: [] };
+            }
+            chosenMap[gi].items.push(parsedBookmarkGroups[gi].items[ii]);
+          });
+          var selectedGroups = Object.keys(chosenMap).map(function (k) { return chosenMap[k]; });
+          applyParsedBookmarks(selectedGroups, {
+            mapFolders: !(bmMapFoldersEl && bmMapFoldersEl.checked === false),
+            dedupUrl: !(bmDedupUrlEl && bmDedupUrlEl.checked === false)
+          }).then(function (res) {
+            if (bookmarkModal) closeModal(bookmarkModal);
+            alert('书签导入完成：新增 ' + res.imported + ' 条' + (res.skipped ? '，跳过重复 ' + res.skipped + ' 条' : ''));
+          });
+        });
+      }
+
+      // ========== T7b WebDAV 云同步（坚果云 / Nextcloud 等） ==========
+      var webdavUrlEl = document.getElementById('webdavUrl');
+      var webdavFileEl = document.getElementById('webdavFile');
+      var webdavUserEl = document.getElementById('webdavUser');
+      var webdavPassEl = document.getElementById('webdavPass');
+      var webdavPassToggleEl = document.getElementById('webdavPassToggle');
+      var webdavTestBtn = document.getElementById('webdavTestBtn');
+      var webdavUploadBtn = document.getElementById('webdavUploadBtn');
+      var webdavDownloadBtn = document.getElementById('webdavDownloadBtn');
+      var webdavStatusEl = document.getElementById('webdavStatus');
+      var webdavPullConfirmEl = document.getElementById('webdavPullConfirm');
+      var webdavPullInfoEl = document.getElementById('webdavPullInfo');
+      var webdavApplyMergeBtn = document.getElementById('webdavApplyMerge');
+      var webdavApplyOverwriteBtn = document.getElementById('webdavApplyOverwrite');
+      var webdavPullCancelBtn = document.getElementById('webdavPullCancel');
+      var pendingWebdavPayload = null;
+
+      function readWebdavConfig() {
+        try {
+          var o = JSON.parse(localStorage.getItem(WEBDAV_KEY) || 'null');
+          return (o && typeof o === 'object') ? o : {};
+        } catch (e) { return {}; }
+      }
+      function saveWebdavConfig(extra) {
+        var cur = Object.assign(readWebdavConfig(), {
+          url: (webdavUrlEl ? webdavUrlEl.value : '').trim(),
+          filename: ((webdavFileEl ? webdavFileEl.value : '').trim() || 'motuo-tab-sync.json').replace(/^\/+/, ''),
+          username: (webdavUserEl ? webdavUserEl.value : '').trim(),
+          password: webdavPassEl ? webdavPassEl.value : ''
+        }, extra || {});
+        try { localStorage.setItem(WEBDAV_KEY, JSON.stringify(cur)); } catch (e) {}
+        updateSideSyncText(cur);
+        return cur;
+      }
+      function updateSideSyncText(cfg) {
+        var dot = document.getElementById('sysSideSyncDot');
+        var txt = document.getElementById('sysSideSyncText');
+        if (!txt) return;
+        if (cfg && cfg.lastSyncAt) {
+          if (dot) dot.classList.remove('muted');
+          var d = new Date(cfg.lastSyncAt);
+          txt.textContent = 'WebDAV · ' + (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+        } else if (cfg && cfg.url) {
+          if (dot) dot.classList.add('muted');
+          txt.textContent = 'WebDAV 已配置';
+        } else {
+          if (dot) dot.classList.add('muted');
+          txt.textContent = '仅本地存储';
+        }
+      }
+      function setWebdavStatus(msg, cls) {
+        if (!webdavStatusEl) return;
+        webdavStatusEl.textContent = msg;
+        webdavStatusEl.className = 'sys-webdav-status' + (cls ? ' ' + cls : '');
+      }
+      function webdavTargetUrl(cfg) {
+        var base = String((cfg && cfg.url) || '').trim();
+        if (!base) return '';
+        if (!/^https?:\/\//i.test(base)) throw new Error('WebDAV 地址须以 http:// 或 https:// 开头');
+        var fname = String((cfg && cfg.filename) || 'motuo-tab-sync.json').trim().replace(/^\/+/, '') || 'motuo-tab-sync.json';
+        if (base.toLowerCase().slice(-5) === '.json') return base;
+        return base.replace(/\/+$/, '') + '/' + fname;
+      }
+      function webdavAuthHeaders(cfg) {
+        var h = {};
+        if (cfg && (cfg.username || cfg.password)) {
+          var rawCred = (cfg.username || '') + ':' + (cfg.password || '');
+          try { h.Authorization = 'Basic ' + btoa(unescape(encodeURIComponent(rawCred))); }
+          catch (e) { h.Authorization = 'Basic ' + btoa(rawCred); }
+        }
+        return h;
+      }
+      function formatWebdavError(err, status) {
+        if (status === 401 || status === 403) return '认证失败（HTTP ' + status + '），请检查用户名或应用密码';
+        if (status === 404) return '远端文件不存在（HTTP 404）';
+        if (status) return '服务端返回 HTTP ' + status;
+        var m = String((err && err.message) || err || '');
+        if (/failed to fetch|network|cors/i.test(m)) return '网络请求被拦截或连接失败（若为纯网页版请改用扩展版或开启 WebDAV CORS）';
+        return m || '未知错误';
+      }
+      (function initWebdavUI() {
+        var cfg = readWebdavConfig();
+        if (webdavUrlEl && cfg.url) webdavUrlEl.value = cfg.url;
+        if (webdavFileEl) webdavFileEl.value = cfg.filename || 'motuo-tab-sync.json';
+        if (webdavUserEl && cfg.username) webdavUserEl.value = cfg.username;
+        if (webdavPassEl && cfg.password) webdavPassEl.value = cfg.password;
+        updateSideSyncText(cfg);
+        [webdavUrlEl, webdavFileEl, webdavUserEl, webdavPassEl].forEach(function (el) {
+          if (el) el.addEventListener('change', function () { saveWebdavConfig(); });
+        });
+        if (webdavPassToggleEl && webdavPassEl) {
+          webdavPassToggleEl.addEventListener('click', function () {
+            webdavPassEl.type = webdavPassEl.type === 'password' ? 'text' : 'password';
+          });
+        }
+        if (webdavTestBtn) {
+          webdavTestBtn.addEventListener('click', function () {
+            var c = saveWebdavConfig();
+            var target;
+            try { target = webdavTargetUrl(c); } catch (e) { setWebdavStatus(e.message, 'err'); return; }
+            if (!target) { setWebdavStatus('请先填写 WebDAV 目录地址', 'err'); return; }
+            setWebdavStatus('正在测试连接…', '');
+            var headers = Object.assign({ Depth: '0' }, webdavAuthHeaders(c));
+            fetch(target, { method: 'PROPFIND', headers: headers, signal: AbortSignal.timeout(15000) })
+              .then(function (res) {
+                if (res.status === 401 || res.status === 403) throw { status: res.status };
+                if (res.status === 405 || res.status === 501) {
+                  return fetch(target, { method: 'GET', headers: webdavAuthHeaders(c), signal: AbortSignal.timeout(15000) });
+                }
+                return res;
+              })
+              .then(function (res2) {
+                if (res2.status === 401 || res2.status === 403) {
+                  setWebdavStatus(formatWebdavError(null, res2.status), 'err');
+                  return;
+                }
+                if (res2.ok || res2.status === 207 || res2.status === 404) {
+                  setWebdavStatus('连接正常（HTTP ' + res2.status + (res2.status === 404 ? '，尚无远端文件，可直接上传' : '') + '）', 'ok');
+                } else {
+                  setWebdavStatus(formatWebdavError(null, res2.status), 'err');
+                }
+              })
+              .catch(function (err) {
+                setWebdavStatus(formatWebdavError(err, err && err.status), 'err');
+              });
+          });
+        }
+        if (webdavUploadBtn) {
+          webdavUploadBtn.addEventListener('click', function () {
+            var c = saveWebdavConfig();
+            var target;
+            try { target = webdavTargetUrl(c); } catch (e) { setWebdavStatus(e.message, 'err'); return; }
+            if (!target) { setWebdavStatus('请先填写 WebDAV 目录地址', 'err'); return; }
+            setWebdavStatus('正在打包并上传…', '');
+            buildBackupPayload({ includeWallpaper: false }).then(function (res) {
+              res.payload.syncedAt = new Date().toISOString();
+              var headers = Object.assign({ 'Content-Type': 'application/json; charset=utf-8' }, webdavAuthHeaders(c));
+              return fetch(target, {
+                method: 'PUT',
+                headers: headers,
+                body: JSON.stringify(res.payload, null, 2),
+                signal: AbortSignal.timeout(20000)
+              });
+            }).then(function (resp) {
+              if (!resp.ok) throw { status: resp.status };
+              saveWebdavConfig({ lastSyncAt: Date.now(), lastSyncAction: 'upload' });
+              setWebdavStatus('上传成功（已自动排除壁纸与 WebDAV 凭证）', 'ok');
+            }).catch(function (err) {
+              setWebdavStatus('上传失败：' + formatWebdavError(err, err && err.status), 'err');
+            });
+          });
+        }
+        if (webdavDownloadBtn) {
+          webdavDownloadBtn.addEventListener('click', function () {
+            var c = saveWebdavConfig();
+            var target;
+            try { target = webdavTargetUrl(c); } catch (e) { setWebdavStatus(e.message, 'err'); return; }
+            if (!target) { setWebdavStatus('请先填写 WebDAV 目录地址', 'err'); return; }
+            setWebdavStatus('正在从云端拉取…', '');
+            if (webdavPullConfirmEl) webdavPullConfirmEl.hidden = true;
+            fetch(target, { method: 'GET', headers: webdavAuthHeaders(c), signal: AbortSignal.timeout(20000) })
+              .then(function (resp) {
+                if (!resp.ok) throw { status: resp.status };
+                return resp.json();
+              })
+              .then(function (remoteData) {
+                if (!remoteData || remoteData.app !== 'Motuo-Tab') throw new Error('远端文件不是有效的 Motuo-Tab 备份');
+                pendingWebdavPayload = remoteData;
+                var cnt = (remoteData.data && Array.isArray(remoteData.data.items)) ? remoteData.data.items.length : 0;
+                var ts = remoteData.syncedAt || remoteData.exportedAt || '未知时间';
+                if (webdavPullInfoEl) {
+                  webdavPullInfoEl.textContent = '云端备份时间：' + ts + ' · 包含 ' + cnt + ' 个主页卡片/分组，请选择应用方式：';
+                }
+                if (webdavPullConfirmEl) webdavPullConfirmEl.hidden = false;
+                setWebdavStatus('已拉取云端数据，请在下方确认合并或覆盖', 'ok');
+              })
+              .catch(function (err) {
+                setWebdavStatus('拉取失败：' + formatWebdavError(err, err && err.status), 'err');
+              });
+          });
+        }
+        if (webdavApplyMergeBtn) {
+          webdavApplyMergeBtn.addEventListener('click', function () {
+            if (!pendingWebdavPayload) return;
+            try {
+              var out = applyBackupPayload(pendingWebdavPayload, { mode: 'merge' });
+              pendingWebdavPayload = null;
+              if (webdavPullConfirmEl) webdavPullConfirmEl.hidden = true;
+              saveWebdavConfig({ lastSyncAt: Date.now(), lastSyncAction: 'merge' });
+              setWebdavStatus('合并完成：新增 ' + out.count + ' 张卡片（保留本地原有配置）', 'ok');
+            } catch (e) {
+              setWebdavStatus('合并失败：' + e.message, 'err');
+            }
+          });
+        }
+        if (webdavApplyOverwriteBtn) {
+          webdavApplyOverwriteBtn.addEventListener('click', function () {
+            if (!pendingWebdavPayload) return;
+            try {
+              var out = applyBackupPayload(pendingWebdavPayload, { mode: 'overwrite', reloadAfter: false, applyWallpaper: false });
+              pendingWebdavPayload = null;
+              if (webdavPullConfirmEl) webdavPullConfirmEl.hidden = true;
+              saveWebdavConfig({ lastSyncAt: Date.now(), lastSyncAction: 'overwrite' });
+              setWebdavStatus('覆盖完成：已恢复 ' + out.count + ' 个主页卡片/分组与系统配置', 'ok');
+            } catch (e) {
+              setWebdavStatus('覆盖失败：' + e.message, 'err');
+            }
+          });
+        }
+        if (webdavPullCancelBtn) {
+          webdavPullCancelBtn.addEventListener('click', function () {
+            pendingWebdavPayload = null;
+            if (webdavPullConfirmEl) webdavPullConfirmEl.hidden = true;
+            setWebdavStatus('已取消拉取应用', '');
+          });
+        }
+      })();
 
       // ---- 搜索历史管理（通用配置弹窗）：逐条删除 / 多选删除 / 一键清空 ----
       (function initHistoryManager() {
@@ -2166,6 +3328,15 @@
           history: AI_HISTORY_KEY,
           snapshot: AI_SNAPSHOT_KEY
         }
+      };
+      window.__motuo.bookmarks = {
+        parse: parseBookmarkHtml,
+        apply: applyParsedBookmarks
+      };
+      window.__motuo.greeting = {
+        render: renderGreeting,
+        textForHour: greetingForHour,
+        isEnabled: isGreetingEnabled
       };
       window.__motuo.iconCache = {
         getSync: getCachedIconSync,

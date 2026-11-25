@@ -77,7 +77,7 @@ const extHtml = read(path.join(SRC, 'index.html'))
 
 write(path.join(EXT, 'newtab.html'), extHtml);
 copy(path.join(SRC, 'styles', 'main.css'), path.join(EXT, 'styles', 'main.css'));
-['search.js', 'main.js', 'ai.js', 'idle.js'].forEach((f) =>
+['search.js', 'main.js', 'ai-search.js', 'ai.js', 'idle.js'].forEach((f) =>
   write(path.join(EXT, 'scripts', f), inlineAssets(read(path.join(SRC, 'scripts', f))))
 );
 copy(path.join(SRC, 'favicon.ico'), path.join(EXT, 'favicon.ico'));

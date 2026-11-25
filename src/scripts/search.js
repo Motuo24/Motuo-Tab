@@ -328,15 +328,68 @@
         return url + encodeURIComponent(query);
       }
 
-      // 站内搜索直达：在搜索引擎前匹配
-      var SITE_DIRECT = {
-        'zh':  'https://www.zhihu.com/search?type=content&q=',
-        'gh':  'https://github.com/search?q=',
-        'bl':  'https://search.bilibili.com/all?keyword=',
-        'b站': 'https://search.bilibili.com/all?keyword=',
-        'tb':  'https://s.taobao.com/search?q=',
-        'db':  'https://www.douban.com/search?q='
-      };
+      // 站内搜索直达（T3 可自定义，支持 %s 占位或末尾追加）
+      var SITE_DIRECT_LIST_KEY = 'newtab.sitedirect.list.v1';
+      var DEFAULT_SITE_DIRECT = [
+        { key: 'zh',  name: '知乎',     url: 'https://www.zhihu.com/search?type=content&q=%s' },
+        { key: 'gh',  name: 'GitHub',   url: 'https://github.com/search?q=%s' },
+        { key: 'bl',  name: '哔哩哔哩', url: 'https://search.bilibili.com/all?keyword=%s' },
+        { key: 'b站', name: '哔哩哔哩', url: 'https://search.bilibili.com/all?keyword=%s' },
+        { key: 'tb',  name: '淘宝',     url: 'https://s.taobao.com/search?q=%s' },
+        { key: 'db',  name: '豆瓣',     url: 'https://www.douban.com/search?q=%s' }
+      ];
+      function cloneDefaultSiteDirect() {
+        return DEFAULT_SITE_DIRECT.map(function (r) {
+          return { key: r.key, name: r.name, url: r.url };
+        });
+      }
+      function sanitizeSiteDirectList(arr) {
+        if (!Array.isArray(arr)) return cloneDefaultSiteDirect();
+        var seen = {};
+        var out = [];
+        arr.forEach(function (r) {
+          if (!r || typeof r !== 'object') return;
+          var k = String(r.key || '').trim().toLowerCase();
+          var u = String(r.url || '').trim();
+          var n = String(r.name || k).trim().slice(0, 24);
+          if (!k || !u || !/^https?:\/\//i.test(u) || seen[k]) return;
+          seen[k] = true;
+          out.push({ key: k, name: n || k, url: u });
+        });
+        return out;
+      }
+      var siteDirectRules = [];
+      function loadSiteDirectRules() {
+        try {
+          var raw = localStorage.getItem(SITE_DIRECT_LIST_KEY);
+          if (raw === null) { siteDirectRules = cloneDefaultSiteDirect(); return siteDirectRules; }
+          var parsed = JSON.parse(raw);
+          siteDirectRules = Array.isArray(parsed) ? sanitizeSiteDirectList(parsed) : cloneDefaultSiteDirect();
+        } catch (e) {
+          siteDirectRules = cloneDefaultSiteDirect();
+        }
+        return siteDirectRules;
+      }
+      function saveSiteDirectRules(arr) {
+        siteDirectRules = sanitizeSiteDirectList(arr);
+        try { localStorage.setItem(SITE_DIRECT_LIST_KEY, JSON.stringify(siteDirectRules)); } catch (e) {}
+        return siteDirectRules.slice();
+      }
+      function findSiteDirectRule(bang) {
+        var b = String(bang || '').trim().toLowerCase();
+        if (!b) return null;
+        for (var i = 0; i < siteDirectRules.length; i++) {
+          if (String(siteDirectRules[i].key || '').toLowerCase() === b) return siteDirectRules[i];
+        }
+        return null;
+      }
+      function buildSiteDirectUrl(rule, rest) {
+        var u = rule.url;
+        var enc = encodeURIComponent(rest);
+        if (u.indexOf('%s') !== -1) return u.replace(/%s/g, enc);
+        return u + enc;
+      }
+      loadSiteDirectRules();
 
       function isUrlLike(q) {
         return /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/.*)?$/i.test(q)
@@ -353,13 +406,14 @@
           window.location.href = url;
           return;
         }
-        // 站内搜索直达: "zh Node.js" → 知乎搜 Node.js（开关在个性化→搜索）
+        // 站内搜索直达: "zh Node.js" → 知乎搜 Node.js（开关在设置→通用设置）
         var bangMatch = q.match(/^(\S+)\s+(.+)/);
         if (bangMatch) {
           var bang = bangMatch[1].toLowerCase();
           var rest = bangMatch[2].trim();
-          if (SITE_DIRECT[bang] && localStorage.getItem('newtab.sitedirect.v1') !== '0') {
-            window.location.href = SITE_DIRECT[bang] + encodeURIComponent(rest);
+          var rule = findSiteDirectRule(bang);
+          if (rule && localStorage.getItem('newtab.sitedirect.v1') !== '0') {
+            window.location.href = buildSiteDirectUrl(rule, rest);
             return;
           }
         }
@@ -412,7 +466,7 @@
         var m = q.match(/^(\S+)\s+(.+)/);
         if (!m) return false;
         try { if (localStorage.getItem(SITEDIRECT_KEY) === '0') return false; } catch (e) {}
-        return !!SITE_DIRECT[m[1].toLowerCase()];
+        return !!findSiteDirectRule(m[1]);
       }
 
       // ---- 联网建议传输层：JSONP（file:// 单文件版亦可用，无 CORS 问题） ----
@@ -663,8 +717,29 @@
               if (resolved && img.src !== resolved) img.src = resolved;
             });
           });
+        },
+        reload: function () {
+          loadCustomEngines();
+          renderCustomEngineList();
+          refreshEngines();
+          if (typeof loadSearchHistory === 'function') loadSearchHistory();
+          loadSiteDirectRules();
         }
       };
+      window.__motuo.siteDirect = {
+        getList: function () { return loadSiteDirectRules().map(function (r) { return { key: r.key, name: r.name, url: r.url }; }); },
+        saveList: saveSiteDirectRules,
+        resetDefault: function () {
+          try { localStorage.removeItem(SITE_DIRECT_LIST_KEY); } catch (e) {}
+          return loadSiteDirectRules().map(function (r) { return { key: r.key, name: r.name, url: r.url }; });
+        },
+        getDefaults: cloneDefaultSiteDirect,
+        find: findSiteDirectRule,
+        buildUrl: buildSiteDirectUrl
+      };
+      window.addEventListener('storage', function (e) {
+        if (e && e.key === SITE_DIRECT_LIST_KEY) loadSiteDirectRules();
+      });
 
       // 调试/测试钩子（传输层可注入：jsdom 无法发真实 JSONP）
       window.__debug = window.__debug || {};

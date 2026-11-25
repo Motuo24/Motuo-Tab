@@ -1348,10 +1348,15 @@
   }
   .ai-overlay.open { opacity: 1; pointer-events: auto; }
 
-  /* AI 配置窗口：左侧分栏 + 右侧一项 */
+  /* AI 与系统设置窗口：共享分级圆角 + 克制中性灰 / DeepSeek 深炭灰设计变量 */
   #aiConfigModal { z-index: 1100; }
-  /* ========== AI 设置独立单窗口（分级圆角 + 克制中性灰 / DeepSeek 深炭灰） ========== */
-  #aiConfigModal {
+  #generalConfigModal { z-index: 1050; }
+  #folderModal { z-index: 1040; }
+  #bookmarkModal { z-index: 1060; }
+  #aiConfigModal,
+  #generalConfigModal,
+  #folderModal,
+  #bookmarkModal {
     --ai-mask-bg: rgba(15, 18, 24, 0.36);
     --ai-dlg-bg: #ffffff;
     --ai-dlg-shadow: 0 28px 80px rgba(15, 18, 24, 0.16), 0 4px 16px rgba(15, 18, 24, 0.06);
@@ -1399,7 +1404,10 @@
     --ai-radius-pill: 999px;
     --ai-radius-tag: 8px;
   }
-  html[data-theme="dark"] #aiConfigModal {
+  html[data-theme="dark"] #aiConfigModal,
+  html[data-theme="dark"] #generalConfigModal,
+  html[data-theme="dark"] #folderModal,
+  html[data-theme="dark"] #bookmarkModal {
     color-scheme: dark;
     --ai-mask-bg: rgba(0, 0, 0, 0.64);
     --ai-dlg-bg: #2b2b2e;
@@ -1443,13 +1451,27 @@
     --ai-pop-shadow: 0 16px 38px rgba(0, 0, 0, 0.48), 0 0 0 1px rgba(255, 255, 255, 0.10);
   }
   #aiConfigModal [hidden] { display: none !important; }
-  #aiConfigModal.modal-mask { background: var(--ai-mask-bg); }
+  #generalConfigModal [hidden],
+  #folderModal [hidden],
+  #bookmarkModal [hidden] { display: none !important; }
+  #generalConfigModal #alphaSlider {
+    background: linear-gradient(to right, var(--ai-ink-solid) 0%, var(--ai-ink-solid) var(--ui-slider-pct, 100%), var(--ai-range-track) var(--ui-slider-pct, 100%));
+  }
+  #generalConfigModal #blurSlider {
+    background: linear-gradient(to right, var(--ai-ink-solid) 0%, var(--ai-ink-solid) var(--blur-slider-pct, 15%), var(--ai-range-track) var(--blur-slider-pct, 15%));
+  }
+  #aiConfigModal.modal-mask,
+  #generalConfigModal.modal-mask,
+  #folderModal.modal-mask,
+  #bookmarkModal.modal-mask { background: var(--ai-mask-bg); }
   #aiConfigModal select option {
     background: var(--ai-dlg-bg);
     color: var(--ai-ink-1);
   }
   #aiConfigModal .ai-config-dialog,
-  html[data-theme="dark"] #aiConfigModal .ai-config-dialog {
+  html[data-theme="dark"] #aiConfigModal .ai-config-dialog,
+  #generalConfigModal .ai-config-dialog,
+  html[data-theme="dark"] #generalConfigModal .ai-config-dialog {
     width: min(860px, 94vw);
     max-width: none;
     height: min(620px, 84vh);
@@ -1477,7 +1499,9 @@
     flex-direction: column;
   }
   #aiConfigModal .ai-sidebar-title,
-  html[data-theme="dark"] #aiConfigModal .ai-sidebar-title {
+  html[data-theme="dark"] #aiConfigModal .ai-sidebar-title,
+  #generalConfigModal .ai-sidebar-title,
+  html[data-theme="dark"] #generalConfigModal .ai-sidebar-title {
     display: block;
     font-size: 18px;
     font-weight: 600;
@@ -1577,7 +1601,10 @@
     pointer-events: none;
   }
   .ai-saved-hint.show { opacity: 1; transform: translateY(0); }
-  #aiConfigModal .ai-close-btn {
+  #aiConfigModal .ai-close-btn,
+  #generalConfigModal .ai-close-btn,
+  #folderModal .ai-close-btn,
+  #bookmarkModal .ai-close-btn {
     width: 32px;
     height: 32px;
     border: none;
@@ -1591,7 +1618,10 @@
     padding: 0;
     transition: background 0.14s ease, color 0.14s ease;
   }
-  #aiConfigModal .ai-close-btn:hover {
+  #aiConfigModal .ai-close-btn:hover,
+  #generalConfigModal .ai-close-btn:hover,
+  #folderModal .ai-close-btn:hover,
+  #bookmarkModal .ai-close-btn:hover {
     background: var(--ai-surf-soft);
     color: var(--ai-ink-1);
   }
@@ -3058,3 +3088,456 @@
     text-align: center;
   }
   .icon-cache-status:empty { display: none; }
+
+  /* ========== 系统设置（#generalConfigModal）内部扩展组件 ========== */
+  #sysDataNavBtn.has-backup-dot span::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #e88a2b;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  #generalConfigModal .backup-reminder {
+    margin: 6px 0 8px;
+    padding: 12px 14px;
+    border-radius: var(--ai-radius-card);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-border-subtle);
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  #generalConfigModal .backup-reminder-text {
+    font-size: 13px;
+    color: var(--ai-ink-1);
+  }
+  #generalConfigModal .backup-reminder-actions { flex-shrink: 0; }
+  .sys-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    width: 100%;
+  }
+  .sys-theme-card {
+    height: 82px;
+    border: 1px solid var(--ai-card-border);
+    border-radius: var(--ai-radius-choice);
+    background: var(--ai-surf-card);
+    color: var(--ai-ink-2);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  }
+  .sys-theme-card svg { width: 20px; height: 20px; }
+  .sys-theme-card:hover { background: var(--ai-surf-card-hover); color: var(--ai-ink-1); }
+  .sys-theme-card.active {
+    background: var(--ai-surf-card-active);
+    border-color: var(--ai-card-active-border);
+    color: var(--ai-ink-1);
+    font-weight: 550;
+  }
+  .sys-slider-line {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding-top: 2px;
+  }
+  .sys-slider-label {
+    font-size: 12.5px;
+    color: var(--ai-ink-2);
+    white-space: nowrap;
+  }
+  .sys-slider-val {
+    min-width: 48px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--ai-radius-pill);
+    background: var(--ai-surf-soft);
+    color: var(--ai-ink-1);
+    font-size: 12.5px;
+    font-weight: 550;
+    font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sys-color-swatch {
+    width: 36px;
+    height: 34px;
+    padding: 2px;
+    border: 1px solid var(--ai-border-subtle);
+    border-radius: 10px;
+    background: var(--ai-well-bg);
+    cursor: pointer;
+  }
+  .sys-color-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+  .sys-color-swatch::-webkit-color-swatch { border: none; border-radius: 7px; }
+  .sys-color-swatch::-moz-color-swatch { border: none; border-radius: 7px; }
+  .sys-toggle-sublist {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--ai-radius-card);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
+  }
+  .sys-sub-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--ai-ink-1);
+    cursor: pointer;
+  }
+  .sys-sd-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .sys-sd-add .sys-sd-key { flex: 0 0 104px; }
+  .sys-sd-add .sys-sd-name { flex: 0 0 116px; }
+  .sys-sd-add .sys-sd-url { flex: 1 1 200px; }
+  .sys-sd-add .ai-input-box input { height: 36px; font-size: 13px; padding: 0 12px; }
+  .sys-sd-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .sys-sd-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 11px;
+    border-radius: var(--ai-radius-item);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
+    font-size: 13px;
+  }
+  .sys-sd-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: var(--ai-radius-tag);
+    background: var(--ai-surf-soft);
+    color: var(--ai-ink-1);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .sys-sd-name-lbl {
+    font-weight: 500;
+    color: var(--ai-ink-1);
+    flex: 0 0 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sys-sd-url-lbl {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--ai-ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sys-sd-del {
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: var(--ai-radius-pill);
+    background: transparent;
+    color: var(--ai-ink-3);
+    font-size: 15px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.14s ease, color 0.14s ease;
+  }
+  .sys-sd-del:hover { background: var(--ai-danger-bg); color: var(--ai-danger-text); }
+  #generalConfigModal .hist-block { border-top: none; padding-top: 0; }
+  #generalConfigModal .hist-head .hist-title { color: var(--ai-ink-1); font-size: 14px; }
+  #generalConfigModal .hist-count { color: var(--ai-ink-3); }
+  #generalConfigModal .hist-list {
+    padding: 6px;
+    border-radius: var(--ai-radius-item);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
+    max-height: 175px;
+  }
+  #generalConfigModal .hist-row .hist-text { color: var(--ai-ink-1); }
+  #generalConfigModal .hist-row:hover { background: var(--ai-surf-soft); }
+  .sys-webdav-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+  }
+  .sys-webdav-field { display: flex; flex-direction: column; gap: 5px; }
+  .sys-webdav-field label { font-size: 12px; color: var(--ai-ink-2); }
+  .sys-webdav-field .ai-input-box input { height: 36px; font-size: 13px; }
+  .sys-webdav-status {
+    font-size: 12px;
+    color: var(--ai-ink-3);
+    line-height: 1.5;
+  }
+  .sys-webdav-status.ok { color: var(--ai-ok-text); }
+  .sys-webdav-status.err { color: var(--ai-danger-text); }
+  .sys-webdav-pull {
+    padding: 12px 14px;
+    border-radius: var(--ai-radius-card);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-border-subtle);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .sys-webdav-pull-info { font-size: 12.5px; color: var(--ai-ink-1); }
+  .sys-shortcuts-list { display: flex; flex-direction: column; gap: 10px; }
+  .sys-shortcut-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 8px 12px;
+    border-radius: var(--ai-radius-item);
+    background: var(--ai-well-bg);
+  }
+  #generalConfigModal .shortcut-kbd {
+    background: var(--ai-dlg-bg);
+    border-color: var(--ai-border-subtle);
+    color: var(--ai-ink-1);
+  }
+  #generalConfigModal .shortcut-desc { color: var(--ai-ink-2); text-align: right; }
+
+  /* ========== T5 卡片分组 / 文件夹 ========== */
+  .shortcut-folder .tile.folder-tile {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 5px;
+    padding: 9px;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, var(--ui-alpha));
+  }
+  html[data-theme="dark"] .shortcut-folder .tile.folder-tile {
+    background: rgba(38, 43, 52, var(--ui-alpha));
+  }
+  .folder-mini-tile {
+    width: 100%;
+    height: 100%;
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.72);
+    color: #1f2329;
+  }
+  html[data-theme="dark"] .folder-mini-tile {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-1);
+  }
+  .folder-mini-tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 2px;
+    box-sizing: border-box;
+  }
+  .folder-empty-glyph {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-3);
+  }
+  .shortcut-folder.drop-into-folder .tile {
+    outline: 2px solid #2468f2;
+    transform: scale(1.06);
+  }
+  #folderModal .folder-dialog,
+  html[data-theme="dark"] #folderModal .folder-dialog {
+    width: min(620px, 92vw);
+    max-width: none;
+    max-height: 82vh;
+    padding: 20px 24px 24px;
+    border-radius: var(--ai-radius-dialog);
+    background: var(--ai-dlg-bg);
+    color: var(--ai-ink-1);
+    box-shadow: var(--ai-dlg-shadow);
+  }
+  .folder-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--ai-hairline);
+  }
+  .folder-title-input {
+    flex: 1;
+    min-width: 0;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: var(--ai-radius-item);
+    background: transparent;
+    color: var(--ai-ink-1);
+    font: inherit;
+    font-size: 17px;
+    font-weight: 600;
+    outline: none;
+    transition: background 0.14s ease, border-color 0.14s ease;
+  }
+  .folder-title-input:hover,
+  .folder-title-input:focus {
+    background: var(--ai-well-bg);
+    border-color: var(--ai-border-subtle);
+  }
+  .folder-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .folder-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 18px 14px;
+    padding: 18px 4px 6px;
+    max-height: 58vh;
+    overflow-y: auto;
+  }
+  .folder-grid .shortcut { width: auto; }
+  .folder-grid-empty {
+    grid-column: 1 / -1;
+    padding: 36px 16px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--ai-ink-3);
+  }
+  .ctx-menu hr[hidden] { display: none !important; }
+  .move-folder-menu { z-index: 1210; max-height: 260px; overflow-y: auto; }
+
+  /* ========== T6 浏览器书签导入预览弹窗 ========== */
+  #bookmarkModal .bookmark-dialog,
+  html[data-theme="dark"] #bookmarkModal .bookmark-dialog {
+    width: min(640px, 92vw);
+    max-width: none;
+    max-height: 84vh;
+    padding: 20px 24px 20px;
+    border-radius: var(--ai-radius-dialog);
+    background: var(--ai-dlg-bg);
+    color: var(--ai-ink-1);
+    box-shadow: var(--ai-dlg-shadow);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .bookmark-title { font-size: 17px; font-weight: 600; color: var(--ai-ink-1); flex: 1; }
+  .bookmark-count { font-size: 12.5px; color: var(--ai-ink-3); }
+  .bookmark-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 0;
+  }
+  .sys-check-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    border-radius: var(--ai-radius-pill);
+    background: var(--ai-well-bg);
+    color: var(--ai-ink-1);
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .sys-check-pill input { accent-color: var(--accent); cursor: pointer; }
+  .bookmark-tree {
+    flex: 1;
+    min-height: 180px;
+    max-height: 46vh;
+    overflow-y: auto;
+    padding: 10px;
+    border-radius: var(--ai-radius-card);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .bm-folder { display: flex; flex-direction: column; gap: 4px; }
+  .bm-folder-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ai-ink-1);
+    cursor: pointer;
+  }
+  .bm-folder-head:hover { background: var(--ai-surf-soft); }
+  .bm-folder-head input,
+  .bm-item input { accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+  .bm-folder-children { display: flex; flex-direction: column; padding-left: 20px; gap: 2px; }
+  .bm-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: var(--ai-ink-1);
+    cursor: pointer;
+  }
+  .bm-item:hover { background: var(--ai-surf-soft); }
+  .bm-item-icon {
+    width: 15px;
+    height: 15px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    object-fit: contain;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ai-ink-3);
+  }
+  .bm-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bm-item-url {
+    max-width: 190px;
+    font-size: 11px;
+    color: var(--ai-ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  @media (max-width: 640px) {
+    .sys-webdav-grid { grid-template-columns: 1fr; }
+    .sys-theme-grid { gap: 8px; }
+  }

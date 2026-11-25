@@ -9,29 +9,33 @@
    源码拆成多文件，发行由 scripts/build.js 打成单文件 HTML 与 MV3 扩展：
      index.html
      styles/main.css
-     scripts/search.js   搜索引擎、历史、联网建议、站内直达
-     scripts/main.js     卡片、壁纸、主题、导入导出、速记
-     scripts/ai.js       AI 助手（须在 main.js 之后）
-     scripts/idle.js     无操作时淡出界面
+     scripts/search.js     搜索引擎、站内直达、历史、联网建议
+     scripts/main.js       卡片/分组、书签导入、壁纸、主题、备份与 WebDAV 同步、速记
+     scripts/ai-search.js  AI 联网搜索适配层与响应流读取
+     scripts/ai.js         AI 助手（须在 main.js 与 ai-search.js 之后）
+     scripts/idle.js       无操作时淡出界面
    ----------------------------------------------------------------------------
    localStorage 键一览（更详细的位置见各模块顶部 CONFIG 注释）：
-     newtab.engine.v1         当前搜索引擎
-     newtab.customEngines.v1  自定义引擎列表
-     newtab.searchHistory.v1  搜索历史（最多 20 条）
-     newtab.shortcuts.v1      快捷方式数据
-     newtab.sitedirect.v1     站内搜索直达开关
-     newtab.suggestOnline.v1  联网搜索建议开关（百度，默认开）
-     newtab.solidColor.v1     纯色壁纸
-     newtab.blur.v1           壁纸模糊度
-     newtab.alpha.v1          卡片透明度
-     newtab.toggleImg.v1      图标卡片透明开关
-     newtab.toggleLtr.v1      文字卡片透明开关
-     newtab.ai.config.v1      AI 配置（endpoint/key/model）
-     newtab.ai.history.v1     AI 对话历史
-     newtab.ai.snapshot.v1    AI 操作前的快照（用于撤销）
-     newtab.scratchpad.v1     速记本内容
-     newtab.theme.v1          主题模式（light / dark / auto）
-     newtab.backupMeta.v1     备份提醒记录（首次使用/上次导出/稍后时间）
+     newtab.engine.v1           当前搜索引擎
+     newtab.customEngines.v1    自定义引擎列表
+     newtab.searchHistory.v1    搜索历史（最多 20 条）
+     newtab.sitedirect.v1       站内搜索直达开关
+     newtab.sitedirect.list.v1  站内搜索直达规则列表
+     newtab.suggestOnline.v1    联网搜索建议开关（百度，默认开）
+     newtab.greeting.v1         时段问候语开关（默认开）
+     newtab.shortcuts.v1        快捷方式与分组数据
+     newtab.solidColor.v1       纯色壁纸
+     newtab.blur.v1             壁纸模糊度
+     newtab.alpha.v1            卡片透明度
+     newtab.toggleImg.v1        图标卡片透明开关
+     newtab.toggleLtr.v1        文字卡片透明开关
+     newtab.ai.config.v1        AI 配置（方案/搜索/提示词/参数）
+     newtab.ai.history.v1       AI 对话历史
+     newtab.ai.snapshot.v1      AI 操作前的快照（用于撤销）
+     newtab.scratchpad.v1       速记本内容
+     newtab.theme.v1            主题模式（light / dark / auto）
+     newtab.backupMeta.v1       备份提醒记录（首次使用/上次导出/稍后时间）
+     newtab.webdav.v1           WebDAV 云同步配置
    IndexedDB：MotuoTabDB (v2) → objectStore "wallpapers" (key="wallpaper"), "icons" (key="url")
    快捷键：Ctrl+E 专注模式 / Ctrl+K 编辑模式 / Ctrl+A AI 助手 / Esc 关闭弹窗
   ============================================================================
@@ -45,8 +49,8 @@
 <body>
   <div id="bgContainer"><video id="bgVideo" muted loop playsinline preload="auto"></video></div>
 
-  <!-- 顶部搜索框 -->
-  <div class="page-title">Motuo Tab</div>
+  <!-- 顶部问候 / 标题与搜索框 -->
+  <div class="page-title" id="pageTitle">Motuo Tab</div>
   <div class="search-wrap">
     <form class="search-box" id="searchForm" autocomplete="off">
       <span class="logo" id="engineTrigger" aria-label="切换搜索引擎" title="切换搜索引擎">
@@ -130,6 +134,7 @@
           </div>
         </div>
         <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="addCreateFolderBtn" style="margin-right:auto;">新建分组</button>
           <button type="button" class="btn btn-secondary" data-close="addModal">取消</button>
           <button type="submit" class="btn btn-primary">添加</button>
         </div>
@@ -137,109 +142,388 @@
     </div>
   </div>
 
-  <!-- 个性化弹窗 -->
-  <div class="modal-mask" id="personalizeModal" aria-hidden="true">
-    <div class="modal" role="dialog" aria-labelledby="personalizeTitle">
-      <h3 id="personalizeTitle">
-        <span>个性化</span>
-        <button class="close" data-close="personalizeModal" aria-label="关闭">×</button>
-      </h3>
-      <div class="personalize-body">
-        <div class="personalize-section">
-          <div class="personalize-section-title">图片 / 动态壁纸</div>
-          <div class="personalize-row">
-            <button class="btn btn-secondary" id="wallpaperBtn">设置壁纸</button>
-            <button class="btn btn-secondary" id="resetWallpaperBtn">重置壁纸</button>
+  <!-- 统一系统设置弹窗（对标 AI 设置单窗口风格：左侧导航 + 右侧画板） -->
+  <div class="modal-mask" id="generalConfigModal" aria-hidden="true">
+    <div class="modal ai-config-dialog sys-config-dialog" role="dialog" aria-labelledby="generalConfigTitle">
+      <div class="ai-config-shell">
+        <aside class="ai-config-sidebar">
+          <h3 id="generalConfigTitle" class="ai-sidebar-title">系统设置</h3>
+          <nav class="ai-config-nav" id="sysConfigNav" aria-label="系统设置分类">
+            <button type="button" class="active" data-pane="general">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              <span>通用设置</span>
+            </button>
+            <button type="button" data-pane="appearance">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2a10 10 0 0 0-10 10c0 5.52 4.48 10 10 10 1.1 0 2-.9 2-2 0-.52-.2-.99-.52-1.34-.31-.34-.5-.79-.5-1.29 0-1.1.9-2 2-2h2.35A4.67 4.67 0 0 0 22 10.7C22 5.9 17.52 2 12 2z"/></svg>
+              <span>外观与壁纸</span>
+            </button>
+            <button type="button" data-pane="search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.8-3.8"/></svg>
+              <span>搜索与直达</span>
+            </button>
+            <button type="button" data-pane="data" id="sysDataNavBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+              <span>数据管理</span>
+            </button>
+            <button type="button" data-pane="about">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>
+              <span>快捷键与关于</span>
+            </button>
+          </nav>
+          <div class="ai-sidebar-status">
+            <div class="ai-status-line"><i class="ai-dot-ok"></i><span id="sysSideThemeText">浅色主题</span></div>
+            <div class="ai-status-line"><i class="ai-dot-ok muted" id="sysSideSyncDot"></i><span id="sysSideSyncText">仅本地存储</span></div>
           </div>
-          <input type="file" id="wallpaperFile" accept="image/*,video/*" />
-          <div style="font-size:12px;color:var(--text-3);margin-top:6px;line-height:1.5;">
-            支持图片、动图（GIF / WebP），以及视频（MP4 / WebM）动态壁纸。
+        </aside>
+
+        <div class="ai-config-main">
+          <div class="ai-config-top">
+            <span class="ai-saved-hint" id="sysSavedHint">已保存</span>
+            <button type="button" class="close ai-close-btn" data-close="generalConfigModal" aria-label="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
           </div>
-          <div class="slider-row">
-            <span style="font-size:12px;color:var(--text-3);">模糊</span>
-            <input type="range" id="blurSlider" min="0" max="20" step="1" value="3" />
-            <span class="slider-val" id="blurVal" style="color:var(--text-2);font-weight:400;">3px</span>
+
+          <div class="ai-config-panes" id="sysConfigPanes">
+            <!-- 1. 通用设置 -->
+            <section class="ai-config-pane active" data-pane="general" id="cfgPaneGeneral">
+              <div class="ai-row stack">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">主题</div>
+                </div>
+                <div class="sys-theme-grid" role="group" aria-label="主题切换">
+                  <button type="button" class="sys-theme-card theme-btn" data-theme="light">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></svg>
+                    <span>浅色</span>
+                  </button>
+                  <button type="button" class="sys-theme-card theme-btn" data-theme="dark">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4 7 7 0 1 0 20 14.5Z"/></svg>
+                    <span>深色</span>
+                  </button>
+                  <button type="button" class="sys-theme-card theme-btn" data-theme="auto">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2.2"/><path d="M8 20h8M12 16v4"/></svg>
+                    <span>跟随系统</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">时段问候语</div>
+                  <div class="ai-row-desc">搜索框上方按当前时段展示轻问候，关闭时显示 Motuo Tab</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <label class="ai-switch"><input type="checkbox" id="toggleGreeting" checked aria-label="时段问候语" /><span class="ai-switch-slider"></span></label>
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">站内搜索直达</div>
+                  <div class="ai-row-desc">输入「触发词 空格 关键词」直接跳转站内搜索（如 zh 知乎）</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <label class="ai-switch"><input type="checkbox" id="cfgToggleSiteDirect" checked aria-label="站内搜索直达" /><span class="ai-switch-slider"></span></label>
+                </div>
+              </div>
+
+              <div class="ai-row ai-row-last">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">联网搜索建议</div>
+                  <div class="ai-row-desc">输入搜索词时从百度获取实时联想建议（关闭后仅用本地历史）</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <label class="ai-switch"><input type="checkbox" id="cfgToggleSuggestOnline" checked aria-label="联网搜索建议" /><span class="ai-switch-slider"></span></label>
+                </div>
+              </div>
+            </section>
+
+            <!-- 2. 外观与壁纸 -->
+            <section class="ai-config-pane" data-pane="appearance" id="cfgPaneAppearance">
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">图片 / 动态壁纸</div>
+                    <div class="ai-row-desc">支持图片、GIF / WebP 动图，以及 MP4 / WebM 视频壁纸</div>
+                  </div>
+                  <div class="ai-row-ctrl">
+                    <button type="button" class="ai-pill-btn solid" id="wallpaperBtn">设置壁纸</button>
+                    <button type="button" class="ai-pill-btn" id="resetWallpaperBtn">重置壁纸</button>
+                    <input type="file" id="wallpaperFile" accept="image/*,video/*" hidden />
+                  </div>
+                </div>
+                <div class="sys-slider-line">
+                  <span class="sys-slider-label">背景模糊</span>
+                  <input type="range" id="blurSlider" class="ai-range" min="0" max="20" step="1" value="3" />
+                  <span class="sys-slider-val" id="blurVal">3px</span>
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">纯色壁纸</div>
+                  <div class="ai-row-desc">使用纯色作为页面底色，设置后会替代当前图片或视频壁纸</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <input type="color" id="solidColorPicker" class="sys-color-swatch" value="#f0f2f5" aria-label="选择纯色壁纸" />
+                  <button type="button" class="ai-pill-btn" id="resetSolidColorBtn">重置</button>
+                </div>
+              </div>
+
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">卡片透明度</div>
+                    <div class="ai-row-desc">调节快捷方式与搜索框的不透明度</div>
+                  </div>
+                  <span class="sys-slider-val" id="alphaVal">100%</span>
+                </div>
+                <div class="sys-slider-line">
+                  <input type="range" id="alphaSlider" class="ai-range" min="0.3" max="1" step="0.05" value="1" />
+                </div>
+                <div class="sys-toggle-sublist">
+                  <label class="sys-sub-toggle">
+                    <span>图标卡片背景透明</span>
+                    <span class="ai-switch"><input type="checkbox" id="toggleImgAlpha" checked /><span class="ai-switch-slider"></span></span>
+                  </label>
+                  <label class="sys-sub-toggle">
+                    <span>文字卡片背景透明</span>
+                    <span class="ai-switch"><input type="checkbox" id="toggleLtrAlpha" checked /><span class="ai-switch-slider"></span></span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="ai-row ai-row-last">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">恢复默认外观</div>
+                  <div class="ai-row-desc">清除自定义壁纸和纯色背景，模糊与透明度恢复默认</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <button type="button" class="ai-pill-btn danger" id="resetPersonalizeBtn">恢复默认</button>
+                </div>
+              </div>
+            </section>
+
+            <!-- 3. 搜索与直达 -->
+            <section class="ai-config-pane" data-pane="search" id="cfgPaneSearch">
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">自定义搜索引擎</div>
+                  <div class="ai-row-desc">管理搜索框左侧下拉中的自定义搜索引擎条目</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <button type="button" class="ai-pill-btn" id="cfgOpenEngineBtn">管理搜索引擎</button>
+                </div>
+              </div>
+
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">站内搜索直达规则</div>
+                    <div class="ai-row-desc">触发词后加空格即可直达；地址支持用 %s 代替搜索词</div>
+                  </div>
+                  <div class="ai-row-ctrl">
+                    <button type="button" class="ai-pill-btn" id="sdResetBtn">恢复默认</button>
+                  </div>
+                </div>
+                <div class="sys-sd-add">
+                  <div class="ai-input-box sys-sd-key"><input type="text" id="sdKeyInput" placeholder="触发词，如 wk" maxlength="12" aria-label="站内直达触发词" /></div>
+                  <div class="ai-input-box sys-sd-name"><input type="text" id="sdNameInput" placeholder="名称，如 维基" maxlength="20" aria-label="站内直达名称" /></div>
+                  <div class="ai-input-box sys-sd-url"><input type="text" id="sdUrlInput" placeholder="https://example.com/search?q=%s" aria-label="站内直达网址" /></div>
+                  <button type="button" class="ai-pill-btn solid" id="sdAddBtn">添加</button>
+                </div>
+                <div class="sys-sd-list" id="siteDirectList"></div>
+              </div>
+
+              <div class="ai-row stack ai-row-last">
+                <div class="hist-block">
+                  <div class="hist-head">
+                    <label class="hist-title">
+                      <input type="checkbox" id="histSelectAll" aria-label="全选搜索历史" />
+                      <span>搜索历史</span>
+                      <span id="histCount" class="hist-count"></span>
+                    </label>
+                    <div class="ai-row-ctrl">
+                      <button id="histDeleteSelected" class="ai-pill-btn" type="button" disabled style="height:28px;font-size:12px;">删除所选</button>
+                      <button id="histClearAll" class="hist-clear" type="button">清空</button>
+                    </div>
+                  </div>
+                  <div class="hist-list" id="histList"></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 4. 数据管理与云同步 -->
+            <section class="ai-config-pane" data-pane="data" id="cfgPaneData">
+              <div class="backup-reminder" id="backupReminderBar" hidden>
+                <div class="backup-reminder-text" id="backupReminderText">已超过 30 天未导出备份，建议留存一份</div>
+                <div class="backup-reminder-actions">
+                  <button type="button" class="ai-pill-btn solid" id="backupRemindExport" style="height:30px;font-size:12px;">立即导出</button>
+                  <button type="button" class="ai-pill-btn" id="backupRemindLater" style="height:30px;font-size:12px;">稍后</button>
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">本地数据备份</div>
+                  <div class="ai-row-desc">导出或导入全部快捷方式、分组、外观、直达规则与 AI 配置</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <button id="exportBtn" class="ai-pill-btn solid" type="button">导出备份</button>
+                  <button id="importBtn" class="ai-pill-btn" type="button">导入备份</button>
+                  <input type="file" id="importFile" accept="application/json,.json" hidden />
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">导入浏览器书签</div>
+                  <div class="ai-row-desc">导入 Chrome / Edge / Firefox 导出的 HTML 书签文件，支持按文件夹分组与预览</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <button id="bookmarkImportBtn" class="ai-pill-btn" type="button">选择书签文件</button>
+                  <input type="file" id="bookmarkImportFile" accept=".html,.htm,text/html" hidden />
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">图标离线缓存</div>
+                  <div class="ai-row-desc" id="refreshIconsStatus">缓存远程图标到 IndexedDB，离线秒开；可随时手动刷新</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <button id="refreshIconsBtn" class="ai-pill-btn" type="button">更新图标缓存</button>
+                </div>
+              </div>
+
+              <div class="ai-row stack ai-row-last">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">WebDAV 云同步（坚果云 / Nextcloud 等）</div>
+                  <div class="ai-row-desc">同步快捷方式、分组与所有设置（自动跳过本地大体积壁纸与当前 WebDAV 凭证）</div>
+                </div>
+                <div class="sys-webdav-grid">
+                  <div class="sys-webdav-field">
+                    <label for="webdavUrl">WebDAV 目录地址</label>
+                    <div class="ai-input-box"><input type="text" id="webdavUrl" placeholder="https://dav.jianguoyun.com/dav/MotuoTab/" /></div>
+                  </div>
+                  <div class="sys-webdav-field">
+                    <label for="webdavFile">备份文件名</label>
+                    <div class="ai-input-box"><input type="text" id="webdavFile" placeholder="motuo-tab-sync.json" value="motuo-tab-sync.json" /></div>
+                  </div>
+                  <div class="sys-webdav-field">
+                    <label for="webdavUser">用户名</label>
+                    <div class="ai-input-box"><input type="text" id="webdavUser" placeholder="邮箱或账号" autocomplete="off" /></div>
+                  </div>
+                  <div class="sys-webdav-field">
+                    <label for="webdavPass">应用密码</label>
+                    <div class="ai-input-box">
+                      <input type="password" id="webdavPass" placeholder="应用专用密码" autocomplete="off" />
+                      <div class="ai-input-actions">
+                        <button type="button" class="ai-input-icon-btn" id="webdavPassToggle" aria-label="显示或隐藏密码" title="显示或隐藏密码">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <button type="button" class="ai-pill-btn" id="webdavTestBtn">测试连接</button>
+                  <button type="button" class="ai-pill-btn solid" id="webdavUploadBtn">上传到云端</button>
+                  <button type="button" class="ai-pill-btn" id="webdavDownloadBtn">从云端拉取</button>
+                </div>
+                <div class="sys-webdav-pull" id="webdavPullConfirm" hidden>
+                  <div class="sys-webdav-pull-info" id="webdavPullInfo"></div>
+                  <div class="ai-row-ctrl">
+                    <button type="button" class="ai-pill-btn solid" id="webdavApplyMerge">合并卡片与分组</button>
+                    <button type="button" class="ai-pill-btn danger" id="webdavApplyOverwrite">覆盖本地配置</button>
+                    <button type="button" class="ai-pill-btn" id="webdavPullCancel">取消</button>
+                  </div>
+                </div>
+                <div class="sys-webdav-status" id="webdavStatus">提示：扩展版可直接跨域请求 WebDAV；纯网页版需目标 WebDAV 服务端允许浏览器 CORS。</div>
+              </div>
+            </section>
+
+            <!-- 5. 快捷键与关于 -->
+            <section class="ai-config-pane" data-pane="about" id="cfgPaneAbout">
+              <div class="ai-row stack">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">键盘快捷键</div>
+                </div>
+                <div class="sys-shortcuts-list">
+                  <div class="sys-shortcut-item">
+                    <span class="shortcut-keys"><kbd class="shortcut-kbd">Esc</kbd></span>
+                    <span class="shortcut-desc">关闭当前弹窗或菜单</span>
+                  </div>
+                  <div class="sys-shortcut-item">
+                    <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">E</kbd></span>
+                    <span class="shortcut-desc">切换专注模式并聚焦搜索框</span>
+                  </div>
+                  <div class="sys-shortcut-item">
+                    <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">K</kbd></span>
+                    <span class="shortcut-desc">切换编辑模式（排序 / 拖入分组 / 底部删除）</span>
+                  </div>
+                  <div class="sys-shortcut-item">
+                    <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">A</kbd></span>
+                    <span class="shortcut-desc">快速打开 AI 助手</span>
+                  </div>
+                  <div class="sys-shortcut-item">
+                    <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">V</kbd></span>
+                    <span class="shortcut-desc">在添加/编辑卡片时粘贴图片作为图标</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="ai-row ai-row-last">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">Motuo-Tab · v__APP_VERSION__</div>
+                  <div class="ai-row-desc">
+                    开发者：Motuo24 · 博客 <a class="help-link" href="https://pod.xr24.cn" target="_blank" rel="noopener">pod.xr24.cn</a> · GitHub <a class="help-link" href="https://github.com/Motuo24/Motuo-Tab" target="_blank" rel="noopener">github.com/Motuo24/Motuo-Tab</a>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
-        </div>
-        <div class="personalize-section">
-          <div class="personalize-section-title">纯色壁纸</div>
-          <div class="personalize-row">
-            <input type="color" id="solidColorPicker" value="#f0f2f5" />
-            <button class="btn btn-secondary" id="resetSolidColorBtn">重置</button>
-          </div>
-        </div>
-        <div class="personalize-section">
-          <div class="personalize-section-title">卡片透明度</div>
-          <div class="slider-row">
-            <input type="range" id="alphaSlider" min="0.3" max="1" step="0.05" value="1" />
-            <span class="slider-val" id="alphaVal">100%</span>
-          </div>
-          <label class="toggle-row">
-            <input type="checkbox" id="toggleImgAlpha" checked />
-            <span>图标卡片背景透明</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="toggleLtrAlpha" checked />
-            <span>文字卡片背景透明</span>
-          </label>
-        </div>
-        <div class="personalize-actions">
-          <button class="btn btn-secondary" id="resetPersonalizeBtn">恢复默认</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 关于弹窗 -->
-  <div class="modal-mask" id="aboutModal" aria-hidden="true">
-    <div class="modal" role="dialog" aria-labelledby="aboutTitle" style="max-width:380px;">
-      <h3 id="aboutTitle">
-        <span>关于</span>
-        <button class="close" data-close="aboutModal" aria-label="关闭">×</button>
-      </h3>
-      <div style="text-align:center;padding:16px 0 8px;">
-        <div style="font-size:15px;font-weight:600;color:var(--text-1);margin-bottom:4px;">Motuo-Tab</div>
-        <div style="font-size:12px;color:var(--text-3);margin-bottom:16px;">浏览器标签页 · v__APP_VERSION__</div>
-        <div style="font-size:13px;color:var(--text-2);line-height:1.7;">
-          <div>开发者：<strong>Motuo24</strong></div>
-          <div>博客：<a href="https://pod.xr24.cn" target="_blank" rel="noopener" style="color:var(--text-link);text-decoration:none;">pod.xr24.cn</a></div>
-          <div>GitHub：<a href="https://github.com/Motuo24/Motuo-Tab" target="_blank" rel="noopener" style="color:var(--text-link);text-decoration:none;">github.com/Motuo24/Motuo-Tab</a></div>
-        </div>
-        <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(31,35,41,0.06);font-size:12px;color:var(--text-3);">
-          简洁高效的浏览器起始页<br>支持快捷方式管理、个性化定制、AI 智能助手
+  <!-- 卡片分组 / 文件夹弹窗（T5） -->
+  <div class="modal-mask" id="folderModal" aria-hidden="true">
+    <div class="modal folder-dialog" role="dialog" aria-labelledby="folderTitleInput">
+      <div class="folder-header">
+        <input type="text" id="folderTitleInput" class="folder-title-input" maxlength="20" aria-label="分组名称" />
+        <div class="folder-actions">
+          <button type="button" class="ai-pill-btn solid" id="folderAddItemBtn" style="height:32px;font-size:12.5px;">+ 添加卡片</button>
+          <button type="button" class="ai-pill-btn" id="folderDissolveBtn" style="height:32px;font-size:12.5px;">解散分组</button>
+          <button type="button" class="close ai-close-btn" data-close="folderModal" aria-label="关闭">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
         </div>
       </div>
+      <div class="folder-grid" id="folderGrid"></div>
     </div>
   </div>
 
-  <!-- 快捷键说明弹窗 -->
-  <div class="modal-mask" id="shortcutModal" aria-hidden="true">
-    <div class="modal" role="dialog" aria-labelledby="shortcutTitle" style="max-width:360px;">
-      <h3 id="shortcutTitle">
-        <span>快捷键</span>
-        <button class="close" data-close="shortcutModal" aria-label="关闭">×</button>
-      </h3>
-      <div style="padding:12px 0 4px;display:flex;flex-direction:column;gap:8px;">
-        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;">
-          <span class="shortcut-keys"><kbd class="shortcut-kbd">Esc</kbd></span>
-          <span class="shortcut-desc">关闭弹窗 / 菜单</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;">
-          <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">E</kbd></span>
-          <span class="shortcut-desc">切换专注模式</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;">
-          <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">K</kbd></span>
-          <span class="shortcut-desc">切换编辑模式</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;">
-          <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">A</kbd></span>
-          <span class="shortcut-desc">快速打开 AI 助手</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;">
-          <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">V</kbd></span>
-          <span class="shortcut-desc">粘贴图片作为图标</span>
-        </div>
+  <!-- 浏览器书签导入预览弹窗（T6） -->
+  <div class="modal-mask" id="bookmarkModal" aria-hidden="true">
+    <div class="modal bookmark-dialog" role="dialog" aria-labelledby="bookmarkModalTitle">
+      <div class="folder-header">
+        <span id="bookmarkModalTitle" class="bookmark-title">导入浏览器书签</span>
+        <span class="bookmark-count" id="bmSelectedCount">已选 0 条</span>
+        <button type="button" class="close ai-close-btn" data-close="bookmarkModal" aria-label="关闭">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="bookmark-options">
+        <label class="sys-check-pill"><input type="checkbox" id="bmSelectAll" checked /> 全选</label>
+        <label class="sys-check-pill"><input type="checkbox" id="bmMapFolders" checked /> 按书签文件夹创建分组</label>
+        <label class="sys-check-pill"><input type="checkbox" id="bmDedupUrl" checked /> 跳过已有相同网址</label>
+      </div>
+      <div class="bookmark-tree" id="bookmarkTree"></div>
+      <div class="form-actions" style="margin-top:12px;">
+        <button type="button" class="ai-pill-btn" data-close="bookmarkModal">取消</button>
+        <button type="button" class="ai-pill-btn solid" id="bmConfirmImport">导入所选</button>
       </div>
     </div>
   </div>
@@ -269,46 +553,6 @@
           <div class="placeholder" style="display:flex;align-items:center;justify-content:center;padding:16px;font-size:12px;color:var(--text-3);background:var(--surface-3);border-radius:8px;border:1px dashed var(--border-strong);">
             暂无自定义引擎
           </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 通用配置弹窗 -->
-  <div class="modal-mask" id="generalConfigModal" aria-hidden="true">
-    <div class="modal" role="dialog" aria-labelledby="generalConfigTitle" style="max-width:360px;">
-      <h3 id="generalConfigTitle">
-        <span>通用配置</span>
-        <button class="close" data-close="generalConfigModal" aria-label="关闭">×</button>
-      </h3>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div class="backup-reminder" id="backupReminderBar" hidden>
-          <div class="backup-reminder-text" id="backupReminderText">已超过 30 天未导出备份，建议留存一份</div>
-          <div class="backup-reminder-actions">
-            <button type="button" class="btn btn-primary backup-reminder-btn" id="backupRemindExport">立即导出</button>
-            <button type="button" class="btn btn-secondary backup-reminder-btn" id="backupRemindLater">稍后</button>
-          </div>
-        </div>
-        <button id="exportBtn" class="btn btn-secondary" style="width:100%;height:40px;font-size:14px;">导出备份</button>
-        <button id="importBtn" class="btn btn-secondary" style="width:100%;height:40px;font-size:14px;">导入备份</button>
-        <input type="file" id="importFile" accept="application/json,.json" style="display:none;" />
-        <div class="icon-cache-row">
-          <button id="refreshIconsBtn" class="btn btn-secondary" type="button" style="width:100%;height:38px;font-size:13px;">更新图标缓存</button>
-          <div id="refreshIconsStatus" class="icon-cache-status" aria-live="polite"></div>
-        </div>
-
-        <!-- 搜索历史管理 -->
-        <div class="hist-block">
-          <div class="hist-head">
-            <label class="hist-title">
-              <input type="checkbox" id="histSelectAll" aria-label="全选搜索历史" />
-              <span>搜索历史</span>
-              <span id="histCount" class="hist-count"></span>
-            </label>
-            <button id="histClearAll" class="hist-clear" type="button">清空</button>
-          </div>
-          <div class="hist-list" id="histList"></div>
-          <button id="histDeleteSelected" class="btn hist-delsel" type="button" disabled>删除所选</button>
         </div>
       </div>
     </div>
@@ -382,12 +626,12 @@
           <section class="help-section" id="help-section-tips">
             <h4>搜索直达 &amp; 使用技巧</h4>
             <ul class="help-ul">
-              <li><strong>站内搜索直达</strong>：搜索框输入 <span class="help-code">bl</span> 关键词（B站）、<span class="help-code">zh</span>（知乎）、<span class="help-code">gh</span>（GitHub）、<span class="help-code">tb</span>（淘宝）、<span class="help-code">db</span>（豆瓣）</li>
+              <li><strong>站内搜索直达</strong>：搜索框输入 <span class="help-code">bl</span> 关键词（B站）、<span class="help-code">zh</span>（知乎）、<span class="help-code">gh</span>（GitHub）、<span class="help-code">tb</span>（淘宝）、<span class="help-code">db</span>（豆瓣），可在系统设置「搜索与直达」中自由增删</li>
               <li><strong>自定义搜索引擎</strong>：搜索框左侧图标下拉，底部可添加自己的搜索引擎</li>
+              <li><strong>卡片分组与书签导入</strong>：右键卡片可「移入分组」，编辑模式下可直接把卡片拖到分组上归类；「数据管理」支持导入 Chrome/Edge/Firefox 导出的书签 HTML 文件</li>
               <li><strong>管理卡片</strong>：右键快捷方式可「新标签页打开 / 编辑 / 删除 / 复制链接」；编辑模式下可拖动排序</li>
-              <li><strong>联网搜索建议</strong>：输入时，本机搜索历史之外还会向百度请求联想词。发送的只有当前输入框里的文字，不含快捷方式、对话或其他本机数据。右下角菜单里可以关掉「联网搜索建议」，关掉后只使用本机历史。</li>
-              <li><strong>搜索历史</strong>：菜单「通用配置」里可以逐条删除、多选删除，或一键清空。</li>
-              <li><strong>数据备份</strong>：菜单「通用配置」→ 导出备份，可迁移全部数据</li>
+              <li><strong>联网搜索建议</strong>：输入时，本机搜索历史之外还会向百度请求联想词。发送的只有当前输入框里的文字，不含快捷方式、对话或其他本机数据。菜单和设置里可以关掉「联网搜索建议」，关掉后只使用本机历史。</li>
+              <li><strong>搜索历史与云同步</strong>：系统设置「搜索与直达」可逐条/批量管理历史；「数据管理」支持导出本地备份或配置 WebDAV 云同步</li>
             </ul>
             <p class="help-note">联网搜索建议默认开启。若不希望把输入发给百度，请在菜单中关闭该开关。</p>
           </section>
@@ -425,7 +669,7 @@
       <div class="menu-group">
         <button id="generalConfigBtn" class="menu-item" role="menuitem">
           <svg class="mi" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span class="mi-label">通用配置</span>
+          <span class="mi-label">系统设置</span>
           <svg class="arrow" width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <button id="personalizeBtn" class="menu-item" role="menuitem">
@@ -473,19 +717,27 @@
     </label>
   </div>
 
-  <!-- 卡片右键菜单 -->
+  <!-- 卡片 / 分组右键菜单 -->
   <div class="ctx-menu" id="ctxMenu">
     <button data-action="newtab">新标签页打开</button>
+    <button data-action="openfolder" hidden>打开分组</button>
     <button data-action="edit">编辑</button>
+    <button data-action="movetofolder">移入分组…</button>
+    <button data-action="moveout" hidden>移出到主页</button>
+    <button data-action="dissolvefolder" hidden>解散分组</button>
     <button data-action="delete" class="danger">删除</button>
-    <hr />
+    <hr data-ctx-sep />
     <button data-action="copy">复制链接</button>
     <button data-action="copymd">复制为 Markdown</button>
   </div>
 
+  <!-- 移入分组浮层菜单 -->
+  <div class="ctx-menu move-folder-menu" id="moveFolderMenu"></div>
+
   <!-- 编辑模式提示条 -->
   <div class="edit-banner" id="editBanner">
-    <span>编辑模式中：拖动卡片排序，拖到底部删除</span>
+    <span>编辑模式中：拖动卡片排序或拖入分组，拖到底部删除</span>
+    <button type="button" id="editNewFolderBtn" style="margin-right:4px;">+ 新建分组</button>
     <button id="exitEditBtn">完成</button>
   </div>
 
@@ -1063,7 +1315,7 @@
               <div class="ai-row">
                 <div class="ai-row-meta">
                   <div class="ai-row-title">整页备份包含密钥</div>
-                  <div class="ai-row-desc">关闭后，从「通用配置」导出备份时自动脱敏 API Key 与搜索密钥</div>
+                  <div class="ai-row-desc">关闭后，从「系统设置」导出备份时自动脱敏 API Key 与搜索密钥</div>
                 </div>
                 <label class="ai-switch">
                   <input type="checkbox" id="aiBackupIncludeKeys" checked />
@@ -1201,6 +1453,7 @@
 
   <script src="scripts/search.js"></script>
   <script src="scripts/main.js"></script>
+  <script src="scripts/ai-search.js"></script>
   <script src="scripts/ai.js"></script>
   <script src="scripts/idle.js"></script>
 

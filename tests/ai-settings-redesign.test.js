@@ -284,3 +284,43 @@ test('关闭「整页备份包含密钥」后导出备份自动脱敏密钥，�
   assert.strictEqual(document.getElementById('aiKey').value, '');
   assert.strictEqual(document.getElementById('aiBackupIncludeKeys').checked, true);
 });
+
+test('配置方案与提示词预设采用「单胶囊 + ··· 菜单 + 原地重命名」，内置预设受保护且 [hidden] 生效', () => {
+  const { window, document } = boot({});
+  assert.ok(HTML.includes('#aiConfigModal [hidden] { display: none !important; }'), '[hidden] 规则优先级必须高于 .ai-row-ctrl');
+
+  // 默认状态下重命名框、菜单和恢复默认按钮都应隐藏，不重复显示名称
+  assert.strictEqual(document.getElementById('aiProfileName').hidden, true);
+  assert.strictEqual(document.getElementById('aiSystemPresetName').hidden, true);
+  assert.strictEqual(document.getElementById('aiContextPresetName').hidden, true);
+  assert.strictEqual(document.getElementById('aiContextPresetCtrl').hidden, true);
+  assert.strictEqual(document.getElementById('aiProfileMenu').hidden, true);
+  assert.strictEqual(document.getElementById('aiPromptResetBtn').hidden, true);
+
+  // 打开配置方案「···」菜单并触发原地重命名
+  document.getElementById('aiProfileMoreBtn').click();
+  assert.strictEqual(document.getElementById('aiProfileMenu').hidden, false);
+  document.getElementById('aiProfileRename').click();
+  assert.strictEqual(document.getElementById('aiProfileMenu').hidden, true);
+  assert.strictEqual(document.getElementById('aiProfileSelectWrap').hidden, true);
+  const nameInp = document.getElementById('aiProfileName');
+  assert.strictEqual(nameInp.hidden, false);
+  nameInp.value = '主力方案';
+  nameInp.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert.strictEqual(nameInp.hidden, true);
+  assert.strictEqual(document.getElementById('aiProfileSelectWrap').hidden, false);
+  const sel = document.getElementById('aiProfileSelect');
+  assert.strictEqual(sel.options[sel.selectedIndex].textContent, '主力方案');
+
+  // 内置提示词预设禁止改名和删除；正文修改后才露出底部「恢复默认」
+  assert.strictEqual(document.getElementById('aiSystemPresetRename').hidden, true);
+  assert.strictEqual(document.getElementById('aiSystemPresetDel').hidden, true);
+  const box = document.getElementById('aiSystemPrompt');
+  const orig = box.value;
+  box.value = orig + '\n补充指令';
+  box.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.strictEqual(document.getElementById('aiPromptResetBtn').hidden, false);
+  document.getElementById('aiPromptResetBtn').click();
+  assert.strictEqual(box.value, orig);
+  assert.strictEqual(document.getElementById('aiPromptResetBtn').hidden, true);
+});

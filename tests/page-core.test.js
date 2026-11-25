@@ -3,7 +3,8 @@
 
 const { test, afterEach } = require('node:test');
 const assert = require('node:assert');
-const { setupWindow, waitFor, readShortcuts } = require('./helpers');
+const { HTML, setupWindow, waitFor, readShortcuts } = require('./helpers');
+const { JSDOM } = require('jsdom');
 
 const active = [];
 afterEach(() => {
@@ -72,7 +73,7 @@ test('添加、改名、删除一张快捷方式会写回存储和页面', async
   await waitFor(() => !cardByName(document, '改名站'));
 });
 
-test('主题按钮写入 data-theme，再次打开沿用已保存的模式', () => {
+test('主题按钮写入 data-theme，Auto 跟随系统深浅色并实时响应系统切换', () => {
   const first = boot();
   assert.strictEqual(first.document.documentElement.getAttribute('data-theme'), 'light');
   first.document.querySelector('.theme-btn[data-theme="dark"]').click();
@@ -81,8 +82,40 @@ test('主题按钮写入 data-theme，再次打开沿用已保存的模式', () 
   assert.ok(first.document.querySelector('.theme-btn[data-theme="dark"]').classList.contains('active'));
 
   const again = boot({ seed: { 'newtab.theme.v1': 'auto' } });
-  assert.strictEqual(again.document.documentElement.getAttribute('data-theme'), 'auto');
+  assert.strictEqual(again.document.documentElement.getAttribute('data-theme-mode'), 'auto');
+  assert.strictEqual(again.document.documentElement.getAttribute('data-theme'), 'light');
   assert.ok(again.document.querySelector('.theme-btn[data-theme="auto"]').classList.contains('active'));
+
+  // 模拟系统处于深色模式，且随后切换回浅色
+  let changeListener = null;
+  const mql = {
+    matches: true,
+    media: '(prefers-color-scheme: dark)',
+    addEventListener(type, fn) { if (type === 'change') changeListener = fn; },
+    removeEventListener() {}
+  };
+  const sysDom = new JSDOM(HTML, {
+    runScripts: 'dangerously',
+    url: 'https://localhost/',
+    pretendToBeVisual: true,
+    beforeParse(win) {
+      win.localStorage.setItem('newtab.theme.v1', 'auto');
+      win.matchMedia = () => mql;
+    }
+  });
+  active.push(sysDom.window);
+  assert.strictEqual(sysDom.window.document.documentElement.getAttribute('data-theme-mode'), 'auto');
+  assert.strictEqual(sysDom.window.document.documentElement.getAttribute('data-theme'), 'dark');
+  assert.ok(changeListener, '应监听 prefers-color-scheme 变化');
+  mql.matches = false;
+  changeListener({ matches: false });
+  assert.strictEqual(sysDom.window.document.documentElement.getAttribute('data-theme'), 'light');
+});
+
+test('主菜单与底部开关药丸共面不叠染阴影', () => {
+  assert.ok(/\.menu-wrapper\s*\{[\s\S]*?filter:\s*drop-shadow\(/.test(HTML), 'menu-wrapper 应使用统一 drop-shadow');
+  assert.ok(/\.menu-wrapper \.menu\s*\{[\s\S]*?box-shadow:\s*none;[\s\S]*?z-index:\s*auto;/.test(HTML), '主菜单在 wrapper 内应去除独立 box-shadow 与 z-index');
+  assert.ok(/\.site-direct-pill,\s*\.suggest-pill\s*\{[\s\S]*?box-shadow:\s*none;/.test(HTML), '底部开关药丸应去除独立 box-shadow 避免与主菜单阴影叠出色差');
 });
 
 test('普通搜索写入历史，站内直达不写入', () => {

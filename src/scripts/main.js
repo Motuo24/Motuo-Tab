@@ -1708,10 +1708,20 @@
         refreshBackground();
       })();
 
-      // ========== 主题模式：浅色 / 深色 / 自动 ==========
-      // 浅色=默认配色；深色=深色覆盖层；自动=文字按壁纸像素用 mix-blend-mode 反色
+      // ========== 主题模式：浅色 / 深色 / 跟随系统（Auto） ==========
       function getTheme() {
         try { return localStorage.getItem(THEME_KEY) || 'light'; } catch (e) { return 'light'; }
+      }
+      var darkSchemeMql = (window.matchMedia && typeof window.matchMedia === 'function')
+        ? window.matchMedia('(prefers-color-scheme: dark)')
+        : null;
+      function systemPrefersDark() {
+        return !!(darkSchemeMql && darkSchemeMql.matches);
+      }
+      function resolveTheme(mode) {
+        if (mode === 'dark') return 'dark';
+        if (mode === 'auto') return systemPrefersDark() ? 'dark' : 'light';
+        return 'light';
       }
       function updateThemeButtons(mode) {
         document.querySelectorAll('.theme-btn').forEach(function (b) {
@@ -1719,14 +1729,26 @@
         });
       }
       function applyTheme(mode) {
-        // 用 <html data-theme="..."> 驱动 CSS（浅色/深色覆盖层 + 自动反色）
-        document.documentElement.setAttribute('data-theme', mode);
-        updateThemeButtons(mode);
+        var pref = (mode === 'dark' || mode === 'auto') ? mode : 'light';
+        document.documentElement.setAttribute('data-theme-mode', pref);
+        document.documentElement.setAttribute('data-theme', resolveTheme(pref));
+        updateThemeButtons(pref);
       }
       function setTheme(mode, persist) {
-        applyTheme(mode);
+        var pref = (mode === 'dark' || mode === 'auto') ? mode : 'light';
+        applyTheme(pref);
         if (persist !== false) {
-          try { localStorage.setItem(THEME_KEY, mode); } catch (e) {}
+          try { localStorage.setItem(THEME_KEY, pref); } catch (e) {}
+        }
+      }
+      if (darkSchemeMql) {
+        var onSystemSchemeChange = function () {
+          if (getTheme() === 'auto') applyTheme('auto');
+        };
+        if (typeof darkSchemeMql.addEventListener === 'function') {
+          darkSchemeMql.addEventListener('change', onSystemSchemeChange);
+        } else if (typeof darkSchemeMql.addListener === 'function') {
+          darkSchemeMql.addListener(onSystemSchemeChange);
         }
       }
       document.querySelectorAll('.theme-btn').forEach(function (btn) {

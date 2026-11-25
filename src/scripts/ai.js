@@ -390,8 +390,12 @@
             getId: function () { return activeContextPresetId; },
             setId: function (v) { activeContextPresetId = v; },
             select: 'aiContextPreset',
+            selectWrap: 'aiContextSelectWrap',
             name: 'aiContextPresetName',
+            rename: 'aiContextPresetRename',
+            reset: 'aiContextPresetReset',
             del: 'aiContextPresetDel',
+            delSep: 'aiContextPresetDelSep',
             box: 'aiContextPrompt'
           };
         }
@@ -400,8 +404,12 @@
           getId: function () { return activeSystemPresetId; },
           setId: function (v) { activeSystemPresetId = v; },
           select: 'aiPromptPreset',
+          selectWrap: 'aiSystemSelectWrap',
           name: 'aiSystemPresetName',
+          rename: 'aiSystemPresetRename',
+          reset: 'aiSystemPresetReset',
           del: 'aiSystemPresetDel',
+          delSep: 'aiSystemPresetDelSep',
           box: 'aiSystemPrompt'
         };
       }
@@ -412,7 +420,7 @@
         var box = document.getElementById(s.box);
         var name = document.getElementById(s.name);
         if (box) cur.text = box.value;
-        if (name && name.value.trim()) cur.name = name.value.trim();
+        if (!cur.builtin && name && name.value.trim()) cur.name = name.value.trim();
       }
       function renderLayer(kind) {
         var s = layerState(kind);
@@ -435,8 +443,15 @@
         var name = document.getElementById(s.name);
         if (box && cur && document.activeElement !== box) box.value = cur.text;
         if (name && cur && document.activeElement !== name) name.value = cur.name || '';
+        var isBuiltin = !!(cur && cur.builtin);
         var del = document.getElementById(s.del);
-        if (del) del.style.display = !cur || cur.builtin ? 'none' : '';
+        var delSep = document.getElementById(s.delSep);
+        var ren = document.getElementById(s.rename);
+        var rst = document.getElementById(s.reset);
+        if (del) del.hidden = !cur || isBuiltin;
+        if (delSep) delSep.hidden = !cur || isBuiltin;
+        if (ren) ren.hidden = !cur || isBuiltin;
+        if (rst) rst.hidden = !cur || !isBuiltin;
       }
       function commitPromptLayers() {
         commitLayer('system');
@@ -448,7 +463,7 @@
         var date = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
         var time = pad(d.getHours()) + ':' + pad(d.getMinutes());
         var tAttr = document.documentElement.getAttribute('data-theme') || 'light';
-        var theme = tAttr === 'dark' ? '深色' : (tAttr === 'auto' ? '自动' : '浅色');
+        var theme = tAttr === 'dark' ? '深色' : '浅色';
         var engKey = '';
         try { engKey = localStorage.getItem('newtab.engine.v1') || 'baidu'; } catch (e) { engKey = 'baidu'; }
         var engNames = { baidu: '百度', bing: '必应', google: 'Google' };
@@ -895,6 +910,14 @@
           var len = String(activeBox.value || '').length;
           counter.textContent = len + ' 字 · 约 ' + Math.ceil(len * 0.65) + ' tokens';
         }
+        var activeList = activePromptLayer === 'context' ? contextPresetList : systemPresetList;
+        var activeId = activePromptLayer === 'context' ? activeContextPresetId : activeSystemPresetId;
+        var curPreset = presetById(activeList, activeId);
+        var builtins = activePromptLayer === 'context' ? builtinContextPresets() : builtinSystemPresets();
+        var defPreset = curPreset && builtins.filter(function (b) { return b.id === curPreset.id; })[0];
+        var isModifiedBuiltin = !!(curPreset && curPreset.builtin && defPreset && String(curPreset.text || '') !== String(defPreset.text || ''));
+        var rstBtn = document.getElementById('aiPromptResetBtn');
+        if (rstBtn) rstBtn.hidden = !isModifiedBuiltin;
         var previewBtn = document.getElementById('aiTogglePromptPreviewBtn');
         if (previewBtn) previewBtn.textContent = promptPreviewOpen ? '返回编辑' : '预览展开效果';
       }
@@ -1035,8 +1058,11 @@
       function syncProfileRow() {
         var row = document.getElementById('aiProfileRow');
         if (row) row.style.display = '';
+        var hasMulti = aiProfiles.length > 1;
         var del = document.getElementById('aiProfileDel');
-        if (del) del.style.display = aiProfiles.length > 1 ? '' : 'none';
+        var delSep = document.getElementById('aiProfileDelSep');
+        if (del) del.hidden = !hasMulti;
+        if (delSep) delSep.hidden = !hasMulti;
       }
 
       // 搜索报错格式化与提供商适配器（对话与「测试搜索」共用）
@@ -1940,29 +1966,119 @@
       bindDisclosure('aiToggleSearchMetaBtn', 'aiSearchMetaDetail', '收起接口与计费详情', '查看接口与计费详情');
       bindDisclosure('aiToggleCustomJsonBtn', 'aiCustomJsonBody', '收起自定义请求头与额外参数', '自定义请求头与额外参数');
 
+      function closeAllPopMenus() {
+        var modal = document.getElementById('aiConfigModal');
+        if (!modal) return;
+        modal.querySelectorAll('.ai-pop-menu').forEach(function (m) { m.hidden = true; });
+        modal.querySelectorAll('.ai-more-btn').forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
+      }
+      function bindPopMenu(btnId, menuId) {
+        var btn = document.getElementById(btnId);
+        var menu = document.getElementById(menuId);
+        if (!btn || !menu) return;
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var willOpen = !!menu.hidden;
+          closeAllPopMenus();
+          menu.hidden = !willOpen;
+          btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        });
+      }
+      bindPopMenu('aiProfileMoreBtn', 'aiProfileMenu');
+      bindPopMenu('aiSystemPresetMoreBtn', 'aiSystemPresetMenu');
+      bindPopMenu('aiContextPresetMoreBtn', 'aiContextPresetMenu');
+      document.addEventListener('click', function (e) {
+        if (!e.target || !e.target.closest || !e.target.closest('#aiConfigModal .ai-pop-wrap')) {
+          closeAllPopMenus();
+        }
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        var modal = document.getElementById('aiConfigModal');
+        if (!modal) return;
+        var hasOpenMenu = Array.prototype.some.call(modal.querySelectorAll('.ai-pop-menu'), function (m) { return !m.hidden; });
+        if (hasOpenMenu) {
+          closeAllPopMenus();
+          e.stopPropagation();
+        }
+      }, true);
+
+      function beginInlineRename(selectWrapId, inputId, getOriginal, onCommit) {
+        var wrap = document.getElementById(selectWrapId);
+        var inp = document.getElementById(inputId);
+        if (!inp) return;
+        closeAllPopMenus();
+        var orig = String(getOriginal() || '');
+        if (wrap) wrap.hidden = true;
+        inp.hidden = false;
+        inp.value = orig;
+        inp.focus();
+        if (typeof inp.select === 'function') inp.select();
+        var finished = false;
+        function done(commit) {
+          if (finished) return;
+          finished = true;
+          inp.removeEventListener('keydown', onKey);
+          inp.removeEventListener('blur', onBlur);
+          inp.hidden = true;
+          if (wrap) wrap.hidden = false;
+          if (commit) {
+            var nextVal = inp.value.trim();
+            if (nextVal) onCommit(nextVal);
+          } else {
+            inp.value = orig;
+          }
+        }
+        function onKey(ev) {
+          if (ev.key === 'Enter') { ev.preventDefault(); done(true); }
+          else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); done(false); }
+        }
+        function onBlur() { done(true); }
+        inp.addEventListener('keydown', onKey);
+        inp.addEventListener('blur', onBlur);
+      }
+
       var profileSel = document.getElementById('aiProfileSelect');
       if (profileSel) {
         profileSel.addEventListener('change', function () {
+          closeAllPopMenus();
           readProfileFromForm(activeProfile);
           activeProfile = aiProfiles.filter(function (p) { return p.id === profileSel.value; })[0] || aiProfiles[0];
           writeProfileToForm(activeProfile);
           saveAIConfig();
         });
       }
+      var profileRename = document.getElementById('aiProfileRename');
+      if (profileRename) {
+        profileRename.addEventListener('click', function () {
+          beginInlineRename('aiProfileSelectWrap', 'aiProfileName', function () {
+            return activeProfile ? activeProfile.name : '';
+          }, function (val) {
+            if (activeProfile) activeProfile.name = val;
+            saveAIConfig();
+          });
+        });
+      }
       var profileAdd = document.getElementById('aiProfileAdd');
       if (profileAdd) {
         profileAdd.addEventListener('click', function () {
+          closeAllPopMenus();
           readProfileFromForm(activeProfile);
           var p = blankProfile('配置 ' + (aiProfiles.length + 1));
           aiProfiles.push(p);
           activeProfile = p;
           writeProfileToForm(p);
           saveAIConfig();
+          beginInlineRename('aiProfileSelectWrap', 'aiProfileName', function () { return p.name; }, function (val) {
+            p.name = val;
+            saveAIConfig();
+          });
         });
       }
       var profileDup = document.getElementById('aiProfileDup');
       if (profileDup) {
         profileDup.addEventListener('click', function () {
+          closeAllPopMenus();
           readProfileFromForm(activeProfile);
           var src = activeProfile || blankProfile('通用配置');
           var copy = {
@@ -1982,6 +2098,7 @@
       var profileDel = document.getElementById('aiProfileDel');
       if (profileDel) {
         profileDel.addEventListener('click', function () {
+          closeAllPopMenus();
           if (aiProfiles.length < 2) { showAIToast('至少保留一套配置'); return; }
           aiProfiles = aiProfiles.filter(function (p) { return p !== activeProfile; });
           activeProfile = aiProfiles[0];
@@ -2100,11 +2217,24 @@
         });
       }
 
+      function resetPromptLayer(kind) {
+        var s = layerState(kind);
+        var builtins = kind === 'context' ? builtinContextPresets() : builtinSystemPresets();
+        var cur = presetById(s.list(), s.getId());
+        var match = cur && builtins.filter(function (b) { return b.id === cur.id; })[0];
+        if (cur) cur.text = (match || builtins[0]).text;
+        var box = document.getElementById(s.box);
+        if (box && cur) box.value = cur.text;
+        renderLayer(kind);
+        saveAIConfig();
+        flashSaved('已恢复默认');
+      }
       function bindPromptLayer(kind, addId) {
         var s = layerState(kind);
         var sel = document.getElementById(s.select);
         if (sel) {
           sel.addEventListener('change', function () {
+            closeAllPopMenus();
             commitLayer(kind);
             s.setId(sel.value);
             renderLayer(kind);
@@ -2120,9 +2250,29 @@
         }
         var name = document.getElementById(s.name);
         if (name) name.addEventListener('change', function () { saveAIConfig(); });
+        var renBtn = document.getElementById(s.rename);
+        if (renBtn) {
+          renBtn.addEventListener('click', function () {
+            var cur = presetById(s.list(), s.getId());
+            if (!cur || cur.builtin) return;
+            beginInlineRename(s.selectWrap, s.name, function () { return cur.name || ''; }, function (val) {
+              cur.name = val;
+              renderLayer(kind);
+              saveAIConfig();
+            });
+          });
+        }
+        var rstMenuBtn = document.getElementById(s.reset);
+        if (rstMenuBtn) {
+          rstMenuBtn.addEventListener('click', function () {
+            closeAllPopMenus();
+            resetPromptLayer(kind);
+          });
+        }
         var addBtn = document.getElementById(addId);
         if (addBtn) {
           addBtn.addEventListener('click', function () {
+            closeAllPopMenus();
             commitLayer(kind);
             var list = s.list();
             var created = {
@@ -2135,11 +2285,17 @@
             s.setId(created.id);
             renderLayer(kind);
             saveAIConfig();
+            beginInlineRename(s.selectWrap, s.name, function () { return created.name; }, function (val) {
+              created.name = val;
+              renderLayer(kind);
+              saveAIConfig();
+            });
           });
         }
         var delBtn = document.getElementById(s.del);
         if (delBtn) {
           delBtn.addEventListener('click', function () {
+            closeAllPopMenus();
             var cur = presetById(s.list(), s.getId());
             if (!cur || cur.builtin) return;
             var next = s.list().filter(function (p) { return p.id !== cur.id; });
@@ -2160,6 +2316,7 @@
         promptLayerSeg.addEventListener('click', function (e) {
           var btn = e.target.closest ? e.target.closest('[data-prompt-layer]') : null;
           if (!btn) return;
+          closeAllPopMenus();
           activePromptLayer = btn.getAttribute('data-prompt-layer') === 'context' ? 'context' : 'system';
           promptPreviewOpen = false;
           syncPromptUI();
@@ -2175,17 +2332,7 @@
       var promptResetBtn = document.getElementById('aiPromptResetBtn');
       if (promptResetBtn) {
         promptResetBtn.addEventListener('click', function () {
-          var kind = activePromptLayer;
-          var s = layerState(kind);
-          var builtins = kind === 'context' ? builtinContextPresets() : builtinSystemPresets();
-          var cur = presetById(s.list(), s.getId());
-          var match = cur && builtins.filter(function (b) { return b.id === cur.id; })[0];
-          if (cur) cur.text = (match || builtins[0]).text;
-          var box = document.getElementById(s.box);
-          if (box && cur) box.value = cur.text;
-          renderLayer(kind);
-          saveAIConfig();
-          flashSaved('已恢复默认');
+          resetPromptLayer(activePromptLayer);
         });
       }
 

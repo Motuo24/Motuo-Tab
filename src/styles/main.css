@@ -392,7 +392,6 @@
     border-radius: 12px;
     box-shadow: var(--elev-shadow);
     padding: 6px;
-    z-index: 12;
   }
   .menu-group { display: flex; flex-direction: column; margin: 0 0 4px; }
   .menu .menu-item {
@@ -429,7 +428,7 @@
   .menu .menu-item.danger:hover { background: rgba(255,107,107,0.10); }
   .menu input[type="file"] { display: none; }
 
-  /* 站内搜索直达药丸（跟随菜单显隐） */
+  /* 站内搜索直达药丸（跟随菜单显隐，统一由容器投射阴影，避免主菜单阴影叠染下方药丸） */
   .menu-wrapper {
     position: fixed;
     right: 28px;
@@ -441,6 +440,7 @@
     width: 172px;
     gap: 12px;
     pointer-events: none;
+    filter: drop-shadow(0 10px 24px rgba(31, 35, 41, 0.14)) drop-shadow(0 2px 5px rgba(31, 35, 41, 0.06));
     transition: opacity 0.2s ease;
   }
   .menu-wrapper.open { display: flex; }
@@ -448,6 +448,8 @@
     position: static;
     display: block;
     pointer-events: auto;
+    box-shadow: none;
+    z-index: auto;
   }
   .site-direct-pill, .suggest-pill {
     display: flex;
@@ -459,7 +461,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: var(--elev-shadow);
+    box-shadow: none;
     font-size: 13px;
     color: var(--text-1);
     cursor: pointer;
@@ -1387,6 +1389,8 @@
     --ai-muted-dot: #b4bac4;
     --ai-danger-text: #c93b3b;
     --ai-danger-bg: rgba(201, 59, 59, 0.08);
+    --ai-pop-bg: #ffffff;
+    --ai-pop-shadow: 0 12px 32px rgba(15, 18, 24, 0.14), 0 0 0 1px rgba(20, 22, 26, 0.08);
     --ai-radius-dialog: 26px;
     --ai-radius-card: 16px;
     --ai-radius-choice: 14px;
@@ -1433,7 +1437,10 @@
     --ai-muted-dot: #6b6e76;
     --ai-danger-text: #ff7a7a;
     --ai-danger-bg: rgba(255, 122, 122, 0.14);
+    --ai-pop-bg: #35363b;
+    --ai-pop-shadow: 0 16px 38px rgba(0, 0, 0, 0.48), 0 0 0 1px rgba(255, 255, 255, 0.10);
   }
+  #aiConfigModal [hidden] { display: none !important; }
   #aiConfigModal.modal-mask { background: var(--ai-mask-bg); }
   #aiConfigModal select option {
     background: var(--ai-dlg-bg);
@@ -1688,21 +1695,65 @@
     pointer-events: none;
   }
   .ai-inline-name {
-    width: 108px;
-    height: 32px;
-    padding: 0 11px;
-    border: 1px solid var(--ai-well-border);
+    width: 152px;
+    height: 34px;
+    padding: 0 13px;
+    border: 1px solid var(--ai-border-strong);
     border-radius: var(--ai-radius-pill);
-    background: var(--ai-well-bg);
+    background: var(--ai-well-focus);
     color: var(--ai-ink-1);
     font: inherit;
-    font-size: 12.5px;
+    font-size: 13px;
     outline: none;
     transition: background 0.14s ease, border-color 0.14s ease;
   }
   .ai-inline-name:focus {
     background: var(--ai-well-focus);
     border-color: var(--ai-border-strong);
+  }
+  .ai-pop-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .ai-pop-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 152px;
+    padding: 5px;
+    border-radius: 14px;
+    background: var(--ai-pop-bg);
+    box-shadow: var(--ai-pop-shadow);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ai-pop-item {
+    width: 100%;
+    height: 32px;
+    padding: 0 11px;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ai-ink-1);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .ai-pop-item:hover { background: var(--ai-surf-soft); }
+  .ai-pop-item.danger { color: var(--ai-danger-text); }
+  .ai-pop-item.danger:hover { background: var(--ai-danger-bg); }
+  .ai-pop-sep {
+    height: 1px;
+    background: var(--ai-hairline);
+    margin: 3px 6px;
   }
   .ai-pill-btn {
     height: 34px;
@@ -2076,6 +2127,11 @@
     border-top: 1px solid var(--ai-hairline);
     font-size: 12px;
     color: var(--ai-ink-3);
+  }
+  .ai-editor-footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
   .ai-muted-group { display: flex; flex-direction: column; gap: 10px; }
   .ai-muted-group.disabled { opacity: 0.42; pointer-events: none; }
@@ -2663,19 +2719,6 @@
   }
   .theme-switch button.active:hover { background: var(--surface); color: var(--accent); }
 
-  /* 自动模式：文字按壁纸像素实时反色 ==========
-     用 mix-blend-mode:difference + 白色文字：黑色壁纸→白字、白色壁纸→黑字、
-     一半黑一半白→各自反色。只作用于文字（标题、卡片名），
-     快捷方式的图片与卡片背景保持正常、不随壁纸反色。
-     注意 .shortcuts 默认带 transform 会形成堆叠上下文，
-     从而隔离混合效果，这里去掉它让文字能直接与壁纸混合。 */
-  html[data-theme="auto"] .shortcuts { transform: none; }
-  html[data-theme="auto"] .page-title,
-  html[data-theme="auto"] .shortcut .label {
-    color: #ffffff;
-    mix-blend-mode: difference;
-  }
-
   /* ========== 深色模式覆盖层 ========== */
   html[data-theme="dark"] body {
     background:
@@ -2745,6 +2788,7 @@
 
   /* FAB / 菜单 / 右键菜单 / 站内直达药丸 */
   html[data-theme="dark"] .fab { background: var(--surface); border-color: var(--border); color: var(--text-4); }
+  html[data-theme="dark"] .menu-wrapper { filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.45)); }
   html[data-theme="dark"] .menu { background: var(--surface); border-color: var(--border); }
   html[data-theme="dark"] .menu button { color: var(--text-1); }
   html[data-theme="dark"] .menu button:hover { background: var(--surface-2); }

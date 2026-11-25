@@ -1238,7 +1238,9 @@
                 theme: readLS(THEME_KEY) || getTheme()
               },
               ai: {
-                config: readLS('newtab.ai.config.v1'),
+                config: (window.__motuo && window.__motuo.redactAIConfigJson)
+                  ? window.__motuo.redactAIConfigJson(readLS('newtab.ai.config.v1'))
+                  : readLS('newtab.ai.config.v1'),
                 history: readLS('newtab.ai.history.v1')
               },
               wallpaper: wallpaperDataUrl

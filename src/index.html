@@ -502,174 +502,592 @@
   <!-- AI 配置：独立弹窗，盖在助手侧边栏之上 -->
   <div class="modal-mask" id="aiConfigModal" aria-hidden="true">
     <div class="modal ai-config-dialog" role="dialog" aria-labelledby="aiConfigTitle">
-      <h3 id="aiConfigTitle">
-        <span>AI 配置</span>
-        <button class="close" data-close="aiConfigModal" aria-label="关闭">×</button>
-      </h3>
       <div class="ai-config-shell" id="aiConfigPanel">
-        <nav class="ai-config-nav" aria-label="配置分类">
-          <button type="button" class="active" data-pane="model">模型</button>
-          <button type="button" data-pane="search">联网搜索</button>
-          <button type="button" data-pane="prompt">提示词</button>
-          <button type="button" data-pane="advanced">高级配置</button>
-        </nav>
-        <div class="ai-config-panes">
-          <section class="ai-config-pane active" data-pane="model">
-            <div class="ai-profile-row" id="aiProfileRow">
-              <span class="ai-profile-label">配置方案</span>
-              <select id="aiProfileSelect" aria-label="配置方案"></select>
-              <input type="text" id="aiProfileName" placeholder="方案名称" aria-label="方案名称" />
-              <button type="button" class="ai-text-btn" id="aiProfileAdd">新增</button>
-              <button type="button" class="ai-text-btn" id="aiProfileDel">删除</button>
-            </div>
-            <label class="field">
-              <span>API 地址</span>
-              <input type="url" id="aiEndpoint" placeholder="https://api.deepseek.com 或完整路径" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span>API Key</span>
-              <input type="text" id="aiKey" placeholder="sk-xxxxxxxx" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span>模型名称</span>
-              <input type="text" id="aiModel" placeholder="deepseek-flash" autocomplete="off" />
-            </label>
-            <div class="ai-profile-row">
-              <button type="button" class="ai-text-btn" id="aiTestBtn">测试连接</button>
-              <span id="aiTestStatus" class="ai-config-hint"></span>
-            </div>
-            <label class="field">
-              <span>思考档位</span>
-              <select id="aiThinkingGear" aria-label="思考档位">
-                <option value="low">低</option>
-                <option value="medium">中</option>
-                <option value="high" selected>高</option>
-              </select>
-            </label>
-            <p class="ai-config-hint">底栏「深度思考」是总开关。打开后使用这里的档位。</p>
-          </section>
-          <section class="ai-config-pane" data-pane="search">
-            <label class="field">
-              <span>提供商</span>
-              <select id="aiSearchProvider" aria-label="搜索提供商">
-                <option value="deepseek">DeepSeek Search</option>
-                <option value="zhipu">智谱 Web Search</option>
-                <option value="kimi">Kimi / Moonshot</option>
-                <option value="bailian">百炼 EnhancedSearch</option>
-                <option value="doubao">豆包搜索</option>
-                <option value="qianfan">百度千帆</option>
-                <option value="bocha" selected>博查</option>
-                <option value="you">You.com</option>
-                <option value="tencent">腾讯元宝搜索</option>
-                <option value="tavily">Tavily</option>
-                <option value="custom">自定义接口</option>
-              </select>
-            </label>
-            <div id="aiSearchMeta" class="ai-search-meta"></div>
-            <label class="field" id="zhipuEngineField">
-              <span>智谱引擎</span>
-              <select id="aiZhipuEngine" aria-label="智谱搜索引擎">
-                <option value="search_std">基础 search_std（0.01 元/次）</option>
-                <option value="search_pro" selected>高阶 search_pro（0.03 元/次）</option>
-                <option value="search_pro_sogou">搜狗 search_pro_sogou（0.05 元/次）</option>
-                <option value="search_pro_quark">夸克 search_pro_quark（0.05 元/次）</option>
-              </select>
-            </label>
-            <label class="field" id="kimiTierField">
-              <span>Kimi 档位</span>
-              <select id="aiKimiTier" aria-label="Kimi 搜索档位">
-                <option value="pro" selected>Pro（0.003 美元/次，可按时间过滤）</option>
-                <option value="basic">基础（0.002 美元/次，无时间过滤）</option>
-              </select>
-            </label>
-            <label class="field" id="aiSearchKeyField">
-              <span id="aiSearchKeyLabel">搜索密钥</span>
-              <input type="text" id="aiSearchKey" placeholder="当前提供商的密钥" autocomplete="off" />
-            </label>
-            <label class="field" id="bochaKeyField" hidden>
-              <span>博查 AI 密钥</span>
-              <input type="text" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
-            </label>
-            <label class="field" id="tavilyKeyField" hidden>
-              <span>Tavily 密钥</span>
-              <input type="text" id="aiTavilyKey" placeholder="tvly-xxxxxxxx" autocomplete="off" />
-            </label>
-            <label class="field" id="customUrlField">
-              <span>自定义搜索地址</span>
-              <input type="url" id="aiCustomUrl" placeholder="https://example.com/search" autocomplete="off" />
-            </label>
-            <label class="field" id="customKeyField">
-              <span>自定义接口密钥（可选）</span>
-              <input type="text" id="aiCustomKey" placeholder="Bearer Token" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span>返回条数</span>
-              <input type="number" id="aiSearchCount" min="1" max="10" step="1" value="5" />
-            </label>
-            <label class="field">
-              <span>时间范围</span>
-              <select id="aiSearchFreshness" aria-label="时间范围">
-                <option value="noLimit">不限</option>
-                <option value="day">一天内</option>
-                <option value="week">一周内</option>
-                <option value="month">一月内</option>
-              </select>
-            </label>
-            <label class="ai-check">
-              <input type="checkbox" id="aiSearchSummary" checked />
-              <span>向提供商请求摘要</span>
-            </label>
-            <p class="ai-config-hint">密钥只存在本机。换提供商时，各自的密钥会留下来。搜索失败时，接口返回的原因会交给助手，并请它告诉你。底栏「联网搜索」是总开关。DeepSeek 的搜索密钥可以留空，留空就用模型页的密钥。</p>
-          </section>
-          <section class="ai-config-pane" data-pane="prompt">
-            <div class="ai-prompt-block">
-              <h4>全局系统提示词</h4>
-              <p class="ai-config-hint">基础人设。整段对话都放在系统提示词里，不随卡片变化。</p>
-              <div class="ai-profile-row">
-                <select id="aiPromptPreset" aria-label="系统提示词预设"></select>
-                <input type="text" id="aiSystemPresetName" placeholder="预设名称" aria-label="系统提示词预设名称" />
-                <button type="button" class="ai-text-btn" id="aiSystemPresetAdd">新增</button>
-                <button type="button" class="ai-text-btn" id="aiSystemPresetDel">删除</button>
+        <aside class="ai-config-sidebar">
+          <h3 id="aiConfigTitle" class="ai-sidebar-title">AI 设置</h3>
+          <nav class="ai-config-nav" aria-label="配置分类">
+            <button type="button" class="active" data-pane="model">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 4.3v9.4L12 21l-7.5-4.3V7.3L12 3z"/><path d="M12 12l7.5-4.3M12 12v9M12 12L4.5 7.7"/></svg>
+              <span>模型</span>
+            </button>
+            <button type="button" data-pane="search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.8-3.8"/></svg>
+              <span>联网搜索</span>
+            </button>
+            <button type="button" data-pane="prompt">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></svg>
+              <span>提示词</span>
+            </button>
+            <button type="button" data-pane="params">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M2 14h4M10 8h4M18 16h4"/></svg>
+              <span>参数与行为</span>
+            </button>
+            <button type="button" data-pane="data">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z"/></svg>
+              <span>数据与安全</span>
+            </button>
+          </nav>
+          <div class="ai-sidebar-status">
+            <div class="ai-status-line"><i class="ai-dot-ok" id="aiSideModelDot"></i><span id="aiSideModelText">未配置模型</span></div>
+            <div class="ai-status-line"><i class="ai-dot-ok" id="aiSideSearchDot"></i><span id="aiSideSearchText">博查搜索</span></div>
+          </div>
+        </aside>
+
+        <div class="ai-config-main">
+          <div class="ai-config-top">
+            <span class="ai-saved-hint" id="aiSavedHint">已保存</span>
+            <button type="button" class="close ai-close-btn" data-close="aiConfigModal" aria-label="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <div class="ai-config-panes">
+            <!-- 1. 模型 -->
+            <section class="ai-config-pane active" data-pane="model">
+              <div class="ai-row" id="aiProfileRow">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">配置方案</div>
+                  <div class="ai-row-desc">为不同场景保存多套接口与模型</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <div class="ai-pill-select-wrap">
+                    <select class="ai-pill-select" id="aiProfileSelect" aria-label="配置方案"></select>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </div>
+                  <input type="text" class="ai-inline-name" id="aiProfileName" placeholder="方案名称" aria-label="方案名称" />
+                  <button type="button" class="ai-icon-pill-btn" id="aiProfileAdd" title="新建方案" aria-label="新建方案">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                  <button type="button" class="ai-icon-pill-btn" id="aiProfileDup" title="复制当前方案" aria-label="复制当前方案">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  </button>
+                  <button type="button" class="ai-icon-pill-btn danger" id="aiProfileDel" title="删除当前方案" aria-label="删除当前方案">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/></svg>
+                  </button>
+                </div>
               </div>
-              <textarea id="aiSystemPrompt" spellcheck="false" aria-label="全局系统提示词"></textarea>
-            </div>
-            <div class="ai-prompt-block">
-              <h4>环境上下文前缀</h4>
-              <p class="ai-config-hint">每次发送前加在这条用户消息前面。卡片或搜索开关变了，下一条会带上新的内容。</p>
-              <div class="ai-profile-row">
-                <select id="aiContextPreset" aria-label="环境上下文预设"></select>
-                <input type="text" id="aiContextPresetName" placeholder="预设名称" aria-label="环境上下文预设名称" />
-                <button type="button" class="ai-text-btn" id="aiContextPresetAdd">新增</button>
-                <button type="button" class="ai-text-btn" id="aiContextPresetDel">删除</button>
+
+              <div class="ai-row stack">
+                <div class="ai-row-title">快速预设</div>
+                <div class="ai-chip-row" id="aiProviderChips">
+                  <button type="button" class="ai-chip" data-vendor="deepseek">DeepSeek</button>
+                  <button type="button" class="ai-chip" data-vendor="openai">OpenAI</button>
+                  <button type="button" class="ai-chip" data-vendor="zhipu">智谱</button>
+                  <button type="button" class="ai-chip" data-vendor="kimi">Kimi</button>
+                  <button type="button" class="ai-chip" data-vendor="bailian">百炼</button>
+                  <button type="button" class="ai-chip" data-vendor="doubao">豆包</button>
+                  <button type="button" class="ai-chip" data-vendor="openrouter">OpenRouter</button>
+                  <button type="button" class="ai-chip" data-vendor="ollama">Ollama</button>
+                  <button type="button" class="ai-chip" data-vendor="custom">自定义</button>
+                </div>
               </div>
-              <div class="ai-var-row">
-                <button type="button" class="ai-var-btn" data-var="{{cards}}">卡片列表</button>
-                <button type="button" class="ai-var-btn" data-var="{{card_names}}">卡片名称</button>
-                <button type="button" class="ai-var-btn" data-var="{{card_count}}">卡片数量</button>
-                <button type="button" class="ai-var-btn" data-var="{{site_direct}}">站内直达</button>
-                <button type="button" class="ai-var-btn" data-var="{{search_rules}}">搜索规则</button>
-                <button type="button" class="ai-var-btn" data-var="{{ops_contract}}">卡片操作约定</button>
-                <button type="button" class="ai-var-btn" data-var="{{last_query}}">上次搜索词</button>
+
+              <div class="ai-row stack">
+                <div class="ai-row-title">API 地址</div>
+                <div class="ai-input-box">
+                  <input type="url" id="aiEndpoint" placeholder="https://api.deepseek.com 或完整路径" autocomplete="off" />
+                </div>
+                <div class="ai-field-hint">实际请求：<code id="aiResolvedEndpoint">（未填写）</code></div>
               </div>
-              <textarea id="aiContextPrompt" spellcheck="false" aria-label="环境上下文前缀" placeholder="留空则发送时不附加环境说明"></textarea>
-            </div>
-          </section>
-          <section class="ai-config-pane" data-pane="advanced">
-            <p class="ai-config-hint">这些选项平时不用改。推理模型若拒绝温度参数，关掉「请求里附带温度」。</p>
-            <label class="field">
-              <span>采样温度</span>
-              <input type="number" id="aiTemperature" min="0" max="2" step="0.1" value="0.1" />
-            </label>
-            <label class="ai-check">
-              <input type="checkbox" id="aiSendTemperature" checked />
-              <span>请求里附带温度</span>
-            </label>
-            <label class="field">
-              <span>回复长度上限（留空不限制）</span>
-              <input type="number" id="aiMaxTokens" min="1" step="1" placeholder="例如 2048" />
-            </label>
-            <p class="ai-config-hint">思考档位在「模型」里。DeepSeek 会发送对应强度，智谱只打开思考，其他厂商不附加它们不认识的字段，只在提示词里要求相应的思考深度。</p>
-          </section>
+
+              <div class="ai-row stack">
+                <div class="ai-row-title">API Key</div>
+                <div class="ai-input-box">
+                  <input type="password" id="aiKey" placeholder="sk-xxxxxxxx" autocomplete="off" />
+                  <div class="ai-input-actions">
+                    <button type="button" class="ai-input-icon-btn" id="aiToggleKeyEye" title="显示/隐藏密钥" aria-label="显示或隐藏密钥">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                    <button type="button" class="ai-input-icon-btn" id="aiCopyKeyBtn" title="复制密钥" aria-label="复制密钥">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-title">模型名称</div>
+                  <button type="button" class="ai-pill-btn ai-pill-btn-sm" id="aiFetchModelsBtn">拉取模型</button>
+                </div>
+                <div class="ai-input-box">
+                  <input type="text" id="aiModel" placeholder="deepseek-flash" autocomplete="off" />
+                </div>
+                <div class="ai-chip-row" id="aiModelChips"></div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">连通性检查</div>
+                  <div class="ai-row-desc">发送轻量探测验证地址与密钥是否有效</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <span class="ai-probe-badge" id="aiTestStatus">未测试</span>
+                  <button type="button" class="ai-pill-btn solid" id="aiTestBtn">测试连接</button>
+                </div>
+              </div>
+
+              <div class="ai-row stack">
+                <div>
+                  <div class="ai-row-title">深度思考</div>
+                  <div class="ai-row-desc">与对话底栏「深度思考」联动，自动适配 DeepSeek / 智谱原生推理字段</div>
+                </div>
+                <div class="ai-choice-grid" id="aiThinkCards">
+                  <button type="button" class="ai-choice-card" data-gear="off">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+                    <span class="c-name">关闭</span>
+                    <span class="c-sub">直接作答</span>
+                  </button>
+                  <button type="button" class="ai-choice-card" data-gear="low">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2"/></svg>
+                    <span class="c-name">低</span>
+                    <span class="c-sub">轻度推理</span>
+                  </button>
+                  <button type="button" class="ai-choice-card" data-gear="medium">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9 18h6M10 22h4"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/></svg>
+                    <span class="c-name">中</span>
+                    <span class="c-sub">均衡平衡</span>
+                  </button>
+                  <button type="button" class="ai-choice-card active" data-gear="high">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3a6 6 0 0 0-6 6c0 2.5 1.5 4 2.5 5.2.6.7 1 1.6 1 2.8h5c0-1.2.4-2.1 1-2.8C16.5 13 18 11.5 18 9a6 6 0 0 0-6-6z"/><path d="M9.5 20h5M10.5 22.5h3"/></svg>
+                    <span class="c-name">高</span>
+                    <span class="c-sub">充分思考</span>
+                  </button>
+                </div>
+                <select id="aiThinkingGear" aria-label="思考档位" hidden>
+                  <option value="low">低</option>
+                  <option value="medium">中</option>
+                  <option value="high" selected>高</option>
+                </select>
+              </div>
+            </section>
+
+            <!-- 2. 联网搜索 -->
+            <section class="ai-config-pane" data-pane="search">
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">搜索服务</div>
+                    <div class="ai-row-desc">切换服务时各自密钥独立留存</div>
+                  </div>
+                  <div class="ai-pill-select-wrap">
+                    <select class="ai-pill-select" id="aiSearchProvider" aria-label="搜索提供商">
+                      <option value="deepseek">DeepSeek Search</option>
+                      <option value="zhipu">智谱 Web Search</option>
+                      <option value="kimi">Kimi / Moonshot</option>
+                      <option value="bailian">百炼 EnhancedSearch</option>
+                      <option value="doubao">豆包搜索</option>
+                      <option value="qianfan">百度千帆</option>
+                      <option value="bocha" selected>博查</option>
+                      <option value="you">You.com</option>
+                      <option value="tencent">腾讯元宝搜索</option>
+                      <option value="tavily">Tavily</option>
+                      <option value="custom">自定义接口</option>
+                    </select>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </div>
+                </div>
+                <div class="ai-meta-tags" id="aiSearchMetaTags"></div>
+                <div>
+                  <button type="button" class="ai-disclosure-btn" id="aiToggleSearchMetaBtn" aria-expanded="false">
+                    <span>查看接口与计费详情</span>
+                    <svg class="ai-disclosure-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                </div>
+                <div class="ai-disclosure-body" id="aiSearchMetaDetail">
+                  <div id="aiSearchMeta" class="ai-search-meta"></div>
+                </div>
+              </div>
+
+              <div class="ai-row" id="zhipuEngineField">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">智谱引擎</div>
+                </div>
+                <div class="ai-pill-select-wrap">
+                  <select class="ai-pill-select" id="aiZhipuEngine" aria-label="智谱搜索引擎">
+                    <option value="search_std">基础 search_std（0.01 元/次）</option>
+                    <option value="search_pro" selected>高阶 search_pro（0.03 元/次）</option>
+                    <option value="search_pro_sogou">搜狗 search_pro_sogou（0.05 元/次）</option>
+                    <option value="search_pro_quark">夸克 search_pro_quark（0.05 元/次）</option>
+                  </select>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </div>
+              </div>
+
+              <div class="ai-row" id="kimiTierField">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">Kimi 档位</div>
+                </div>
+                <div class="ai-seg-group" id="aiKimiTierSeg">
+                  <button type="button" class="ai-seg-btn active" data-kimi-tier="pro">Pro（可按时间过滤）</button>
+                  <button type="button" class="ai-seg-btn" data-kimi-tier="basic">基础版</button>
+                </div>
+                <select id="aiKimiTier" aria-label="Kimi 搜索档位" hidden>
+                  <option value="pro" selected>Pro（0.003 美元/次，可按时间过滤）</option>
+                  <option value="basic">基础（0.002 美元/次，无时间过滤）</option>
+                </select>
+              </div>
+
+              <div class="ai-row stack" id="customUrlField">
+                <div class="ai-row-title">自定义搜索地址</div>
+                <div class="ai-input-box">
+                  <input type="url" id="aiCustomUrl" placeholder="https://example.com/search" autocomplete="off" />
+                </div>
+              </div>
+
+              <div class="ai-row stack" id="customKeyField">
+                <div class="ai-row-title">自定义接口密钥（可选）</div>
+                <div class="ai-input-box">
+                  <input type="password" id="aiCustomKey" placeholder="Bearer Token" autocomplete="off" />
+                  <div class="ai-input-actions">
+                    <button type="button" class="ai-input-icon-btn" id="aiToggleCustomKeyEye" title="显示/隐藏密钥" aria-label="显示或隐藏自定义接口密钥">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="ai-row stack" id="aiSearchKeyField">
+                <div class="ai-row-head">
+                  <div class="ai-row-title" id="aiSearchKeyLabel">搜索密钥</div>
+                  <div class="ai-row-ctrl">
+                    <span class="ai-probe-badge" id="aiSearchProbeStatus">未测试</span>
+                    <button type="button" class="ai-pill-btn ai-pill-btn-sm" id="aiTestSearchBtn">测试搜索</button>
+                  </div>
+                </div>
+                <div class="ai-input-box">
+                  <input type="password" id="aiSearchKey" placeholder="当前提供商的密钥" autocomplete="off" />
+                  <div class="ai-input-actions">
+                    <button type="button" class="ai-input-icon-btn" id="aiToggleSearchEye" title="显示/隐藏密钥" aria-label="显示或隐藏搜索密钥">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 兼容旧测试与存储字段的隐藏挂载点 -->
+              <label id="bochaKeyField" hidden>
+                <span>博查 AI 密钥</span>
+                <input type="password" id="aiBochaKey" placeholder="sk-xxxxxxxx" autocomplete="off" value="" />
+              </label>
+              <label id="tavilyKeyField" hidden>
+                <span>Tavily 密钥</span>
+                <input type="password" id="aiTavilyKey" placeholder="tvly-xxxxxxxx" autocomplete="off" />
+              </label>
+
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-title">返回条数</div>
+                  <span class="ai-val-pill" id="aiSearchCountVal">5 条</span>
+                </div>
+                <div class="ai-slider-wrap">
+                  <input type="range" class="ai-range" id="aiSearchCount" min="1" max="10" step="1" value="5" aria-label="返回条数" />
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">时间范围</div>
+                  <div class="ai-row-desc">按支持情况自动映射为各提供商过滤参数</div>
+                </div>
+                <div class="ai-seg-group" id="aiSearchFreshnessSeg">
+                  <button type="button" class="ai-seg-btn active" data-freshness="noLimit">不限</button>
+                  <button type="button" class="ai-seg-btn" data-freshness="day">一天</button>
+                  <button type="button" class="ai-seg-btn" data-freshness="week">一周</button>
+                  <button type="button" class="ai-seg-btn" data-freshness="month">一月</button>
+                </div>
+                <select id="aiSearchFreshness" aria-label="时间范围" hidden>
+                  <option value="noLimit">不限</option>
+                  <option value="day">一天内</option>
+                  <option value="week">一周内</option>
+                  <option value="month">一月内</option>
+                </select>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">最大搜索轮数</div>
+                  <div class="ai-row-desc">单轮对话内允许模型连续检索的上限</div>
+                </div>
+                <div class="ai-seg-group" id="aiMaxSearchRoundsSeg">
+                  <button type="button" class="ai-seg-btn" data-rounds="1">1</button>
+                  <button type="button" class="ai-seg-btn" data-rounds="2">2</button>
+                  <button type="button" class="ai-seg-btn active" data-rounds="3">3</button>
+                  <button type="button" class="ai-seg-btn" data-rounds="5">5</button>
+                </div>
+                <input type="hidden" id="aiMaxSearchRounds" value="3" />
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">向提供商请求摘要</div>
+                  <div class="ai-row-desc">返回更完整的网页片段供模型引用</div>
+                </div>
+                <label class="ai-switch">
+                  <input type="checkbox" id="aiSearchSummary" checked />
+                  <span class="ai-switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">回答附带来源编号</div>
+                  <div class="ai-row-desc">在联网结果后提示模型标注如 [1] 的引用标记</div>
+                </div>
+                <label class="ai-switch">
+                  <input type="checkbox" id="aiCiteSources" checked />
+                  <span class="ai-switch-slider"></span>
+                </label>
+              </div>
+            </section>
+
+            <!-- 3. 提示词 -->
+            <section class="ai-config-pane" data-pane="prompt">
+              <div class="ai-row ai-prompt-toolbar">
+                <div class="ai-seg-group" id="aiPromptLayerSeg">
+                  <button type="button" class="ai-seg-btn active" data-prompt-layer="system">系统提示词</button>
+                  <button type="button" class="ai-seg-btn" data-prompt-layer="context">环境上下文</button>
+                </div>
+                <div class="ai-row-ctrl" id="aiSystemPresetCtrl">
+                  <div class="ai-pill-select-wrap">
+                    <select class="ai-pill-select" id="aiPromptPreset" aria-label="系统提示词预设"></select>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </div>
+                  <input type="text" class="ai-inline-name" id="aiSystemPresetName" placeholder="预设名称" aria-label="系统提示词预设名称" />
+                  <button type="button" class="ai-icon-pill-btn" id="aiSystemPresetAdd" title="新建预设" aria-label="新建系统提示词预设">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                  <button type="button" class="ai-icon-pill-btn danger" id="aiSystemPresetDel" title="删除当前预设" aria-label="删除当前系统提示词预设">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/></svg>
+                  </button>
+                </div>
+                <div class="ai-row-ctrl" id="aiContextPresetCtrl" hidden>
+                  <div class="ai-pill-select-wrap">
+                    <select class="ai-pill-select" id="aiContextPreset" aria-label="环境上下文预设"></select>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </div>
+                  <input type="text" class="ai-inline-name" id="aiContextPresetName" placeholder="预设名称" aria-label="环境上下文预设名称" />
+                  <button type="button" class="ai-icon-pill-btn" id="aiContextPresetAdd" title="新建预设" aria-label="新建环境上下文预设">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                  <button type="button" class="ai-icon-pill-btn danger" id="aiContextPresetDel" title="删除当前预设" aria-label="删除当前环境上下文预设">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/></svg>
+                  </button>
+                </div>
+                <button type="button" class="ai-pill-btn ai-pill-btn-sm" id="aiPromptResetBtn">恢复默认</button>
+              </div>
+
+              <div class="ai-row stack ai-row-last">
+                <div class="ai-row-desc" id="aiPromptLayerDesc">基础人设与能力边界，整段对话共享，不随卡片变动</div>
+                <div class="ai-var-row" id="aiPromptVarRow">
+                  <button type="button" class="ai-var-btn" data-var="{{cards}}">{{cards}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{card_names}}">{{card_names}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{card_count}}">{{card_count}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{site_direct}}">{{site_direct}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{search_rules}}">{{search_rules}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{ops_contract}}">{{ops_contract}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{last_query}}">{{last_query}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{date}}">{{date}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{time}}">{{time}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{theme}}">{{theme}}</button>
+                  <button type="button" class="ai-var-btn" data-var="{{engine}}">{{engine}}</button>
+                </div>
+
+                <div class="ai-editor-shell">
+                  <textarea id="aiSystemPrompt" spellcheck="false" aria-label="全局系统提示词"></textarea>
+                  <textarea id="aiContextPrompt" spellcheck="false" aria-label="环境上下文前缀" placeholder="留空则发送时不附加环境说明" hidden></textarea>
+                  <div class="ai-editor-preview" id="aiPromptPreviewBox"></div>
+                  <div class="ai-editor-footer">
+                    <span id="aiPromptCounter">0 字 · 约 0 tokens</span>
+                    <button type="button" class="ai-pill-btn ai-pill-btn-xs" id="aiTogglePromptPreviewBtn">预览展开效果</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 4. 参数与行为 -->
+            <section class="ai-config-pane" data-pane="params">
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">采样温度 (Temperature)</div>
+                    <div class="ai-row-desc">部分推理模型不接受温度参数，可关闭随请求发送</div>
+                  </div>
+                  <div class="ai-row-ctrl">
+                    <span class="ai-val-pill" id="aiTempVal">0.1</span>
+                    <label class="ai-switch">
+                      <input type="checkbox" id="aiSendTemperature" checked />
+                      <span class="ai-switch-slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="ai-muted-group" id="aiTempGroup">
+                  <div class="ai-slider-wrap">
+                    <input type="range" class="ai-range" id="aiTemperature" min="0" max="2" step="0.1" value="0.1" aria-label="采样温度" />
+                  </div>
+                  <div class="ai-chip-row" id="aiTempChips">
+                    <button type="button" class="ai-chip active" data-temp="0.1">精确 0.1</button>
+                    <button type="button" class="ai-chip" data-temp="0.7">均衡 0.7</button>
+                    <button type="button" class="ai-chip" data-temp="1.2">创意 1.2</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">Top-P 核采样</div>
+                    <div class="ai-row-desc">默认不发送，打开后按阈值控制候选词范围</div>
+                  </div>
+                  <div class="ai-row-ctrl">
+                    <span class="ai-val-pill" id="aiTopPVal" style="display:none;">0.9</span>
+                    <label class="ai-switch">
+                      <input type="checkbox" id="aiSendTopP" />
+                      <span class="ai-switch-slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="ai-slider-wrap" id="aiTopPSliderRow" style="display:none;">
+                  <input type="range" class="ai-range" id="aiTopP" min="0.1" max="1" step="0.05" value="0.9" aria-label="Top-P" />
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">回复长度上限</div>
+                  <div class="ai-row-desc">单次回答最多输出的 token 数</div>
+                </div>
+                <div class="ai-row-ctrl">
+                  <div class="ai-seg-group" id="aiMaxTokensSeg">
+                    <button type="button" class="ai-seg-btn active" data-tokens="">不限</button>
+                    <button type="button" class="ai-seg-btn" data-tokens="2048">2048</button>
+                    <button type="button" class="ai-seg-btn" data-tokens="4096">4096</button>
+                    <button type="button" class="ai-seg-btn" data-tokens="8192">8192</button>
+                  </div>
+                  <input type="number" class="ai-inline-num" id="aiMaxTokens" min="1" step="1" placeholder="自定义" aria-label="回复长度上限" />
+                </div>
+              </div>
+
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">携带历史消息条数</div>
+                    <div class="ai-row-desc">限制附带的上下文窗口，兼顾连贯性与费用</div>
+                  </div>
+                  <span class="ai-val-pill" id="aiHistoryLimitVal">20 条</span>
+                </div>
+                <div class="ai-slider-wrap">
+                  <input type="range" class="ai-range" id="aiHistoryLimit" min="4" max="60" step="2" value="20" aria-label="携带历史消息条数" />
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">请求超时</div>
+                </div>
+                <div class="ai-pill-select-wrap">
+                  <select class="ai-pill-select" id="aiTimeoutSec" aria-label="请求超时">
+                    <option value="60">60 秒</option>
+                    <option value="120" selected>120 秒</option>
+                    <option value="180">180 秒</option>
+                    <option value="300">300 秒</option>
+                  </select>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </div>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">流式输出（SSE）</div>
+                  <div class="ai-row-desc">实时逐字展示回答；极少数不兼容中转可关闭</div>
+                </div>
+                <label class="ai-switch">
+                  <input type="checkbox" id="aiStreamEnabled" checked />
+                  <span class="ai-switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">批量删除卡片前二次确认</div>
+                  <div class="ai-row-desc">AI 一次删除多张或近乎清空卡片时弹窗确认</div>
+                </div>
+                <label class="ai-switch">
+                  <input type="checkbox" id="aiConfirmBulkDelete" checked />
+                  <span class="ai-switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="ai-row stack">
+                <div>
+                  <button type="button" class="ai-disclosure-btn" id="aiToggleCustomJsonBtn" aria-expanded="false">
+                    <span>自定义请求头与额外参数</span>
+                    <svg class="ai-disclosure-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                </div>
+                <div class="ai-disclosure-body" id="aiCustomJsonBody">
+                  <div class="ai-json-fields">
+                    <div>
+                      <div class="ai-json-label">自定义请求头（JSON）</div>
+                      <textarea class="ai-json-box" id="aiCustomHeaders" spellcheck="false" placeholder='{"X-Title": "Motuo-Tab"}'></textarea>
+                    </div>
+                    <div>
+                      <div class="ai-json-label">额外请求体字段（JSON）</div>
+                      <textarea class="ai-json-box" id="aiExtraBody" spellcheck="false" placeholder='{"presence_penalty": 0}'></textarea>
+                    </div>
+                    <div class="ai-json-err" id="aiCustomJsonError"></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 5. 数据与安全 -->
+            <section class="ai-config-pane" data-pane="data">
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">整页备份包含密钥</div>
+                  <div class="ai-row-desc">关闭后，从「通用配置」导出备份时自动脱敏 API Key 与搜索密钥</div>
+                </div>
+                <label class="ai-switch">
+                  <input type="checkbox" id="aiBackupIncludeKeys" checked />
+                  <span class="ai-switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">独立导出 AI 配置</div>
+                  <div class="ai-row-desc">仅导出模型方案、搜索设置与提示词预设，不含卡片与壁纸</div>
+                </div>
+                <button type="button" class="ai-pill-btn" id="aiExportConfigBtn">导出 JSON</button>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">导入 AI 配置</div>
+                  <div class="ai-row-desc">从导出的配置文件恢复 AI 设置</div>
+                </div>
+                <button type="button" class="ai-pill-btn" id="aiImportConfigBtn">选择文件</button>
+                <input type="file" id="aiImportConfigFile" accept="application/json,.json" hidden />
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">清空 AI 对话历史</div>
+                  <div class="ai-row-desc">仅清除侧边栏里的历史消息，保留配置与卡片</div>
+                </div>
+                <button type="button" class="ai-pill-btn danger" id="aiClearHistoryBtn">清空</button>
+              </div>
+
+              <div class="ai-row">
+                <div class="ai-row-meta">
+                  <div class="ai-row-title">恢复默认 AI 配置</div>
+                  <div class="ai-row-desc">还原内置提示词并清除已填写的接口和密钥</div>
+                </div>
+                <button type="button" class="ai-pill-btn danger" id="aiResetConfigBtn">重置</button>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </div>

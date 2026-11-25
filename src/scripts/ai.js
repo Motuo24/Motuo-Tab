@@ -48,6 +48,111 @@
         var el = document.getElementById(id);
         return el ? String(el.value || '').trim() : '';
       }
+      function isChecked(id, def) {
+        var el = document.getElementById(id);
+        return el ? !!el.checked : !!def;
+      }
+      function isSendTopP() { return isChecked('aiSendTopP', false); }
+      function topPValue() {
+        var n = parseFloat(fieldValue('aiTopP') || '0.9');
+        if (isNaN(n) || n < 0.05) return 0.9;
+        if (n > 1) return 1;
+        return n;
+      }
+      function historyLimit() {
+        var n = parseInt(fieldValue('aiHistoryLimit') || '20', 10);
+        if (isNaN(n) || n < 4) return 20;
+        if (n > 60) return 60;
+        return n;
+      }
+      function timeoutMs() {
+        var sec = parseInt(fieldValue('aiTimeoutSec') || '120', 10);
+        if (isNaN(sec) || sec < 10) sec = 120;
+        return sec * 1000;
+      }
+      function isStreamEnabled() { return isChecked('aiStreamEnabled', true); }
+      function shouldConfirmBulkDelete() { return isChecked('aiConfirmBulkDelete', true); }
+      function maxSearchRounds() {
+        var n = parseInt(fieldValue('aiMaxSearchRounds') || '3', 10);
+        if (isNaN(n) || n < 1) return 3;
+        if (n > 10) return 10;
+        return n;
+      }
+      function shouldCiteSources() { return isChecked('aiCiteSources', true); }
+      function includeKeysInBackup() { return isChecked('aiBackupIncludeKeys', true); }
+      function parseJsonObjectField(id) {
+        var rawJson = fieldValue(id);
+        if (!rawJson) return { ok: true, obj: null, error: '' };
+        try {
+          var parsed = JSON.parse(rawJson);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return { ok: false, obj: null, error: '必须是 JSON 对象（{ ... }）' };
+          }
+          return { ok: true, obj: parsed, error: '' };
+        } catch (e) {
+          return { ok: false, obj: null, error: 'JSON 格式错误：' + (e && e.message ? e.message : e) };
+        }
+      }
+      function buildModelsUrl(endpoint) {
+        var rawEp = String(endpoint || '').trim();
+        if (!rawEp) return '';
+        var q = '';
+        var qi = rawEp.indexOf('?');
+        if (qi !== -1) { q = rawEp.slice(qi); rawEp = rawEp.slice(0, qi); }
+        rawEp = rawEp.replace(/\/+$/, '');
+        if (/\/chat\/completions$/i.test(rawEp)) {
+          return rawEp.replace(/\/chat\/completions$/i, '/models') + q;
+        }
+        var path = rawEp.replace(/^https?:\/\/[^/]+/, '');
+        if (!/\/v\d+/.test(path)) rawEp += '/v1';
+        return rawEp + '/models' + q;
+      }
+      function buildChatHeaders(key) {
+        var headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
+        var parsed = parseJsonObjectField('aiCustomHeaders');
+        if (parsed.ok && parsed.obj) {
+          Object.keys(parsed.obj).forEach(function (k) {
+            if (parsed.obj[k] != null) headers[k] = String(parsed.obj[k]);
+          });
+        }
+        return headers;
+      }
+      function redactAIConfigObject(cfg) {
+        if (!cfg || typeof cfg !== 'object') return cfg;
+        var clone = JSON.parse(JSON.stringify(cfg));
+        if (clone.includeKeysInBackup !== false) return clone;
+        clone.key = '';
+        clone.bochaKey = '';
+        if (Array.isArray(clone.profiles)) {
+          clone.profiles.forEach(function (item) { if (item && typeof item === 'object') item.key = ''; });
+        }
+        if (clone.search && typeof clone.search === 'object') {
+          clone.search.bochaKey = '';
+          clone.search.tavilyKey = '';
+          clone.search.customKey = '';
+          if (clone.search.keys && typeof clone.search.keys === 'object') clone.search.keys = {};
+        }
+        if (typeof clone.customHeaders === 'string' && clone.customHeaders.trim()) {
+          try {
+            var hdrs = JSON.parse(clone.customHeaders);
+            if (hdrs && typeof hdrs === 'object' && !Array.isArray(hdrs)) {
+              Object.keys(hdrs).forEach(function (hk) {
+                if (/authorization|api[-_]?key|token|secret/i.test(hk)) delete hdrs[hk];
+              });
+              clone.customHeaders = JSON.stringify(hdrs);
+            }
+          } catch (e) {}
+        }
+        return clone;
+      }
+      window.__motuo.redactAIConfigJson = function (rawJson) {
+        if (!rawJson) return rawJson;
+        try {
+          var parsed = JSON.parse(rawJson);
+          if (!parsed || parsed.includeKeysInBackup !== false) return rawJson;
+          return JSON.stringify(redactAIConfigObject(parsed));
+        } catch (e) { return rawJson; }
+      };
       function thinkingGear() {
         if (!(aiDeepSearch && aiDeepSearch.checked)) return 'off';
         var gear = fieldValue('aiThinkingGear') || 'high';
@@ -103,11 +208,12 @@
       }
       function searchRulesText() {
         if (!(aiWebSearch && aiWebSearch.checked && providerReady())) return '';
+        var citeNote = shouldCiteSources() ? '用中文回答并标注来源编号（如 [1]）。' : '用中文回答。';
         return '## 联网搜索（优先级最高）\n'
           + '当用户需要实时或最新信息时，本轮不要直接回答，也不要输出 <ops>；只输出一行：\n'
           + '<web_search>简洁有效的搜索关键词</web_search>\n'
           + '用户说再搜一次且没给新关键词时，沿用最近一次搜索词：' + (lastSearchQuery || '（还没有）') + '。\n'
-          + '客户端会把结果发回。收到后：若用户还要求改卡片，输出一行摘要和 <ops>；否则用中文回答并标注来源编号（如 [1]）。\n'
+          + '客户端会把结果发回。收到后：若用户还要求改卡片，输出一行摘要和 <ops>；否则' + citeNote + '\n'
           + '常识题直接回答。\n';
       }
       function opsContractText() {
@@ -336,8 +442,22 @@
         commitLayer('system');
         commitLayer('context');
       }
+      function currentDateTimeVars() {
+        var d = new Date();
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        var date = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        var time = pad(d.getHours()) + ':' + pad(d.getMinutes());
+        var tAttr = document.documentElement.getAttribute('data-theme') || 'light';
+        var theme = tAttr === 'dark' ? '深色' : (tAttr === 'auto' ? '自动' : '浅色');
+        var engKey = '';
+        try { engKey = localStorage.getItem('newtab.engine.v1') || 'baidu'; } catch (e) { engKey = 'baidu'; }
+        var engNames = { baidu: '百度', bing: '必应', google: 'Google' };
+        var engine = engNames[engKey] || engKey;
+        return { date: date, time: time, theme: theme, engine: engine };
+      }
       function fillPrompt(template) {
         var names = cards.list.map(function (x) { return x.name; }).join('、') || '（暂无卡片）';
+        var ctxVars = currentDateTimeVars();
         return String(template || '')
           .replace(/\{\{cards\}\}/g, cardLinesText())
           .replace(/\{\{card_names\}\}/g, names)
@@ -345,7 +465,11 @@
           .replace(/\{\{site_direct\}\}/g, '搜索框输入「前缀 空格 关键词」会打开对应网站的站内搜索。zh 知乎，gh GitHub，bl 和 b站 都是哔哩哔哩，tb 淘宝，db 豆瓣。开关在菜单「站内搜索直达」。')
           .replace(/\{\{search_rules\}\}/g, searchRulesText())
           .replace(/\{\{ops_contract\}\}/g, opsContractText())
-          .replace(/\{\{last_query\}\}/g, lastSearchQuery || '（还没有）');
+          .replace(/\{\{last_query\}\}/g, lastSearchQuery || '（还没有）')
+          .replace(/\{\{date\}\}/g, ctxVars.date)
+          .replace(/\{\{time\}\}/g, ctxVars.time)
+          .replace(/\{\{theme\}\}/g, ctxVars.theme)
+          .replace(/\{\{engine\}\}/g, ctxVars.engine);
       }
       function buildSystemPrompt() {
         var box = document.getElementById('aiSystemPrompt');
@@ -373,12 +497,15 @@
         return raw + '/chat/completions' + q;
       }
       function buildChatBody(modelName, messages, endpointValue) {
-        var body = { model: modelName, messages: messages, stream: true };
+        var body = { model: modelName, messages: messages, stream: isStreamEnabled() };
         var sendTemp = document.getElementById('aiSendTemperature');
         if (!sendTemp || sendTemp.checked) {
           var tEl = document.getElementById('aiTemperature');
           var temp = tEl && tEl.value !== '' ? parseFloat(tEl.value) : 0.1;
           if (!isNaN(temp)) body.temperature = temp;
+        }
+        if (isSendTopP()) {
+          body.top_p = topPValue();
         }
         var mt = parseInt(fieldValue('aiMaxTokens'), 10);
         if (mt > 0) body.max_tokens = mt;
@@ -389,6 +516,12 @@
           if ((String(endpointValue || '') + ' ' + modelName).toLowerCase().indexOf('deepseek') !== -1) {
             body.reasoning_effort = effort;
           }
+        }
+        var extra = parseJsonObjectField('aiExtraBody');
+        if (extra.ok && extra.obj) {
+          Object.keys(extra.obj).forEach(function (k) {
+            if (k !== 'model' && k !== 'messages') body[k] = extra.obj[k];
+          });
         }
         return body;
       }
@@ -462,22 +595,29 @@
       // 不应回传给模型。否则模型会把它们当成自己的历史正文（尤其 <tool_call>），
       // 干扰它后续是否/如何真正发起工具调用的判断。
       function toApiMessages(history) {
+        var lim = historyLimit();
+        var sys = history[0] && history[0].role === 'system' ? history[0] : null;
+        var sliceSrc = sys ? history.slice(1) : history.slice(0);
+        var filtered = [];
+        for (var fi = 0; fi < sliceSrc.length; fi++) {
+          var fm = sliceSrc[fi];
+          if (!fm || typeof fm !== 'object' || fm.role === 'tool' || fm.tool_calls) continue;
+          filtered.push(fm);
+        }
+        if (filtered.length > lim) {
+          filtered = filtered.slice(filtered.length - lim);
+          while (filtered.length && filtered[0] && filtered[0].hidden) filtered.shift();
+        }
+        var windowed = sys ? [sys].concat(filtered) : filtered;
         var out = [];
-        for (var i = 0; i < history.length; i++) {
-          var m = history[i];
+        for (var i = 0; i < windowed.length; i++) {
+          var m = windowed[i];
           if (!m || typeof m !== 'object') continue;
-          // 新协议不使用 native tools：丢弃旧的 tool 结果消息与 tool_calls 字段，
-          // 否则请求里没有 tools 却带着 tool 消息，部分 API（含 DeepSeek）会报 400。
           if (m.role === 'tool') continue;
           var copy = {};
           for (var k in m) {
-            // 既不带 native tool_calls，也不带 reasoning_content
-            // （后者只有 native tools 链路才需要，旧版 reasoner 收到会 400）
             if (Object.prototype.hasOwnProperty.call(m, k) && k !== 'tool_calls' && k !== 'reasoning_content' && k !== 'hidden' && k !== 'snapshotId' && k !== 'searchQuery') copy[k] = m[k];
           }
-          // 只清洗 assistant 的历史正文，剥离前端渲染用的语义标签。
-          // 关键：system 提示词里本来就包含 <ops>/<web_search> 的格式示例，
-          // 绝不能一起删掉，否则模型收不到格式规范（曾导致裸 JSON、标签丢尖括号等）。
           if (m.role === 'assistant' && typeof copy.content === 'string') {
             copy.content = copy.content
               .replace(/<think>[\s\S]*?<\/think>/gi, '')
@@ -486,7 +626,6 @@
               .replace(/<ops>[\s\S]*?<\/ops>/gi, '')
               .trim();
           }
-          // 纯 tool_calls 帧（content 为空）在去掉 tool_calls 后没有意义，直接丢弃
           if (m.tool_calls && (copy.content === null || copy.content === undefined || copy.content === '')) continue;
           out.push(copy);
         }
@@ -564,6 +703,202 @@
           sel.appendChild(opt);
         });
       }
+
+      var AI_VENDORS = {
+        deepseek:   { label: 'DeepSeek',   endpoint: 'https://api.deepseek.com',                          models: ['deepseek-flash', 'deepseek-chat', 'deepseek-reasoner'] },
+        openai:     { label: 'OpenAI',     endpoint: 'https://api.openai.com',                            models: ['gpt-4.1', 'gpt-4.1-mini', 'o4-mini'] },
+        zhipu:      { label: '智谱',       endpoint: 'https://open.bigmodel.cn/api/paas/v4',              models: ['glm-4.5', 'glm-4.5-air', 'glm-z1-flash'] },
+        kimi:       { label: 'Kimi',       endpoint: 'https://api.moonshot.ai',                           models: ['kimi-k2', 'moonshot-v1-32k'] },
+        bailian:    { label: '百炼',       endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen3-max', 'qwen-plus', 'qwen-turbo'] },
+        doubao:     { label: '豆包',       endpoint: 'https://ark.cn-beijing.volces.com/api/v3',          models: ['doubao-1.5-pro', 'doubao-1.5-lite'] },
+        openrouter: { label: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1',                      models: ['anthropic/claude-sonnet-4', 'google/gemini-2.5-flash'] },
+        ollama:     { label: 'Ollama',     endpoint: 'http://localhost:11434',                            models: ['qwen3:8b', 'llama3.2', 'deepseek-r1:8b'] },
+        custom:     { label: '自定义',     endpoint: '',                                                  models: [] }
+      };
+      var fetchedModelsCache = {};
+      var SEARCH_META_TAGS = {
+        bocha:    { label: '博查搜索',   tags: ['Bearer 鉴权', '支持时间过滤', '支持摘要', '按次计费'] },
+        deepseek: { label: 'DeepSeek',   tags: ['Bearer 鉴权', '复用模型密钥可留空', '空结果不计费'] },
+        zhipu:    { label: '智谱搜索',   tags: ['Bearer 鉴权', '4 档引擎可选', '支持时间过滤'] },
+        kimi:     { label: 'Kimi',       tags: ['Bearer 鉴权', 'Basic / Pro 分档', 'Pro 支持时间窗口'] },
+        bailian:  { label: '百炼搜索',   tags: ['Bearer 鉴权', 'HTTP Streamable MCP', '免费月额度'] },
+        doubao:   { label: '豆包搜索',   tags: ['Bearer 鉴权', '每月 500 次免费', '无时间范围参数'] },
+        qianfan:  { label: '百度千帆',   tags: ['Bearer 鉴权', '每月 1500 次免费', '周/月过滤'] },
+        you:      { label: 'You.com',    tags: ['X-API-Key 鉴权', '支持时间过滤', '5 美元/千次'] },
+        tencent:  { label: '腾讯元宝',   tags: ['Bearer 鉴权', 'MCP SearchPro', '支持 d/m 时间'] },
+        tavily:   { label: 'Tavily',     tags: ['api_key 体参数', '支持时间过滤', '按账户额度'] },
+        custom:   { label: '自定义接口', tags: ['可选 Bearer', '兼容常见返回字段'] }
+      };
+
+      var aiSavedTimer = null;
+      function flashSaved(msg) {
+        var el = document.getElementById('aiSavedHint');
+        if (!el) return;
+        el.textContent = msg || '已保存';
+        el.classList.add('show');
+        clearTimeout(aiSavedTimer);
+        aiSavedTimer = setTimeout(function () { el.classList.remove('show'); }, 1400);
+      }
+      function detectVendorFromEndpoint(ep) {
+        var raw = String(ep || '').toLowerCase();
+        if (!raw) return 'custom';
+        if (raw.indexOf('deepseek.com') !== -1) return 'deepseek';
+        if (raw.indexOf('openai.com') !== -1) return 'openai';
+        if (raw.indexOf('bigmodel.cn') !== -1 || raw.indexOf('zhipu') !== -1) return 'zhipu';
+        if (raw.indexOf('moonshot.') !== -1) return 'kimi';
+        if (raw.indexOf('dashscope.aliyuncs.com') !== -1) return 'bailian';
+        if (raw.indexOf('volces.com') !== -1) return 'doubao';
+        if (raw.indexOf('openrouter.ai') !== -1) return 'openrouter';
+        if (raw.indexOf('localhost:11434') !== -1 || raw.indexOf('127.0.0.1:11434') !== -1) return 'ollama';
+        return 'custom';
+      }
+      function resolvedEndpointHint() {
+        var el = document.getElementById('aiResolvedEndpoint');
+        if (!el) return;
+        el.textContent = buildChatUrl(aiEndpoint ? aiEndpoint.value : '') || '（未填写）';
+      }
+      function renderVendorAndModelChips() {
+        var vendor = detectVendorFromEndpoint(aiEndpoint ? aiEndpoint.value : '');
+        var chipWrap = document.getElementById('aiProviderChips');
+        if (chipWrap) {
+          chipWrap.querySelectorAll('.ai-chip').forEach(function (c) {
+            c.classList.toggle('active', c.getAttribute('data-vendor') === vendor);
+          });
+        }
+        var modelWrap = document.getElementById('aiModelChips');
+        if (!modelWrap) return;
+        var mUrl = buildModelsUrl(aiEndpoint ? aiEndpoint.value : '');
+        var list = (mUrl && fetchedModelsCache[mUrl]) || (AI_VENDORS[vendor] && AI_VENDORS[vendor].models) || [];
+        var curModel = aiModel ? aiModel.value.trim() : '';
+        modelWrap.innerHTML = '';
+        list.forEach(function (m) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ai-chip' + (curModel === m ? ' active' : '');
+          btn.textContent = m;
+          btn.addEventListener('click', function () {
+            if (aiModel) aiModel.value = m;
+            saveAIConfig();
+          });
+          modelWrap.appendChild(btn);
+        });
+      }
+      function syncSidebarStatus() {
+        var ep = aiEndpoint ? aiEndpoint.value.trim() : '';
+        var mdl = aiModel ? aiModel.value.trim() : '';
+        var vendor = detectVendorFromEndpoint(ep);
+        var vLabel = (AI_VENDORS[vendor] && AI_VENDORS[vendor].label) || '模型';
+        var mText = document.getElementById('aiSideModelText');
+        var mDot = document.getElementById('aiSideModelDot');
+        if (mText) mText.textContent = (ep || mdl) ? (vLabel + ' · ' + (mdl || '未填模型')) : '未配置模型';
+        if (mDot) mDot.classList.toggle('muted', !(ep && mdl));
+        var p = searchProvider();
+        var sMeta = SEARCH_META_TAGS[p] || SEARCH_META_TAGS.bocha;
+        var sText = document.getElementById('aiSideSearchText');
+        var sDot = document.getElementById('aiSideSearchDot');
+        var ready = providerReady();
+        if (sText) sText.textContent = sMeta.label + (ready ? ' 已配置' : ' 未填密钥');
+        if (sDot) sDot.classList.toggle('muted', !ready);
+      }
+      function syncThinkUI() {
+        var cardsWrap = document.getElementById('aiThinkCards');
+        if (!cardsWrap) return;
+        var gear = (aiDeepSearch && aiDeepSearch.checked) ? (fieldValue('aiThinkingGear') || 'high') : 'off';
+        if (gear !== 'off' && gear !== 'low' && gear !== 'medium' && gear !== 'high') gear = 'high';
+        cardsWrap.querySelectorAll('.ai-choice-card').forEach(function (c) {
+          c.classList.toggle('active', c.getAttribute('data-gear') === gear);
+        });
+      }
+      function syncSegmentedUI() {
+        var kimiTier = fieldValue('aiKimiTier') || 'pro';
+        document.querySelectorAll('#aiKimiTierSeg .ai-seg-btn').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-kimi-tier') === kimiTier);
+        });
+        var fresh = searchFreshness();
+        document.querySelectorAll('#aiSearchFreshnessSeg .ai-seg-btn').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-freshness') === fresh);
+        });
+        var rounds = String(maxSearchRounds());
+        document.querySelectorAll('#aiMaxSearchRoundsSeg .ai-seg-btn').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-rounds') === rounds);
+        });
+        var scVal = document.getElementById('aiSearchCountVal');
+        if (scVal) scVal.textContent = searchCount() + ' 条';
+        var mtVal = fieldValue('aiMaxTokens');
+        document.querySelectorAll('#aiMaxTokensSeg .ai-seg-btn').forEach(function (b) {
+          b.classList.toggle('active', (b.getAttribute('data-tokens') || '') === mtVal);
+        });
+      }
+      function syncParamsUI() {
+        var sendTemp = isChecked('aiSendTemperature', true);
+        var tempEl = document.getElementById('aiTemperature');
+        var tNum = tempEl && tempEl.value !== '' ? parseFloat(tempEl.value) : 0.1;
+        if (isNaN(tNum)) tNum = 0.1;
+        var tempValEl = document.getElementById('aiTempVal');
+        if (tempValEl) tempValEl.textContent = Number(tNum).toFixed(1);
+        var tempGroup = document.getElementById('aiTempGroup');
+        if (tempGroup) tempGroup.classList.toggle('disabled', !sendTemp);
+        document.querySelectorAll('#aiTempChips .ai-chip').forEach(function (c) {
+          c.classList.toggle('active', Number(c.getAttribute('data-temp')) === Number(tNum));
+        });
+        var sendP = isSendTopP();
+        var topP = topPValue();
+        var topPVal = document.getElementById('aiTopPVal');
+        var topPRow = document.getElementById('aiTopPSliderRow');
+        if (topPVal) {
+          topPVal.textContent = Number(topP).toFixed(2).replace(/0$/, '');
+          topPVal.style.display = sendP ? 'inline-flex' : 'none';
+        }
+        if (topPRow) topPRow.style.display = sendP ? 'flex' : 'none';
+        var hlVal = document.getElementById('aiHistoryLimitVal');
+        if (hlVal) hlVal.textContent = historyLimit() + ' 条';
+        var errBox = document.getElementById('aiCustomJsonError');
+        if (errBox) {
+          var hRes = parseJsonObjectField('aiCustomHeaders');
+          var bRes = parseJsonObjectField('aiExtraBody');
+          var errs = [];
+          if (!hRes.ok) errs.push('自定义请求头：' + hRes.error);
+          if (!bRes.ok) errs.push('额外请求体：' + bRes.error);
+          errBox.textContent = errs.join('；');
+        }
+      }
+      var activePromptLayer = 'system';
+      var promptPreviewOpen = false;
+      function syncPromptUI() {
+        document.querySelectorAll('#aiPromptLayerSeg [data-prompt-layer]').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-prompt-layer') === activePromptLayer);
+        });
+        var sysCtrl = document.getElementById('aiSystemPresetCtrl');
+        var ctxCtrl = document.getElementById('aiContextPresetCtrl');
+        if (sysCtrl) sysCtrl.hidden = activePromptLayer !== 'system';
+        if (ctxCtrl) ctxCtrl.hidden = activePromptLayer !== 'context';
+        var desc = document.getElementById('aiPromptLayerDesc');
+        if (desc) {
+          desc.textContent = activePromptLayer === 'context'
+            ? '每次发送前附加在当前用户消息前面，卡片或搜索状态变更后自动更新'
+            : '基础人设与能力边界，整段对话共享，不随卡片变动';
+        }
+        var sysBox = document.getElementById('aiSystemPrompt');
+        var ctxBox = document.getElementById('aiContextPrompt');
+        var previewBox = document.getElementById('aiPromptPreviewBox');
+        var activeBox = activePromptLayer === 'context' ? ctxBox : sysBox;
+        if (sysBox) sysBox.hidden = promptPreviewOpen || activePromptLayer !== 'system';
+        if (ctxBox) ctxBox.hidden = promptPreviewOpen || activePromptLayer !== 'context';
+        if (previewBox) {
+          previewBox.classList.toggle('open', promptPreviewOpen);
+          if (promptPreviewOpen && activeBox) {
+            previewBox.textContent = fillPrompt(activeBox.value) || '（内容为空）';
+          }
+        }
+        var counter = document.getElementById('aiPromptCounter');
+        if (counter && activeBox) {
+          var len = String(activeBox.value || '').length;
+          counter.textContent = len + ' 字 · 约 ' + Math.ceil(len * 0.65) + ' tokens';
+        }
+        var previewBtn = document.getElementById('aiTogglePromptPreviewBtn');
+        if (previewBtn) previewBtn.textContent = promptPreviewOpen ? '返回编辑' : '预览展开效果';
+      }
+
       function searchCatalog() {
         return {
           deepseek: {
@@ -661,13 +996,22 @@
         if (shownProvider === 'custom' && activeId !== 'aiCustomKey') setIf('aiCustomKey', searchKeyBag.custom || '');
       }
       function renderSearchMeta() {
+        var p = searchProvider();
         var box = document.getElementById('aiSearchMeta');
-        var info = searchCatalog()[searchProvider()] || searchCatalog().bocha;
-        if (!box || !info) return;
-        box.innerHTML = '<b>鉴权</b> ' + info.auth
-          + '<br><b>计费</b> ' + info.bill
-          + '<br><b>时间过滤</b> ' + info.time
-          + '<br><b>返回</b> ' + info.shape;
+        var info = searchCatalog()[p] || searchCatalog().bocha;
+        if (box && info) {
+          box.innerHTML = '<b>鉴权</b> ' + info.auth
+            + '<br><b>计费</b> ' + info.bill
+            + '<br><b>时间过滤</b> ' + info.time
+            + '<br><b>返回</b> ' + info.shape;
+        }
+        var tagsBox = document.getElementById('aiSearchMetaTags');
+        var tagMeta = SEARCH_META_TAGS[p] || SEARCH_META_TAGS.bocha;
+        if (tagsBox && tagMeta) {
+          tagsBox.innerHTML = tagMeta.tags.map(function (t) {
+            return '<span class="ai-meta-tag">' + t + '</span>';
+          }).join('');
+        }
       }
       function syncProviderFields() {
         var p = searchProvider();
@@ -688,22 +1032,524 @@
         }
         renderSearchMeta();
       }
-      function shouldShowProfiles() {
-        if (aiProfiles.length > 1) return true;
-        if (fieldValue('aiEndpoint') || fieldValue('aiKey') || fieldValue('aiModel')) return true;
-        for (var i = 0; i < aiProfiles.length; i++) {
-          var p = aiProfiles[i];
-          if (p && (String(p.endpoint || '').trim() || String(p.key || '').trim() || String(p.model || '').trim())) return true;
-        }
-        return false;
-      }
       function syncProfileRow() {
         var row = document.getElementById('aiProfileRow');
-        if (row) row.style.display = shouldShowProfiles() ? '' : 'none';
+        if (row) row.style.display = '';
         var del = document.getElementById('aiProfileDel');
         if (del) del.style.display = aiProfiles.length > 1 ? '' : 'none';
       }
-      function saveAIConfig() {
+
+      // 搜索报错格式化与提供商适配器（对话与「测试搜索」共用）
+      function pickErrorMessage(obj, depth) {
+        if (obj == null || depth > 4) return '';
+        if (typeof obj === 'string') return obj.trim();
+        if (typeof obj !== 'object') return '';
+        var keys = ['message', 'msg', 'error_message', 'detail', 'error'];
+        for (var i = 0; i < keys.length; i++) {
+          if (obj[keys[i]] != null) {
+            var got = pickErrorMessage(obj[keys[i]], (depth || 0) + 1);
+            if (got) return got;
+          }
+        }
+        if (obj.data) return pickErrorMessage(obj.data, (depth || 0) + 1);
+        return '';
+      }
+      function readableSearchBody(text) {
+        var raw = String(text || '').trim();
+        if (!raw) return '';
+        var parsed = null;
+        try { parsed = JSON.parse(raw); } catch (e) {
+          var start = raw.indexOf('{');
+          var end = raw.lastIndexOf('}');
+          if (start !== -1 && end > start) {
+            try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch (e2) {}
+          }
+        }
+        var friendly = parsed ? pickErrorMessage(parsed, 0) : '';
+        var snippet = raw.replace(/\s+/g, ' ');
+        if (snippet.length > 500) snippet = snippet.slice(0, 500);
+        if (friendly && snippet && snippet !== friendly) return friendly + '（原文：' + snippet + '）';
+        return friendly || snippet;
+      }
+      function describeSearchError(err) {
+        var status = err && err.httpStatus;
+        var body = err && err.body;
+        var msg = String((err && err.message) || err || '');
+        if (!body) {
+          var matched = msg.match(/^搜索API HTTP (\d+)：([\s\S]*)$/);
+          if (matched) {
+            status = status || matched[1];
+            body = matched[2];
+          } else {
+            body = msg;
+          }
+        }
+        var detail = readableSearchBody(body);
+        if (status) return 'HTTP ' + status + '：' + (detail || '无响应正文');
+        return detail || '未知错误';
+      }
+      function searchFailurePrompt(detail) {
+        return '【联网搜索失败】\n'
+          + '原因：' + detail + '\n'
+          + '请用中文把上述原因告诉用户，不要只说「调用失败」或「无法核实」。'
+          + '不要编造网址或搜索结果。如果原因和密钥、余额或额度有关，请提醒用户打开 AI 配置窗口，检查当前搜索提供商的密钥和余额。';
+      }
+      function escapeSearchHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+      function fetchBocha(query) {
+        return fetch('https://api.bochaai.com/v1/web-search', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + currentSearchKey(),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            query: query,
+            freshness: (function () {
+              var f = searchFreshness();
+              if (f === 'day') return 'oneDay';
+              if (f === 'week') return 'oneWeek';
+              if (f === 'month') return 'oneMonth';
+              return 'noLimit';
+            })(),
+            summary: !(document.getElementById('aiSearchSummary') && document.getElementById('aiSearchSummary').checked === false),
+            count: searchCount()
+          }),
+          signal: AbortSignal.timeout(30000)
+        }).then(function (sRes) {
+          if (!sRes.ok) {
+            return sRes.text().then(function (t) {
+              var err = new Error('搜索API HTTP ' + sRes.status);
+              err.httpStatus = sRes.status;
+              err.body = String(t || '').slice(0, 500);
+              throw err;
+            });
+          }
+          return sRes.json();
+        }).then(function (sData) {
+          var searchContext = '', resultCount = 0;
+          try {
+            var webPages = sData.data && sData.data.webPages;
+            if (webPages && webPages.value && webPages.value.length > 0) {
+              var items = webPages.value.slice(0, searchCount());
+              resultCount = items.length;
+              for (var i = 0; i < items.length; i++) {
+                var p = items[i];
+                searchContext += '【' + (i + 1) + '】' + (p.name || '') + '\n';
+                searchContext += '链接：' + (p.url || '') + '\n';
+                searchContext += (p.snippet || p.summary || '') + '\n\n';
+              }
+            }
+          } catch (e) {}
+          return { searchContext: searchContext, resultCount: resultCount, failed: false };
+        }).catch(function (sErr) {
+          return { searchContext: '', resultCount: 0, failed: true, error: sErr };
+        });
+      }
+      function normalizeSearchItem(p) {
+        p = p || {};
+        var snippet = p.summary || p.snippet || p.content || p.text || p.description || p.passage || p.Text || '';
+        if (!snippet && Array.isArray(p.snippets)) snippet = p.snippets.join('\n');
+        if (!snippet && Array.isArray(p.chunks)) {
+          snippet = p.chunks.map(function (c) { return (c && (c.text || c.Text || c.content)) || ''; }).filter(Boolean).join('\n');
+        }
+        if (!snippet && Array.isArray(p.Snippet)) {
+          snippet = p.Snippet.map(function (c) { return (c && (c.Text || c.text)) || ''; }).filter(Boolean).join('\n');
+        }
+        snippet = String(snippet);
+        if (snippet.length > 700) snippet = snippet.slice(0, 700);
+        return {
+          title: p.title || p.name || p.Title || '',
+          url: p.url || p.link || p.Url || '',
+          snippet: snippet
+        };
+      }
+      function searchItemsToContext(items) {
+        var searchContext = '';
+        var list = (items || []).slice(0, searchCount()).map(normalizeSearchItem);
+        for (var i = 0; i < list.length; i++) {
+          var p = list[i];
+          searchContext += '【' + (i + 1) + '】' + p.title + '\n';
+          searchContext += '链接：' + p.url + '\n';
+          searchContext += p.snippet + '\n\n';
+        }
+        return { searchContext: searchContext, resultCount: list.length, failed: false };
+      }
+      function fetchSearchPost(url, headers, body, pickItems) {
+        return fetch(url, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30000)
+        }).then(function (sRes) {
+          if (!sRes.ok) {
+            return sRes.text().then(function (t) {
+              var err = new Error('搜索API HTTP ' + sRes.status);
+              err.httpStatus = sRes.status;
+              err.body = String(t || '').slice(0, 500);
+              throw err;
+            });
+          }
+          return sRes.json();
+        }).then(function (data) {
+          return searchItemsToContext(pickItems(data));
+        }).catch(function (sErr) {
+          return { searchContext: '', resultCount: 0, failed: true, error: sErr };
+        });
+      }
+      function fetchTavily(query) {
+        var fresh = searchFreshness();
+        var body = {
+          api_key: currentSearchKey(),
+          query: query,
+          max_results: searchCount(),
+          include_answer: false,
+          search_depth: 'basic'
+        };
+        if (fresh === 'day' || fresh === 'week' || fresh === 'month') body.time_range = fresh;
+        return fetchSearchPost('https://api.tavily.com/search', { 'Content-Type': 'application/json' }, body, function (data) {
+          return (data && data.results) || [];
+        });
+      }
+      function fetchCustomSearch(query) {
+        var headers = { 'Content-Type': 'application/json' };
+        var customKey = currentSearchKey();
+        if (customKey) headers.Authorization = 'Bearer ' + customKey;
+        return fetchSearchPost(fieldValue('aiCustomUrl'), headers, {
+          query: query,
+          count: searchCount(),
+          freshness: searchFreshness()
+        }, function (data) {
+          if (!data) return [];
+          if (data.data && data.data.webPages && data.data.webPages.value) return data.data.webPages.value;
+          if (Array.isArray(data.results)) return data.results;
+          if (Array.isArray(data.data)) return data.data;
+          if (Array.isArray(data)) return data;
+          return [];
+        });
+      }
+      function fetchDeepSeekSearch(query) {
+        var fresh = searchFreshness();
+        var q = clipText(query, fresh === 'noLimit' ? 128 : 110);
+        if (fresh === 'day') q += ' after:' + isoDaysAgo(1);
+        else if (fresh === 'week') q += ' after:' + isoDaysAgo(7);
+        else if (fresh === 'month') q += ' after:' + isoDaysAgo(30);
+        return fetchSearchPost('https://api.deepseek.com/v1/tools/search', {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + currentSearchKey()
+        }, { query: q, count: searchCount(), need_content: false }, function (data) {
+          return (data && data.results) || [];
+        });
+      }
+      function fetchZhipu(query) {
+        var engine = fieldValue('aiZhipuEngine') || 'search_pro';
+        var fresh = searchFreshness();
+        var body = {
+          search_query: clipText(query, 70),
+          search_engine: engine,
+          search_intent: false,
+          search_recency_filter: fresh === 'day' ? 'oneDay' : fresh === 'week' ? 'oneWeek' : fresh === 'month' ? 'oneMonth' : 'noLimit'
+        };
+        if (engine !== 'search_pro_quark') body.count = searchCount();
+        return fetchSearchPost('https://open.bigmodel.cn/api/paas/v4/web_search', {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + currentSearchKey()
+        }, body, function (data) {
+          return (data && (data.search_result || data.search_results)) || [];
+        });
+      }
+      function fetchKimi(query) {
+        var tier = fieldValue('aiKimiTier') || 'pro';
+        var fresh = searchFreshness();
+        var path = tier === 'basic' ? '/v1/tools/search' : '/v1/tools/search_pro';
+        var body = { text_query: query, limit: searchCount() };
+        if (tier === 'basic') {
+          var sum = document.getElementById('aiSearchSummary');
+          body.include_content = !(sum && sum.checked === false);
+        } else if (fresh === 'day' || fresh === 'week' || fresh === 'month') {
+          var days = fresh === 'day' ? 1 : fresh === 'week' ? 7 : 30;
+          body.time_window = { start: isoDaysAgo(days), end: isoDaysAgo(0) };
+        }
+        return fetchSearchPost('https://api.moonshot.ai' + path, {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + currentSearchKey()
+        }, body, function (data) {
+          return (data && data.search_results) || [];
+        });
+      }
+      function qianfanQuery(query) {
+        var s = String(query || '');
+        var n = 0;
+        var out = '';
+        for (var i = 0; i < s.length; i++) {
+          var add = s.charCodeAt(i) > 255 ? 2 : 1;
+          if (n + add > 72) break;
+          n += add;
+          out += s.charAt(i);
+        }
+        return out || clipText(s, 36);
+      }
+      function fetchQianfan(query) {
+        var fresh = searchFreshness();
+        var body = {
+          messages: [{ role: 'user', content: qianfanQuery(query) }],
+          search_source: 'baidu_search_v2',
+          edition: 'standard',
+          resource_type_filter: [{ type: 'web', top_k: searchCount() }]
+        };
+        if (fresh === 'day' || fresh === 'week') body.search_recency_filter = 'week';
+        else if (fresh === 'month') body.search_recency_filter = 'month';
+        return fetchSearchPost('https://qianfan.baidubce.com/v2/ai_search/web_search', {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + currentSearchKey()
+        }, body, function (data) {
+          return (data && data.references) || [];
+        });
+      }
+      function fetchDoubao(query) {
+        return fetchSearchPost('https://open.feedcoopapi.com/search_api/global_search', {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + currentSearchKey()
+        }, {
+          SearchType: 'web',
+          Query: clipText(query, 100),
+          DocCount: searchCount(),
+          MaxSnippetLength: 500
+        }, function (data) {
+          if (data && data.ResponseMetadata && data.ResponseMetadata.Error) {
+            var metaErr = new Error('搜索API ' + (data.ResponseMetadata.Error.Message || data.ResponseMetadata.Error.Code || '调用失败'));
+            metaErr.body = JSON.stringify(data.ResponseMetadata.Error).slice(0, 500);
+            throw metaErr;
+          }
+          if (data && data.Result && data.Result.ErrorCode) {
+            var err = new Error('搜索API ' + data.Result.ErrorCode + ' ' + (data.Result.ErrorMsg || ''));
+            err.body = data.Result.ErrorMsg || '';
+            throw err;
+          }
+          return (data && data.Result && data.Result.Documents) || [];
+        });
+      }
+      function fetchYou(query) {
+        var body = { query: query, count: searchCount() };
+        var fresh = searchFreshness();
+        if (fresh === 'day' || fresh === 'week' || fresh === 'month') body.freshness = fresh;
+        return fetchSearchPost('https://ydc-index.io/v1/search', {
+          'Content-Type': 'application/json',
+          'X-API-Key': currentSearchKey()
+        }, body, function (data) {
+          if (data && data.results && Array.isArray(data.results.web)) return data.results.web;
+          if (data && Array.isArray(data.results)) return data.results;
+          return [];
+        });
+      }
+      function parseMcpPayload(text) {
+        var raw = String(text || '').trim();
+        if (!raw) return null;
+        if (raw.charAt(0) === '{' || raw.charAt(0) === '[') {
+          try { return JSON.parse(raw); } catch (e) {}
+        }
+        var last = null;
+        var lines = raw.split('\n');
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i].trim();
+          if (line.indexOf('data:') !== 0) continue;
+          var payload = line.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try { last = JSON.parse(payload); } catch (e2) {}
+        }
+        return last;
+      }
+      function mcpRequest(url, session, body) {
+        var headers = {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/event-stream',
+          'Authorization': 'Bearer ' + currentSearchKey()
+        };
+        if (session) headers['Mcp-Session-Id'] = session;
+        return fetch(url, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30000)
+        }).then(function (res) {
+          var next = session || '';
+          try {
+            if (res.headers && res.headers.get) next = res.headers.get('mcp-session-id') || res.headers.get('Mcp-Session-Id') || next;
+          } catch (e) {}
+          return res.text().then(function (t) {
+            if (!res.ok) {
+              var err = new Error('搜索API HTTP ' + res.status);
+              err.httpStatus = res.status;
+              err.body = String(t || '').slice(0, 500);
+              throw err;
+            }
+            return { session: next, json: parseMcpPayload(t), raw: String(t || '') };
+          });
+        });
+      }
+      function pickMcpTool(tools, preferred) {
+        var list = tools || [];
+        var i;
+        if (preferred) {
+          for (i = 0; i < list.length; i++) if (list[i] && list[i].name === preferred) return list[i];
+        }
+        var order = ['search_pro', 'SearchPro', 'web_search', 'search'];
+        for (var n = 0; n < order.length; n++) {
+          for (i = 0; i < list.length; i++) if (list[i] && list[i].name === order[n]) return list[i];
+        }
+        for (i = 0; i < list.length; i++) {
+          if (list[i] && /search/i.test(list[i].name || '')) return list[i];
+        }
+        return list[0] || null;
+      }
+      function mcpProp(props, names) {
+        for (var i = 0; i < names.length; i++) if (props[names[i]]) return names[i];
+        return '';
+      }
+      function fillMcpArgs(tool, query, fallbackArgs) {
+        var schema = (tool && (tool.inputSchema || tool.input_schema)) || {};
+        var props = schema.properties || {};
+        var names = Object.keys(props);
+        if (!names.length) return fallbackArgs ? fallbackArgs() : { query: query };
+        var args = {};
+        var qKey = mcpProp(props, ['query', 'Query', 'text_query', 'search_query', 'q']);
+        args[qKey || names[0]] = qKey === 'Query' ? clipText(query, 500) : query;
+        var countKey = mcpProp(props, ['count', 'Count', 'Cnt', 'limit', 'top_k']);
+        if (countKey) args[countKey] = countKey === 'Cnt' ? 10 : searchCount();
+        var timeKey = mcpProp(props, ['Freshness', 'freshness', 'search_recency_filter', 'time_range']);
+        var fresh = searchFreshness();
+        if (timeKey && fresh !== 'noLimit') {
+          if (timeKey === 'Freshness') args[timeKey] = fresh === 'day' ? 'd1' : fresh === 'week' ? 'd7' : 'm1';
+          else if (timeKey === 'search_recency_filter') args[timeKey] = fresh === 'day' ? 'oneDay' : fresh === 'week' ? 'oneWeek' : 'oneMonth';
+          else args[timeKey] = fresh;
+        }
+        return args;
+      }
+      function mcpResultText(result) {
+        if (!result) return '';
+        if (typeof result === 'string') return result;
+        var content = result.content;
+        if (typeof content === 'string') return content;
+        if (Array.isArray(content)) {
+          return content.map(function (c) { return (c && (c.text || c.content)) || ''; }).join('\n');
+        }
+        return JSON.stringify(result);
+      }
+      function itemsFromUnknown(data) {
+        if (!data) return [];
+        if (typeof data === 'string') {
+          var trimmed = data.trim();
+          if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
+            try { return itemsFromUnknown(JSON.parse(trimmed)); } catch (e) { return [{ snippet: trimmed.slice(0, 700) }]; }
+          }
+          return trimmed ? [{ snippet: trimmed.slice(0, 700) }] : [];
+        }
+        if (Array.isArray(data)) {
+          if (data.length && typeof data[0] === 'string') {
+            return data.map(function (s) {
+              try { return JSON.parse(s); } catch (e) { return { snippet: s }; }
+            });
+          }
+          return data;
+        }
+        if (Array.isArray(data.Pages)) return itemsFromUnknown(data.Pages);
+        if (data.Response && Array.isArray(data.Response.Pages)) return itemsFromUnknown(data.Response.Pages);
+        if (Array.isArray(data.search_result)) return data.search_result;
+        if (Array.isArray(data.search_results)) return data.search_results;
+        if (Array.isArray(data.references)) return data.references;
+        if (Array.isArray(data.results)) return data.results;
+        if (data.results && Array.isArray(data.results.web)) return data.results.web;
+        if (data.Result && Array.isArray(data.Result.Documents)) return data.Result.Documents;
+        if (data.data && data.data.webPages && Array.isArray(data.data.webPages.value)) return data.data.webPages.value;
+        return [];
+      }
+      function fetchMcpSearch(url, preferred, query, fallbackArgs) {
+        return mcpRequest(url, '', {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-06-18',
+            capabilities: {},
+            clientInfo: { name: 'motuo-tab', version: '0.8.12' }
+          }
+        }).then(function (init) {
+          if (init.json && init.json.error) {
+            var err = new Error('搜索API ' + (init.json.error.message || 'initialize 失败'));
+            err.body = JSON.stringify(init.json.error).slice(0, 500);
+            throw err;
+          }
+          return mcpRequest(url, init.session, { jsonrpc: '2.0', method: 'notifications/initialized' }).then(function () {
+            return init.session;
+          }, function () { return init.session; });
+        }).then(function (session) {
+          return mcpRequest(url, session, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }).then(function (listed) {
+            return { session: listed.session || session, listed: listed };
+          }, function () {
+            return { session: session, listed: null };
+          });
+        }).then(function (state) {
+          var tools = state.listed && state.listed.json && state.listed.json.result && state.listed.json.result.tools;
+          var tool = pickMcpTool(tools, preferred);
+          var args = fillMcpArgs(tool, query, fallbackArgs);
+          return mcpRequest(url, state.session, {
+            jsonrpc: '2.0',
+            id: 3,
+            method: 'tools/call',
+            params: { name: (tool && tool.name) || preferred, arguments: args }
+          });
+        }).then(function (called) {
+          if (called.json && called.json.error) {
+            var err = new Error('搜索API ' + (called.json.error.message || 'tools/call 失败'));
+            err.body = JSON.stringify(called.json.error).slice(0, 500);
+            throw err;
+          }
+          var result = called.json && called.json.result;
+          if (result && result.isError) {
+            var err2 = new Error('搜索API 工具返回错误');
+            err2.body = mcpResultText(result).slice(0, 500);
+            throw err2;
+          }
+          var text = mcpResultText(result);
+          var items = itemsFromUnknown(text);
+          if (!items.length) items = itemsFromUnknown(result);
+          return searchItemsToContext(items);
+        }).catch(function (sErr) {
+          return { searchContext: '', resultCount: 0, failed: true, error: sErr };
+        });
+      }
+      function fetchBailian(query) {
+        return fetchMcpSearch('https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp', 'search_pro', query, function () {
+          return { query: query };
+        });
+      }
+      function fetchTencent(query) {
+        return fetchMcpSearch('https://api.wsa.cloud.tencent.com/Mcp', 'SearchPro', query, function () {
+          var args = { Query: clipText(query, 500), Mode: 0, Cnt: 10 };
+          var fresh = searchFreshness();
+          if (fresh === 'day') args.Freshness = 'd1';
+          else if (fresh === 'week') args.Freshness = 'd7';
+          else if (fresh === 'month') args.Freshness = 'm1';
+          return args;
+        });
+      }
+      function fetchWebSearch(query) {
+        var p = searchProvider();
+        if (p === 'deepseek') return fetchDeepSeekSearch(query);
+        if (p === 'zhipu') return fetchZhipu(query);
+        if (p === 'kimi') return fetchKimi(query);
+        if (p === 'bailian') return fetchBailian(query);
+        if (p === 'doubao') return fetchDoubao(query);
+        if (p === 'qianfan') return fetchQianfan(query);
+        if (p === 'you') return fetchYou(query);
+        if (p === 'tencent') return fetchTencent(query);
+        if (p === 'tavily') return fetchTavily(query);
+        if (p === 'custom') return fetchCustomSearch(query);
+        return fetchBocha(query);
+      }
+
+      function saveAIConfig(quiet) {
         updateModelBadge();
         commitPromptLayers();
         commitSearchKeyFromDom();
@@ -720,7 +1566,16 @@
           thinkingGear: gear,
           temperature: fieldValue('aiTemperature') || '0.1',
           maxTokens: fieldValue('aiMaxTokens'),
-          sendTemperature: !(document.getElementById('aiSendTemperature') && document.getElementById('aiSendTemperature').checked === false),
+          sendTemperature: isChecked('aiSendTemperature', true),
+          sendTopP: isSendTopP(),
+          topP: String(topPValue()),
+          historyLimit: historyLimit(),
+          timeoutSec: Math.round(timeoutMs() / 1000),
+          stream: isStreamEnabled(),
+          confirmBulkDelete: shouldConfirmBulkDelete(),
+          customHeaders: fieldValue('aiCustomHeaders'),
+          extraBody: fieldValue('aiExtraBody'),
+          includeKeysInBackup: includeKeysInBackup(),
           webSearch: !!(aiWebSearch && aiWebSearch.checked),
           deepSearch: !!(aiDeepSearch && aiDeepSearch.checked),
           endpoint: aiEndpoint.value.trim(),
@@ -730,7 +1585,9 @@
           search: {
             provider: searchProvider(),
             count: searchCount(),
-            summary: !(document.getElementById('aiSearchSummary') && document.getElementById('aiSearchSummary').checked === false),
+            summary: isChecked('aiSearchSummary', true),
+            citeSources: shouldCiteSources(),
+            maxRounds: maxSearchRounds(),
             freshness: searchFreshness(),
             bochaKey: searchKeyBag.bocha || (aiBochaKey ? aiBochaKey.value.trim() : ''),
             tavilyKey: searchKeyBag.tavily || fieldValue('aiTavilyKey'),
@@ -751,12 +1608,28 @@
         renderProfileSelect();
         syncProviderFields();
         syncProfileRow();
+        resolvedEndpointHint();
+        renderVendorAndModelChips();
+        syncThinkUI();
+        syncSegmentedUI();
+        syncParamsUI();
+        syncPromptUI();
+        syncSidebarStatus();
+        if (!quiet) {
+          var cfgModal = document.getElementById('aiConfigModal');
+          if (cfgModal && cfgModal.classList.contains('open')) flashSaved();
+        }
       }
 
-      (function loadAIConfig() {
-        var cfg = null;
+      function applyAIConfigObject(cfg) {
         var migrated = false;
-        try { cfg = JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || 'null'); } catch (e) { cfg = null; }
+        systemPresetList = builtinSystemPresets();
+        contextPresetList = builtinContextPresets();
+        activeSystemPresetId = 'general';
+        activeContextPresetId = 'full';
+        searchKeyBag = {};
+        shownProvider = 'bocha';
+
         if (cfg && Array.isArray(cfg.profiles) && cfg.profiles.length) {
           aiProfiles = cfg.profiles;
           activeProfile = aiProfiles.filter(function (p) { return p.id === cfg.activeProfileId; })[0] || aiProfiles[0];
@@ -775,54 +1648,73 @@
         }
         writeProfileToForm(activeProfile);
         renderProfileSelect();
-        if (cfg) {
-          if (cfg.webSearch) aiWebSearch.checked = true;
-          var bKey = (cfg.search && cfg.search.bochaKey) || cfg.bochaKey;
-          if (bKey) aiBochaKey.value = bKey;
-          if (cfg.deepSearch) aiDeepSearch.checked = true;
-          setIf('aiThinkingGear', cfg.thinkingGear || (cfg.deepSearch ? 'high' : 'high'));
-          if (cfg.temperature != null && cfg.temperature !== '') setIf('aiTemperature', cfg.temperature);
-          if (cfg.maxTokens != null) setIf('aiMaxTokens', cfg.maxTokens);
-          var sendT = document.getElementById('aiSendTemperature');
-          if (sendT && cfg.sendTemperature === false) sendT.checked = false;
-          var search = cfg.search || {};
-          searchKeyBag = (search.keys && typeof search.keys === 'object') ? search.keys : {};
-          if (!searchKeyBag.bocha && bKey) searchKeyBag.bocha = bKey;
-          if (!searchKeyBag.tavily && search.tavilyKey) searchKeyBag.tavily = search.tavilyKey;
-          if (!searchKeyBag.custom && search.customKey) searchKeyBag.custom = search.customKey;
-          setIf('aiSearchProvider', search.provider || 'bocha');
-          shownProvider = search.provider || 'bocha';
-          setIf('aiSearchKey', searchKeyBag[shownProvider] || '');
-          setIf('aiTavilyKey', search.tavilyKey || searchKeyBag.tavily || '');
-          setIf('aiCustomUrl', search.customUrl || '');
-          setIf('aiCustomKey', search.customKey || searchKeyBag.custom || '');
-          setIf('aiZhipuEngine', search.zhipuEngine || 'search_pro');
-          setIf('aiKimiTier', search.kimiTier || 'pro');
-          setIf('aiSearchCount', search.count || 5);
-          setIf('aiSearchFreshness', search.freshness || 'noLimit');
-          var sum = document.getElementById('aiSearchSummary');
-          if (sum && search.summary === false) sum.checked = false;
-          if (Array.isArray(cfg.systemPresets) && cfg.systemPresets.length) {
-            systemPresetList = mergePresets(cfg.systemPresets, builtinSystemPresets());
-            activeSystemPresetId = cfg.activeSystemPresetId || 'general';
-          }
-          if (Array.isArray(cfg.contextPresets) && cfg.contextPresets.length) {
-            contextPresetList = mergePresets(cfg.contextPresets, builtinContextPresets());
-            activeContextPresetId = cfg.activeContextPresetId || 'full';
-          }
-          if (!cfg.systemPresets) {
-            var classified = classifyStoredPrompt(cfg.systemPrompt);
-            if (classified.custom) {
-              var customId = 's' + Date.now().toString(36);
-              systemPresetList.push({ id: customId, name: '已保存的提示词', text: classified.custom, builtin: false });
-              activeSystemPresetId = customId;
-              activeContextPresetId = classified.contextId;
-              migrated = true;
-            } else if (cfg.systemPrompt) {
-              activeSystemPresetId = classified.systemId;
-              activeContextPresetId = classified.contextId;
-              migrated = true;
-            }
+
+        // 重置默认可控参数，再叠加传入配置
+        if (aiWebSearch) aiWebSearch.checked = !!(cfg && cfg.webSearch);
+        if (aiDeepSearch) aiDeepSearch.checked = !!(cfg && cfg.deepSearch);
+        if (aiBochaKey) aiBochaKey.value = '';
+        setIf('aiThinkingGear', (cfg && cfg.thinkingGear) || 'high');
+        setIf('aiTemperature', (cfg && cfg.temperature != null && cfg.temperature !== '') ? cfg.temperature : '0.1');
+        setIf('aiMaxTokens', (cfg && cfg.maxTokens != null) ? cfg.maxTokens : '');
+        var sendT = document.getElementById('aiSendTemperature');
+        if (sendT) sendT.checked = !(cfg && cfg.sendTemperature === false);
+        var sendP = document.getElementById('aiSendTopP');
+        if (sendP) sendP.checked = !!(cfg && cfg.sendTopP);
+        setIf('aiTopP', (cfg && cfg.topP != null && cfg.topP !== '') ? cfg.topP : '0.9');
+        setIf('aiHistoryLimit', (cfg && cfg.historyLimit != null) ? cfg.historyLimit : 20);
+        setIf('aiTimeoutSec', (cfg && cfg.timeoutSec != null) ? String(cfg.timeoutSec) : '120');
+        var stEl = document.getElementById('aiStreamEnabled');
+        if (stEl) stEl.checked = !(cfg && cfg.stream === false);
+        var cbEl = document.getElementById('aiConfirmBulkDelete');
+        if (cbEl) cbEl.checked = !(cfg && cfg.confirmBulkDelete === false);
+        setIf('aiCustomHeaders', (cfg && cfg.customHeaders) || '');
+        setIf('aiExtraBody', (cfg && cfg.extraBody) || '');
+        var bkEl = document.getElementById('aiBackupIncludeKeys');
+        if (bkEl) bkEl.checked = !(cfg && cfg.includeKeysInBackup === false);
+
+        var search = (cfg && cfg.search) || {};
+        var bKey = (search && search.bochaKey) || (cfg && cfg.bochaKey) || '';
+        if (bKey && aiBochaKey) aiBochaKey.value = bKey;
+        searchKeyBag = (search.keys && typeof search.keys === 'object') ? Object.assign({}, search.keys) : {};
+        if (!searchKeyBag.bocha && bKey) searchKeyBag.bocha = bKey;
+        if (!searchKeyBag.tavily && search.tavilyKey) searchKeyBag.tavily = search.tavilyKey;
+        if (!searchKeyBag.custom && search.customKey) searchKeyBag.custom = search.customKey;
+        setIf('aiSearchProvider', search.provider || 'bocha');
+        shownProvider = search.provider || 'bocha';
+        setIf('aiSearchKey', searchKeyBag[shownProvider] || '');
+        setIf('aiTavilyKey', search.tavilyKey || searchKeyBag.tavily || '');
+        setIf('aiCustomUrl', search.customUrl || '');
+        setIf('aiCustomKey', search.customKey || searchKeyBag.custom || '');
+        setIf('aiZhipuEngine', search.zhipuEngine || 'search_pro');
+        setIf('aiKimiTier', search.kimiTier || 'pro');
+        setIf('aiSearchCount', search.count || 5);
+        setIf('aiSearchFreshness', search.freshness || 'noLimit');
+        setIf('aiMaxSearchRounds', String(search.maxRounds || 3));
+        var sum = document.getElementById('aiSearchSummary');
+        if (sum) sum.checked = !(search.summary === false);
+        var cite = document.getElementById('aiCiteSources');
+        if (cite) cite.checked = !(search.citeSources === false);
+
+        if (cfg && Array.isArray(cfg.systemPresets) && cfg.systemPresets.length) {
+          systemPresetList = mergePresets(cfg.systemPresets, builtinSystemPresets());
+          activeSystemPresetId = cfg.activeSystemPresetId || 'general';
+        }
+        if (cfg && Array.isArray(cfg.contextPresets) && cfg.contextPresets.length) {
+          contextPresetList = mergePresets(cfg.contextPresets, builtinContextPresets());
+          activeContextPresetId = cfg.activeContextPresetId || 'full';
+        }
+        if (cfg && !cfg.systemPresets) {
+          var classified = classifyStoredPrompt(cfg.systemPrompt);
+          if (classified.custom) {
+            var customId = 's' + Date.now().toString(36);
+            systemPresetList.push({ id: customId, name: '已保存的提示词', text: classified.custom, builtin: false });
+            activeSystemPresetId = customId;
+            activeContextPresetId = classified.contextId;
+            migrated = true;
+          } else if (cfg.systemPrompt) {
+            activeSystemPresetId = classified.systemId;
+            activeContextPresetId = classified.contextId;
+            migrated = true;
           }
         }
         if (!presetById(systemPresetList, activeSystemPresetId)) activeSystemPresetId = 'general';
@@ -832,16 +1724,53 @@
         updateModelBadge();
         syncProviderFields();
         syncProfileRow();
-        if (migrated) saveAIConfig();
+        resolvedEndpointHint();
+        renderVendorAndModelChips();
+        syncThinkUI();
+        syncSegmentedUI();
+        syncParamsUI();
+        syncPromptUI();
+        syncSidebarStatus();
+        return migrated;
+      }
+
+      (function loadAIConfig() {
+        var cfg = null;
+        try { cfg = JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || 'null'); } catch (e) { cfg = null; }
+        var migrated = applyAIConfigObject(cfg);
+        if (migrated) saveAIConfig(true);
       })();
 
-      ['aiEndpoint', 'aiKey', 'aiModel', 'aiBochaKey', 'aiTavilyKey', 'aiCustomUrl', 'aiCustomKey', 'aiSearchKey', 'aiTemperature', 'aiMaxTokens', 'aiSearchCount', 'aiSystemPrompt', 'aiProfileName'].forEach(function (id) {
+      ['aiEndpoint', 'aiKey', 'aiModel', 'aiCustomUrl', 'aiSearchKey', 'aiMaxTokens', 'aiSystemPrompt', 'aiContextPrompt', 'aiProfileName', 'aiCustomHeaders', 'aiExtraBody'].forEach(function (id) {
         var el = document.getElementById(id);
-        if (el) el.addEventListener('change', saveAIConfig);
+        if (el) el.addEventListener('change', function () { saveAIConfig(); });
       });
-      ['aiThinkingGear', 'aiSearchFreshness', 'aiZhipuEngine', 'aiKimiTier'].forEach(function (id) {
+      if (aiBochaKey) {
+        aiBochaKey.addEventListener('change', function () {
+          searchKeyBag.bocha = aiBochaKey.value.trim();
+          if (shownProvider === 'bocha') setIf('aiSearchKey', searchKeyBag.bocha);
+          saveAIConfig();
+        });
+      }
+      var aiTavilyKeyEl = document.getElementById('aiTavilyKey');
+      if (aiTavilyKeyEl) {
+        aiTavilyKeyEl.addEventListener('change', function () {
+          searchKeyBag.tavily = aiTavilyKeyEl.value.trim();
+          if (shownProvider === 'tavily') setIf('aiSearchKey', searchKeyBag.tavily);
+          saveAIConfig();
+        });
+      }
+      var aiCustomKeyEl = document.getElementById('aiCustomKey');
+      if (aiCustomKeyEl) {
+        aiCustomKeyEl.addEventListener('change', function () {
+          searchKeyBag.custom = aiCustomKeyEl.value.trim();
+          if (shownProvider === 'custom') setIf('aiSearchKey', searchKeyBag.custom);
+          saveAIConfig();
+        });
+      }
+      ['aiThinkingGear', 'aiSearchFreshness', 'aiZhipuEngine', 'aiKimiTier', 'aiTimeoutSec'].forEach(function (id) {
         var el = document.getElementById(id);
-        if (el) el.addEventListener('change', saveAIConfig);
+        if (el) el.addEventListener('change', function () { saveAIConfig(); });
       });
       var searchProviderSel = document.getElementById('aiSearchProvider');
       if (searchProviderSel) {
@@ -855,20 +1784,161 @@
             shownProvider = next;
             setIf('aiSearchKey', searchKeyBag[next] || '');
           }
+          var probeEl = document.getElementById('aiSearchProbeStatus');
+          if (probeEl) { probeEl.className = 'ai-probe-badge'; probeEl.textContent = '未测试'; }
           saveAIConfig();
         });
       }
-      ['aiSendTemperature', 'aiSearchSummary'].forEach(function (id) {
+      ['aiSendTemperature', 'aiSendTopP', 'aiSearchSummary', 'aiCiteSources', 'aiStreamEnabled', 'aiConfirmBulkDelete', 'aiBackupIncludeKeys'].forEach(function (id) {
         var el = document.getElementById(id);
-        if (el) el.addEventListener('change', saveAIConfig);
+        if (el) el.addEventListener('change', function () { saveAIConfig(); });
       });
+      ['aiTemperature', 'aiTopP', 'aiSearchCount', 'aiHistoryLimit'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('input', function () {
+            syncSegmentedUI();
+            syncParamsUI();
+          });
+          el.addEventListener('change', function () { saveAIConfig(); });
+        }
+      });
+      // maxTokens input synced below
+      var aiMaxTokensInput = document.getElementById('aiMaxTokens');
+      if (aiMaxTokensInput) {
+        aiMaxTokensInput.addEventListener('input', syncSegmentedUI);
+      }
+      var customHeadersBox = document.getElementById('aiCustomHeaders');
+      var extraBodyBox = document.getElementById('aiExtraBody');
+      if (customHeadersBox) customHeadersBox.addEventListener('input', syncParamsUI);
+      if (extraBodyBox) extraBodyBox.addEventListener('input', syncParamsUI);
+
       aiWebSearch.addEventListener('change', function () {
-        saveAIConfig();
+        saveAIConfig(true);
         if (this.checked && !providerReady()) {
           showAIToast('联网搜索需要先在配置窗口里填写当前提供商的密钥');
         }
       });
-      aiDeepSearch.addEventListener('change', saveAIConfig);
+      aiDeepSearch.addEventListener('change', function () { saveAIConfig(true); });
+
+      // 快速厂商预设芯片
+      var providerChips = document.getElementById('aiProviderChips');
+      if (providerChips) {
+        providerChips.addEventListener('click', function (e) {
+          var chip = e.target.closest ? e.target.closest('.ai-chip[data-vendor]') : null;
+          if (!chip) return;
+          var key = chip.getAttribute('data-vendor');
+          var v = AI_VENDORS[key];
+          if (!v) return;
+          if (v.endpoint && aiEndpoint) aiEndpoint.value = v.endpoint;
+          if (v.models && v.models.length && aiModel) aiModel.value = v.models[0];
+          saveAIConfig();
+        });
+      }
+
+      // 密钥遮罩切换与复制
+      function bindEyeToggle(btnId, inputId) {
+        var btn = document.getElementById(btnId);
+        if (!btn) return;
+        btn.addEventListener('click', function () {
+          var inp = document.getElementById(inputId);
+          if (!inp) return;
+          inp.type = inp.type === 'password' ? 'text' : 'password';
+        });
+      }
+      bindEyeToggle('aiToggleKeyEye', 'aiKey');
+      bindEyeToggle('aiToggleSearchEye', 'aiSearchKey');
+      bindEyeToggle('aiToggleCustomKeyEye', 'aiCustomKey');
+      var copyKeyBtn = document.getElementById('aiCopyKeyBtn');
+      if (copyKeyBtn) {
+        copyKeyBtn.addEventListener('click', function () {
+          var v = aiKey ? aiKey.value : '';
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(v).catch(function () {});
+          }
+          flashSaved(v ? '已复制密钥' : '密钥为空');
+        });
+      }
+
+      // 深度思考 4 宫格卡片
+      var thinkCards = document.getElementById('aiThinkCards');
+      if (thinkCards) {
+        thinkCards.addEventListener('click', function (e) {
+          var card = e.target.closest ? e.target.closest('.ai-choice-card[data-gear]') : null;
+          if (!card) return;
+          var g = card.getAttribute('data-gear');
+          if (g === 'off') {
+            if (aiDeepSearch) aiDeepSearch.checked = false;
+          } else {
+            if (aiDeepSearch) aiDeepSearch.checked = true;
+            setIf('aiThinkingGear', g);
+          }
+          saveAIConfig();
+        });
+      }
+
+      // 分段胶囊按钮同步
+      var kimiTierSeg = document.getElementById('aiKimiTierSeg');
+      if (kimiTierSeg) {
+        kimiTierSeg.addEventListener('click', function (e) {
+          var btn = e.target.closest ? e.target.closest('.ai-seg-btn[data-kimi-tier]') : null;
+          if (!btn) return;
+          setIf('aiKimiTier', btn.getAttribute('data-kimi-tier'));
+          saveAIConfig();
+        });
+      }
+      var freshSeg = document.getElementById('aiSearchFreshnessSeg');
+      if (freshSeg) {
+        freshSeg.addEventListener('click', function (e) {
+          var btn = e.target.closest ? e.target.closest('.ai-seg-btn[data-freshness]') : null;
+          if (!btn) return;
+          setIf('aiSearchFreshness', btn.getAttribute('data-freshness'));
+          saveAIConfig();
+        });
+      }
+      var roundsSeg = document.getElementById('aiMaxSearchRoundsSeg');
+      if (roundsSeg) {
+        roundsSeg.addEventListener('click', function (e) {
+          var btn = e.target.closest ? e.target.closest('.ai-seg-btn[data-rounds]') : null;
+          if (!btn) return;
+          setIf('aiMaxSearchRounds', btn.getAttribute('data-rounds'));
+          saveAIConfig();
+        });
+      }
+      var maxTokensSeg = document.getElementById('aiMaxTokensSeg');
+      if (maxTokensSeg) {
+        maxTokensSeg.addEventListener('click', function (e) {
+          var btn = e.target.closest ? e.target.closest('.ai-seg-btn[data-tokens]') : null;
+          if (!btn) return;
+          setIf('aiMaxTokens', btn.getAttribute('data-tokens') || '');
+          saveAIConfig();
+        });
+      }
+      var tempChips = document.getElementById('aiTempChips');
+      if (tempChips) {
+        tempChips.addEventListener('click', function (e) {
+          var chip = e.target.closest ? e.target.closest('.ai-chip[data-temp]') : null;
+          if (!chip) return;
+          setIf('aiTemperature', chip.getAttribute('data-temp'));
+          saveAIConfig();
+        });
+      }
+
+      // 折叠详情与自定义 JSON 区块（SVG chevron 原地旋转）
+      function bindDisclosure(btnId, bodyId, openLabel, closedLabel) {
+        var btn = document.getElementById(btnId);
+        var body = document.getElementById(bodyId);
+        if (!btn || !body) return;
+        btn.addEventListener('click', function () {
+          var open = body.classList.toggle('open');
+          btn.classList.toggle('open', open);
+          btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+          var span = btn.querySelector('span');
+          if (span) span.textContent = open ? openLabel : closedLabel;
+        });
+      }
+      bindDisclosure('aiToggleSearchMetaBtn', 'aiSearchMetaDetail', '收起接口与计费详情', '查看接口与计费详情');
+      bindDisclosure('aiToggleCustomJsonBtn', 'aiCustomJsonBody', '收起自定义请求头与额外参数', '自定义请求头与额外参数');
 
       var profileSel = document.getElementById('aiProfileSelect');
       if (profileSel) {
@@ -890,6 +1960,25 @@
           saveAIConfig();
         });
       }
+      var profileDup = document.getElementById('aiProfileDup');
+      if (profileDup) {
+        profileDup.addEventListener('click', function () {
+          readProfileFromForm(activeProfile);
+          var src = activeProfile || blankProfile('通用配置');
+          var copy = {
+            id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+            name: (src.name || '配置') + ' (副本)',
+            endpoint: src.endpoint || '',
+            key: src.key || '',
+            model: src.model || ''
+          };
+          aiProfiles.push(copy);
+          activeProfile = copy;
+          writeProfileToForm(copy);
+          saveAIConfig();
+          flashSaved('已复制方案');
+        });
+      }
       var profileDel = document.getElementById('aiProfileDel');
       if (profileDel) {
         profileDel.addEventListener('click', function () {
@@ -900,6 +1989,50 @@
           saveAIConfig();
         });
       }
+
+      // 拉取模型列表（GET /v1/models）
+      var fetchModelsBtn = document.getElementById('aiFetchModelsBtn');
+      if (fetchModelsBtn) {
+        fetchModelsBtn.addEventListener('click', function () {
+          var endpoint = aiEndpoint ? aiEndpoint.value.trim() : '';
+          var mUrl = buildModelsUrl(endpoint);
+          if (!mUrl) { flashSaved('请先填写 API 地址'); return; }
+          var key = aiKey ? aiKey.value.trim() : '';
+          var headers = {};
+          if (key) headers.Authorization = 'Bearer ' + key;
+          var parsedHdrs = parseJsonObjectField('aiCustomHeaders');
+          if (parsedHdrs.ok && parsedHdrs.obj) {
+            Object.keys(parsedHdrs.obj).forEach(function (k) {
+              if (parsedHdrs.obj[k] != null) headers[k] = String(parsedHdrs.obj[k]);
+            });
+          }
+          var prevText = fetchModelsBtn.textContent;
+          fetchModelsBtn.disabled = true;
+          fetchModelsBtn.textContent = '拉取中…';
+          fetch(mUrl, { method: 'GET', headers: headers, signal: AbortSignal.timeout(15000) }).then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error('HTTP ' + r.status + ' ' + String(t || '').slice(0, 120)); });
+            return r.json();
+          }).then(function (data) {
+            var list = [];
+            if (data && Array.isArray(data.data)) {
+              list = data.data.map(function (x) { return x && x.id; }).filter(Boolean);
+            } else if (data && Array.isArray(data.models)) {
+              list = data.models.map(function (x) { return x && (x.name || x.model || x.id); }).filter(Boolean);
+            }
+            list = list.filter(function (x, i, a) { return a.indexOf(x) === i; }).slice(0, 24);
+            if (!list.length) throw new Error('接口未返回模型列表');
+            fetchedModelsCache[mUrl] = list;
+            renderVendorAndModelChips();
+            flashSaved('已拉取 ' + list.length + ' 个模型');
+          }).catch(function (err) {
+            flashSaved('拉取失败：' + (err && err.message ? err.message : err));
+          }).finally(function () {
+            fetchModelsBtn.disabled = false;
+            fetchModelsBtn.textContent = prevText;
+          });
+        });
+      }
+
       var testBtn = document.getElementById('aiTestBtn');
       if (testBtn) {
         testBtn.addEventListener('click', function () {
@@ -907,21 +2040,66 @@
           var endpoint = aiEndpoint.value.trim();
           var key = aiKey.value.trim();
           var model = aiModel.value.trim() || 'deepseek-flash';
-          if (!endpoint || !key) { if (status) status.textContent = '请先填写地址和密钥'; return; }
-          if (status) status.textContent = '正在连接…';
+          if (!endpoint || !key) {
+            if (status) { status.className = 'ai-probe-badge err'; status.textContent = '请先填写地址和密钥'; }
+            return;
+          }
+          if (status) { status.className = 'ai-probe-badge'; status.textContent = '正在连接…'; }
+          var t0 = Date.now();
           var testBody = { model: model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false };
           fetch(buildChatUrl(endpoint), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
-            body: JSON.stringify(testBody)
+            headers: buildChatHeaders(key),
+            body: JSON.stringify(testBody),
+            signal: AbortSignal.timeout(timeoutMs())
           }).then(function (r) {
             if (!r.ok) return r.text().then(function (t) { throw new Error('HTTP ' + r.status + ' ' + String(t).slice(0, 160)); });
-            if (status) status.textContent = '连接成功';
+            var ms = Math.max(1, Date.now() - t0);
+            if (status) {
+              status.className = 'ai-probe-badge ok';
+              status.innerHTML = '<i class="ai-dot-ok"></i><span>连接成功 · ' + ms + 'ms</span>';
+            }
           }).catch(function (err) {
-            if (status) status.textContent = '连接失败：' + (err && err.message ? err.message : err);
+            if (status) {
+              status.className = 'ai-probe-badge err';
+              status.textContent = '连接失败：' + (err && err.message ? err.message : err);
+            }
           });
         });
       }
+
+      // 测试联网搜索接口
+      var testSearchBtn = document.getElementById('aiTestSearchBtn');
+      if (testSearchBtn) {
+        testSearchBtn.addEventListener('click', function () {
+          var badge = document.getElementById('aiSearchProbeStatus');
+          commitSearchKeyFromDom();
+          if (!providerReady()) {
+            if (badge) {
+              badge.className = 'ai-probe-badge err';
+              badge.textContent = searchProvider() === 'custom' ? '请先填写自定义地址' : '请先填写搜索密钥';
+            }
+            return;
+          }
+          if (badge) { badge.className = 'ai-probe-badge'; badge.textContent = '探测中…'; }
+          var t0 = Date.now();
+          fetchWebSearch('Motuo-Tab').then(function (r) {
+            if (r && r.failed) {
+              if (badge) {
+                badge.className = 'ai-probe-badge err';
+                badge.textContent = '失败：' + describeSearchError(r.error);
+              }
+              return;
+            }
+            var ms = Math.max(1, Date.now() - t0);
+            if (badge) {
+              badge.className = 'ai-probe-badge ok';
+              badge.innerHTML = '<i class="ai-dot-ok"></i><span>可用 · ' + r.resultCount + ' 条 · ' + ms + 'ms</span>';
+            }
+          });
+        });
+      }
+
       function bindPromptLayer(kind, addId) {
         var s = layerState(kind);
         var sel = document.getElementById(s.select);
@@ -934,9 +2112,14 @@
           });
         }
         var box = document.getElementById(s.box);
-        if (box) box.addEventListener('input', saveAIConfig);
+        if (box) {
+          box.addEventListener('input', function () {
+            syncPromptUI();
+            saveAIConfig();
+          });
+        }
         var name = document.getElementById(s.name);
-        if (name) name.addEventListener('change', saveAIConfig);
+        if (name) name.addEventListener('change', function () { saveAIConfig(); });
         var addBtn = document.getElementById(addId);
         if (addBtn) {
           addBtn.addEventListener('click', function () {
@@ -970,9 +2153,52 @@
       }
       bindPromptLayer('system', 'aiSystemPresetAdd');
       bindPromptLayer('context', 'aiContextPresetAdd');
+
+      // 提示词双层切换、预览与恢复默认
+      var promptLayerSeg = document.getElementById('aiPromptLayerSeg');
+      if (promptLayerSeg) {
+        promptLayerSeg.addEventListener('click', function (e) {
+          var btn = e.target.closest ? e.target.closest('[data-prompt-layer]') : null;
+          if (!btn) return;
+          activePromptLayer = btn.getAttribute('data-prompt-layer') === 'context' ? 'context' : 'system';
+          promptPreviewOpen = false;
+          syncPromptUI();
+        });
+      }
+      var promptPreviewBtn = document.getElementById('aiTogglePromptPreviewBtn');
+      if (promptPreviewBtn) {
+        promptPreviewBtn.addEventListener('click', function () {
+          promptPreviewOpen = !promptPreviewOpen;
+          syncPromptUI();
+        });
+      }
+      var promptResetBtn = document.getElementById('aiPromptResetBtn');
+      if (promptResetBtn) {
+        promptResetBtn.addEventListener('click', function () {
+          var kind = activePromptLayer;
+          var s = layerState(kind);
+          var builtins = kind === 'context' ? builtinContextPresets() : builtinSystemPresets();
+          var cur = presetById(s.list(), s.getId());
+          var match = cur && builtins.filter(function (b) { return b.id === cur.id; })[0];
+          if (cur) cur.text = (match || builtins[0]).text;
+          var box = document.getElementById(s.box);
+          if (box && cur) box.value = cur.text;
+          renderLayer(kind);
+          saveAIConfig();
+          flashSaved('已恢复默认');
+        });
+      }
+
       ['aiEndpoint', 'aiKey', 'aiModel'].forEach(function (id) {
         var el = document.getElementById(id);
-        if (el) el.addEventListener('input', syncProfileRow);
+        if (el) {
+          el.addEventListener('input', function () {
+            syncProfileRow();
+            resolvedEndpointHint();
+            renderVendorAndModelChips();
+            syncSidebarStatus();
+          });
+        }
       });
       var configNav = document.querySelector('.ai-config-nav');
       if (configNav) {
@@ -993,8 +2219,9 @@
         varRow.addEventListener('click', function (e) {
           var btn = e.target.closest ? e.target.closest('.ai-var-btn') : null;
           if (!btn) return;
-          var box = document.getElementById('aiContextPrompt');
+          var box = document.getElementById(activePromptLayer === 'context' ? 'aiContextPrompt' : 'aiSystemPrompt');
           if (!box) return;
+          if (promptPreviewOpen) { promptPreviewOpen = false; syncPromptUI(); }
           var token = btn.getAttribute('data-var') || '';
           var start = box.selectionStart || 0;
           var end = box.selectionEnd || 0;
@@ -1004,6 +2231,88 @@
         });
       }
 
+      // 数据与安全 Tab 按钮
+      var exportAiBtn = document.getElementById('aiExportConfigBtn');
+      if (exportAiBtn) {
+        exportAiBtn.addEventListener('click', function () {
+          saveAIConfig(true);
+          var rawCfg = null;
+          try { rawCfg = JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || 'null'); } catch (e) { rawCfg = null; }
+          var payload = {
+            app: 'Motuo-Tab-AI',
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            config: redactAIConfigObject(rawCfg || {})
+          };
+          var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = 'motuo-tab-ai-config-' + Date.now() + '.json';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          flashSaved('已导出 AI 配置');
+        });
+      }
+      var importAiBtn = document.getElementById('aiImportConfigBtn');
+      var importAiFile = document.getElementById('aiImportConfigFile');
+      if (importAiBtn && importAiFile) {
+        importAiBtn.addEventListener('click', function () {
+          importAiFile.value = '';
+          importAiFile.click();
+        });
+        importAiFile.addEventListener('change', function () {
+          var file = importAiFile.files && importAiFile.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function () {
+            try {
+              var obj = JSON.parse(reader.result);
+              var cfg = null;
+              if (obj && obj.data && obj.data.ai && obj.data.ai.config) {
+                cfg = typeof obj.data.ai.config === 'string' ? JSON.parse(obj.data.ai.config) : obj.data.ai.config;
+              } else if (obj && obj.config && typeof obj.config === 'object') {
+                cfg = obj.config;
+              } else if (obj && typeof obj === 'object') {
+                cfg = obj;
+              }
+              if (!cfg || typeof cfg !== 'object') throw new Error('无效的 AI 配置文件');
+              applyAIConfigObject(cfg);
+              saveAIConfig(true);
+              flashSaved('已导入 AI 配置');
+            } catch (err) {
+              alert('导入 AI 配置失败：' + (err && err.message ? err.message : err));
+            }
+          };
+          reader.readAsText(file);
+        });
+      }
+      var clearHistBtn = document.getElementById('aiClearHistoryBtn');
+      if (clearHistBtn) {
+        clearHistBtn.addEventListener('click', function () {
+          if (aiSending) return;
+          if (aiHistory.length > 1 && !confirm('确定清空全部对话？清空后不可恢复。')) return;
+          clearAIConversation();
+          flashSaved('已清空对话历史');
+        });
+      }
+      var resetAiBtn = document.getElementById('aiResetConfigBtn');
+      if (resetAiBtn) {
+        resetAiBtn.addEventListener('click', function () {
+          if (!confirm('确定恢复默认 AI 配置？将清除已填写的接口地址与密钥，并还原内置提示词。')) return;
+          try { localStorage.removeItem(AI_CONFIG_KEY); } catch (e) {}
+          fetchedModelsCache = {};
+          applyAIConfigObject(null);
+          saveAIConfig(true);
+          var mProbe = document.getElementById('aiTestStatus');
+          if (mProbe) { mProbe.className = 'ai-probe-badge'; mProbe.textContent = '未测试'; }
+          var sProbe = document.getElementById('aiSearchProbeStatus');
+          if (sProbe) { sProbe.className = 'ai-probe-badge'; sProbe.textContent = '未测试'; }
+          flashSaved('已恢复默认配置');
+        });
+      }
       // 深度搜索：在气泡内部创建思考过程容器（默认收起，点击头部展开/收起）
       function createThinkingEl() {
         var el = document.createElement('div');
@@ -1816,7 +3125,7 @@
 
         // 危险操作检测：删超过 3 个、或者几乎清空（剩不到 2 个）
         var willDelete = removeArr.length;
-        if (willDelete > 3 || (newList.length < 2 && cards.list.length > 0 && willDelete > 0)) {
+        if (shouldConfirmBulkDelete() && (willDelete > 3 || (newList.length < 2 && cards.list.length > 0 && willDelete > 0))) {
           var msg = 'AI 准备删除 ' + willDelete + ' 个卡片，剩余 ' + newList.length + ' 个。\n确定要执行吗？';
           if (!confirm(msg)) {
             if (bubble) {
@@ -2096,7 +3405,64 @@
         var streamFailed = false;         // 首轮流式是否已失败（失败后不再走后续流程，避免错误气泡被覆盖）
         var opsRetried = false;           // 是否已做过一次"格式纠错重试"
         var searchChipParts = [];         // 多轮搜索产生的 chip JSON（写入历史）
-        var AI_MAX_SEARCH_ROUNDS = 3;     // 单轮对话最多搜索几次（防模型死循环）
+        var AI_MAX_SEARCH_ROUNDS = maxSearchRounds();     // 单轮对话最多搜索几次（防模型死循环）
+
+        function consumeChatResponse(res, opts) {
+          var ct = '';
+          try { if (res.headers && res.headers.get) ct = String(res.headers.get('content-type') || ''); } catch (e) {}
+          var canStream = isStreamEnabled() && res.body && typeof res.body.getReader === 'function' && !(/application\/json/i.test(ct));
+          if (!canStream) {
+            var jsonP = typeof res.json === 'function'
+              ? res.json()
+              : res.text().then(function (t) { return JSON.parse(t); });
+            return jsonP.then(function (data) {
+              if (data && data.error) {
+                var jErr = new Error('API 错误：' + (typeof data.error === 'string' ? data.error : JSON.stringify(data.error)));
+                jErr.apiError = true;
+                throw jErr;
+              }
+              var ch = data && data.choices && data.choices[0];
+              var msg = (ch && (ch.message || ch.delta)) || {};
+              if (msg.reasoning_content && opts.onReasoning) opts.onReasoning(msg.reasoning_content);
+              if (msg.content && opts.onContent) opts.onContent(msg.content);
+              if (msg.tool_calls && opts.onToolCalls) opts.onToolCalls(msg.tool_calls);
+            });
+          }
+          return new Promise(function (resolve, reject) {
+            var reader = res.body.getReader();
+            var dec = new TextDecoder();
+            var buf = '';
+            (function read() {
+              reader.read().then(function (r) {
+                if (r.done) return resolve();
+                buf += dec.decode(r.value, { stream: true });
+                var lines = buf.split('\n');
+                buf = lines.pop() || '';
+                for (var i = 0; i < lines.length; i++) {
+                  var ln = lines[i].trim();
+                  if (!ln || ln.indexOf(':') === 0 || ln === 'data: [DONE]') continue;
+                  if (ln.indexOf('data: ') === 0) {
+                    try {
+                      var ch = JSON.parse(ln.slice(6));
+                      if (ch && ch.error) {
+                        var _apiErr = new Error('API 流式错误：' + (typeof ch.error === 'string' ? ch.error : JSON.stringify(ch.error)));
+                        _apiErr.apiError = true;
+                        throw _apiErr;
+                      }
+                      var d = ch.choices && ch.choices[0] && ch.choices[0].delta;
+                      if (!d) continue;
+                      if (opts.onFirstDelta) { opts.onFirstDelta(d); opts.onFirstDelta = null; }
+                      if (d.content && opts.onContent) opts.onContent(d.content);
+                      if (d.reasoning_content && opts.onReasoning) opts.onReasoning(d.reasoning_content);
+                      if (d.tool_calls && opts.onToolCalls) opts.onToolCalls(d.tool_calls);
+                    } catch (e) { if (e && e.apiError) throw e; }
+                  }
+                }
+                read();
+              }, reject);
+            })();
+          });
+        }
 
         // P1：格式纠错——问模型要一次"只给 <ops> 块"。仅修改意图且首次没解析到 ops 时调用。
         // 完全内部化：用完即从历史移除，绝不污染后续轮次；若模型判断无需改动则整个作废、保留首轮回答。
@@ -2117,33 +3483,13 @@
           var retryAccum = '';
           return fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+            headers: buildChatHeaders(key),
             body: JSON.stringify(retryBody),
-            signal: AbortSignal.timeout(120000)
+            signal: AbortSignal.timeout(timeoutMs())
           }).then(function (res) {
             if (!res.ok) return res.text().then(function (t) { throw new Error('HTTP ' + res.status + '：' + String(t).slice(0, 200)); });
-            return new Promise(function (resolve, reject) {
-              var reader = res.body.getReader();
-              var dec = new TextDecoder();
-              var buf = '';
-              (function read() {
-                reader.read().then(function (r) {
-                  if (r.done) return resolve();
-                  buf += dec.decode(r.value, { stream: true });
-                  var lines = buf.split('\n');
-                  buf = lines.pop() || '';
-                  lines.forEach(function (ln) {
-                    ln = ln.trim();
-                    if (ln.indexOf('data: ') !== 0 || ln === 'data: [DONE]') return;
-                    try {
-                      var ch = JSON.parse(ln.slice(6));
-                      var d = ch.choices && ch.choices[0] && ch.choices[0].delta;
-                      if (d && d.content) retryAccum += d.content;
-                    } catch (e) {}
-                  });
-                  read();
-                }, reject);
-              })();
+            return consumeChatResponse(res, {
+              onContent: function (c) { retryAccum += c; }
             });
           }).then(function () {
             // 关键：内部纠错消息用完即删，避免污染后续用户请求（否则下一轮会被"系统校验"带偏）
@@ -2162,575 +3508,36 @@
           });
         }
 
-        // 从错误对象里抽出能给人看的原因：状态码 + message/error 字段，并保留一段原文
-        function pickErrorMessage(obj, depth) {
-          if (obj == null || depth > 4) return '';
-          if (typeof obj === 'string') return obj.trim();
-          if (typeof obj !== 'object') return '';
-          var keys = ['message', 'msg', 'error_message', 'detail', 'error'];
-          for (var i = 0; i < keys.length; i++) {
-            if (obj[keys[i]] != null) {
-              var got = pickErrorMessage(obj[keys[i]], (depth || 0) + 1);
-              if (got) return got;
-            }
-          }
-          if (obj.data) return pickErrorMessage(obj.data, (depth || 0) + 1);
-          return '';
-        }
-        function readableSearchBody(text) {
-          var raw = String(text || '').trim();
-          if (!raw) return '';
-          var parsed = null;
-          try { parsed = JSON.parse(raw); } catch (e) {
-            var start = raw.indexOf('{');
-            var end = raw.lastIndexOf('}');
-            if (start !== -1 && end > start) {
-              try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch (e2) {}
-            }
-          }
-          var friendly = parsed ? pickErrorMessage(parsed, 0) : '';
-          var snippet = raw.replace(/\s+/g, ' ');
-          if (snippet.length > 500) snippet = snippet.slice(0, 500);
-          if (friendly && snippet && snippet !== friendly) return friendly + '（原文：' + snippet + '）';
-          return friendly || snippet;
-        }
-        function describeSearchError(err) {
-          var status = err && err.httpStatus;
-          var body = err && err.body;
-          var msg = String((err && err.message) || err || '');
-          if (!body) {
-            var matched = msg.match(/^搜索API HTTP (\d+)：([\s\S]*)$/);
-            if (matched) {
-              status = status || matched[1];
-              body = matched[2];
-            } else {
-              body = msg;
-            }
-          }
-          var detail = readableSearchBody(body);
-          if (status) return 'HTTP ' + status + '：' + (detail || '无响应正文');
-          return detail || '未知错误';
-        }
-        function searchFailurePrompt(detail) {
-          return '【联网搜索失败】\n'
-            + '原因：' + detail + '\n'
-            + '请用中文把上述原因告诉用户，不要只说「调用失败」或「无法核实」。'
-            + '不要编造网址或搜索结果。如果原因和密钥、余额或额度有关，请提醒用户打开 AI 配置窗口，检查当前搜索提供商的密钥和余额。';
-        }
-        function escapeSearchHtml(s) {
-          return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        }
-
-        // 博查搜索：返回 { searchContext, resultCount, failed, error }
-        function fetchBocha(query) {
-          return fetch('https://api.bochaai.com/v1/web-search', {
-            method: 'POST',
-            headers: {
-              'Authorization': 'Bearer ' + currentSearchKey(),
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              query: query,
-              freshness: (function () {
-                var f = searchFreshness();
-                if (f === 'day') return 'oneDay';
-                if (f === 'week') return 'oneWeek';
-                if (f === 'month') return 'oneMonth';
-                return 'noLimit';
-              })(),
-              summary: !(document.getElementById('aiSearchSummary') && document.getElementById('aiSearchSummary').checked === false),
-              count: searchCount()
-            }),
-            signal: AbortSignal.timeout(30000)
-          }).then(function (sRes) {
-            if (!sRes.ok) {
-              return sRes.text().then(function (t) {
-                var err = new Error('搜索API HTTP ' + sRes.status);
-                err.httpStatus = sRes.status;
-                err.body = String(t || '').slice(0, 500);
-                throw err;
-              });
-            }
-            return sRes.json();
-          }).then(function (sData) {
-            var searchContext = '', resultCount = 0;
-            try {
-              var webPages = sData.data && sData.data.webPages;
-              if (webPages && webPages.value && webPages.value.length > 0) {
-                var items = webPages.value.slice(0, searchCount());
-                resultCount = items.length;
-                for (var i = 0; i < items.length; i++) {
-                  var p = items[i];
-                  searchContext += '【' + (i + 1) + '】' + (p.name || '') + '\n';
-                  searchContext += '链接：' + (p.url || '') + '\n';
-                  searchContext += (p.snippet || p.summary || '') + '\n\n';
-                }
-              }
-            } catch (e) {}
-            return { searchContext: searchContext, resultCount: resultCount, failed: false };
-          }).catch(function (sErr) {
-            // 搜索失败（网络 / CORS / 超时 / 配额）：不中断对话，降级为"无结果"
-            return { searchContext: '', resultCount: 0, failed: true, error: sErr };
-          });
-        }
-
-        function normalizeSearchItem(p) {
-          p = p || {};
-          var snippet = p.summary || p.snippet || p.content || p.text || p.description || p.passage || p.Text || '';
-          if (!snippet && Array.isArray(p.snippets)) snippet = p.snippets.join('\n');
-          if (!snippet && Array.isArray(p.chunks)) {
-            snippet = p.chunks.map(function (c) { return (c && (c.text || c.Text || c.content)) || ''; }).filter(Boolean).join('\n');
-          }
-          if (!snippet && Array.isArray(p.Snippet)) {
-            snippet = p.Snippet.map(function (c) { return (c && (c.Text || c.text)) || ''; }).filter(Boolean).join('\n');
-          }
-          snippet = String(snippet);
-          if (snippet.length > 700) snippet = snippet.slice(0, 700);
-          return {
-            title: p.title || p.name || p.Title || '',
-            url: p.url || p.link || p.Url || '',
-            snippet: snippet
-          };
-        }
-        function searchItemsToContext(items) {
-          var searchContext = '';
-          var list = (items || []).slice(0, searchCount()).map(normalizeSearchItem);
-          for (var i = 0; i < list.length; i++) {
-            var p = list[i];
-            searchContext += '【' + (i + 1) + '】' + p.title + '\n';
-            searchContext += '链接：' + p.url + '\n';
-            searchContext += p.snippet + '\n\n';
-          }
-          return { searchContext: searchContext, resultCount: list.length, failed: false };
-        }
-        function fetchSearchPost(url, headers, body, pickItems) {
-          return fetch(url, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(30000)
-          }).then(function (sRes) {
-            if (!sRes.ok) {
-              return sRes.text().then(function (t) {
-                var err = new Error('搜索API HTTP ' + sRes.status);
-                err.httpStatus = sRes.status;
-                err.body = String(t || '').slice(0, 500);
-                throw err;
-              });
-            }
-            return sRes.json();
-          }).then(function (data) {
-            return searchItemsToContext(pickItems(data));
-          }).catch(function (sErr) {
-            return { searchContext: '', resultCount: 0, failed: true, error: sErr };
-          });
-        }
-        function fetchTavily(query) {
-          var fresh = searchFreshness();
-          var body = {
-            api_key: currentSearchKey(),
-            query: query,
-            max_results: searchCount(),
-            include_answer: false,
-            search_depth: 'basic'
-          };
-          if (fresh === 'day' || fresh === 'week' || fresh === 'month') body.time_range = fresh;
-          return fetchSearchPost('https://api.tavily.com/search', { 'Content-Type': 'application/json' }, body, function (data) {
-            return (data && data.results) || [];
-          });
-        }
-        function fetchCustomSearch(query) {
-          var headers = { 'Content-Type': 'application/json' };
-          var customKey = currentSearchKey();
-          if (customKey) headers.Authorization = 'Bearer ' + customKey;
-          return fetchSearchPost(fieldValue('aiCustomUrl'), headers, {
-            query: query,
-            count: searchCount(),
-            freshness: searchFreshness()
-          }, function (data) {
-            if (!data) return [];
-            if (data.data && data.data.webPages && data.data.webPages.value) return data.data.webPages.value;
-            if (Array.isArray(data.results)) return data.results;
-            if (Array.isArray(data.data)) return data.data;
-            if (Array.isArray(data)) return data;
-            return [];
-          });
-        }
-        function fetchDeepSeekSearch(query) {
-          var fresh = searchFreshness();
-          var q = clipText(query, fresh === 'noLimit' ? 128 : 110);
-          if (fresh === 'day') q += ' after:' + isoDaysAgo(1);
-          else if (fresh === 'week') q += ' after:' + isoDaysAgo(7);
-          else if (fresh === 'month') q += ' after:' + isoDaysAgo(30);
-          return fetchSearchPost('https://api.deepseek.com/v1/tools/search', {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + currentSearchKey()
-          }, { query: q, count: searchCount(), need_content: false }, function (data) {
-            return (data && data.results) || [];
-          });
-        }
-        function fetchZhipu(query) {
-          var engine = fieldValue('aiZhipuEngine') || 'search_pro';
-          var fresh = searchFreshness();
-          var body = {
-            search_query: clipText(query, 70),
-            search_engine: engine,
-            search_intent: false,
-            search_recency_filter: fresh === 'day' ? 'oneDay' : fresh === 'week' ? 'oneWeek' : fresh === 'month' ? 'oneMonth' : 'noLimit'
-          };
-          if (engine !== 'search_pro_quark') body.count = searchCount();
-          return fetchSearchPost('https://open.bigmodel.cn/api/paas/v4/web_search', {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + currentSearchKey()
-          }, body, function (data) {
-            return (data && (data.search_result || data.search_results)) || [];
-          });
-        }
-        function fetchKimi(query) {
-          var tier = fieldValue('aiKimiTier') || 'pro';
-          var fresh = searchFreshness();
-          var path = tier === 'basic' ? '/v1/tools/search' : '/v1/tools/search_pro';
-          var body = { text_query: query, limit: searchCount() };
-          if (tier === 'basic') {
-            var sum = document.getElementById('aiSearchSummary');
-            body.include_content = !(sum && sum.checked === false);
-          } else if (fresh === 'day' || fresh === 'week' || fresh === 'month') {
-            var days = fresh === 'day' ? 1 : fresh === 'week' ? 7 : 30;
-            body.time_window = { start: isoDaysAgo(days), end: isoDaysAgo(0) };
-          }
-          return fetchSearchPost('https://api.moonshot.ai' + path, {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + currentSearchKey()
-          }, body, function (data) {
-            return (data && data.search_results) || [];
-          });
-        }
-        function qianfanQuery(query) {
-          var s = String(query || '');
-          var n = 0;
-          var out = '';
-          for (var i = 0; i < s.length; i++) {
-            var add = s.charCodeAt(i) > 255 ? 2 : 1;
-            if (n + add > 72) break;
-            n += add;
-            out += s.charAt(i);
-          }
-          return out || clipText(s, 36);
-        }
-        function fetchQianfan(query) {
-          var fresh = searchFreshness();
-          var body = {
-            messages: [{ role: 'user', content: qianfanQuery(query) }],
-            search_source: 'baidu_search_v2',
-            edition: 'standard',
-            resource_type_filter: [{ type: 'web', top_k: searchCount() }]
-          };
-          if (fresh === 'day' || fresh === 'week') body.search_recency_filter = 'week';
-          else if (fresh === 'month') body.search_recency_filter = 'month';
-          return fetchSearchPost('https://qianfan.baidubce.com/v2/ai_search/web_search', {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + currentSearchKey()
-          }, body, function (data) {
-            return (data && data.references) || [];
-          });
-        }
-        function fetchDoubao(query) {
-          return fetchSearchPost('https://open.feedcoopapi.com/search_api/global_search', {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + currentSearchKey()
-          }, {
-            SearchType: 'web',
-            Query: clipText(query, 100),
-            DocCount: searchCount(),
-            MaxSnippetLength: 500
-          }, function (data) {
-            if (data && data.ResponseMetadata && data.ResponseMetadata.Error) {
-              var metaErr = new Error('搜索API ' + (data.ResponseMetadata.Error.Message || data.ResponseMetadata.Error.Code || '调用失败'));
-              metaErr.body = JSON.stringify(data.ResponseMetadata.Error).slice(0, 500);
-              throw metaErr;
-            }
-            if (data && data.Result && data.Result.ErrorCode) {
-              var err = new Error('搜索API ' + data.Result.ErrorCode + ' ' + (data.Result.ErrorMsg || ''));
-              err.body = data.Result.ErrorMsg || '';
-              throw err;
-            }
-            return (data && data.Result && data.Result.Documents) || [];
-          });
-        }
-        function fetchYou(query) {
-          var body = { query: query, count: searchCount() };
-          var fresh = searchFreshness();
-          if (fresh === 'day' || fresh === 'week' || fresh === 'month') body.freshness = fresh;
-          return fetchSearchPost('https://ydc-index.io/v1/search', {
-            'Content-Type': 'application/json',
-            'X-API-Key': currentSearchKey()
-          }, body, function (data) {
-            if (data && data.results && Array.isArray(data.results.web)) return data.results.web;
-            if (data && Array.isArray(data.results)) return data.results;
-            return [];
-          });
-        }
-        function parseMcpPayload(text) {
-          var raw = String(text || '').trim();
-          if (!raw) return null;
-          if (raw.charAt(0) === '{' || raw.charAt(0) === '[') {
-            try { return JSON.parse(raw); } catch (e) {}
-          }
-          var last = null;
-          var lines = raw.split('\n');
-          for (var i = 0; i < lines.length; i++) {
-            var line = lines[i].trim();
-            if (line.indexOf('data:') !== 0) continue;
-            var payload = line.slice(5).trim();
-            if (!payload || payload === '[DONE]') continue;
-            try { last = JSON.parse(payload); } catch (e2) {}
-          }
-          return last;
-        }
-        function mcpRequest(url, session, body) {
-          var headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream',
-            'Authorization': 'Bearer ' + currentSearchKey()
-          };
-          if (session) headers['Mcp-Session-Id'] = session;
-          return fetch(url, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(30000)
-          }).then(function (res) {
-            var next = session || '';
-            try {
-              if (res.headers && res.headers.get) next = res.headers.get('mcp-session-id') || res.headers.get('Mcp-Session-Id') || next;
-            } catch (e) {}
-            return res.text().then(function (t) {
-              if (!res.ok) {
-                var err = new Error('搜索API HTTP ' + res.status);
-                err.httpStatus = res.status;
-                err.body = String(t || '').slice(0, 500);
-                throw err;
-              }
-              return { session: next, json: parseMcpPayload(t), raw: String(t || '') };
-            });
-          });
-        }
-        function pickMcpTool(tools, preferred) {
-          var list = tools || [];
-          var i;
-          if (preferred) {
-            for (i = 0; i < list.length; i++) if (list[i] && list[i].name === preferred) return list[i];
-          }
-          var order = ['search_pro', 'SearchPro', 'web_search', 'search'];
-          for (var n = 0; n < order.length; n++) {
-            for (i = 0; i < list.length; i++) if (list[i] && list[i].name === order[n]) return list[i];
-          }
-          for (i = 0; i < list.length; i++) {
-            if (list[i] && /search/i.test(list[i].name || '')) return list[i];
-          }
-          return list[0] || null;
-        }
-        function mcpProp(props, names) {
-          for (var i = 0; i < names.length; i++) if (props[names[i]]) return names[i];
-          return '';
-        }
-        function fillMcpArgs(tool, query, fallbackArgs) {
-          var schema = (tool && (tool.inputSchema || tool.input_schema)) || {};
-          var props = schema.properties || {};
-          var names = Object.keys(props);
-          if (!names.length) return fallbackArgs ? fallbackArgs() : { query: query };
-          var args = {};
-          var qKey = mcpProp(props, ['query', 'Query', 'text_query', 'search_query', 'q']);
-          args[qKey || names[0]] = qKey === 'Query' ? clipText(query, 500) : query;
-          var countKey = mcpProp(props, ['count', 'Count', 'Cnt', 'limit', 'top_k']);
-          if (countKey) args[countKey] = countKey === 'Cnt' ? 10 : searchCount();
-          var timeKey = mcpProp(props, ['Freshness', 'freshness', 'search_recency_filter', 'time_range']);
-          var fresh = searchFreshness();
-          if (timeKey && fresh !== 'noLimit') {
-            if (timeKey === 'Freshness') args[timeKey] = fresh === 'day' ? 'd1' : fresh === 'week' ? 'd7' : 'm1';
-            else if (timeKey === 'search_recency_filter') args[timeKey] = fresh === 'day' ? 'oneDay' : fresh === 'week' ? 'oneWeek' : 'oneMonth';
-            else args[timeKey] = fresh;
-          }
-          return args;
-        }
-        function mcpResultText(result) {
-          if (!result) return '';
-          if (typeof result === 'string') return result;
-          var content = result.content;
-          if (typeof content === 'string') return content;
-          if (Array.isArray(content)) {
-            return content.map(function (c) { return (c && (c.text || c.content)) || ''; }).join('\n');
-          }
-          return JSON.stringify(result);
-        }
-        function itemsFromUnknown(data) {
-          if (!data) return [];
-          if (typeof data === 'string') {
-            var trimmed = data.trim();
-            if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
-              try { return itemsFromUnknown(JSON.parse(trimmed)); } catch (e) { return [{ snippet: trimmed.slice(0, 700) }]; }
-            }
-            return trimmed ? [{ snippet: trimmed.slice(0, 700) }] : [];
-          }
-          if (Array.isArray(data)) {
-            if (data.length && typeof data[0] === 'string') {
-              return data.map(function (s) {
-                try { return JSON.parse(s); } catch (e) { return { snippet: s }; }
-              });
-            }
-            return data;
-          }
-          if (Array.isArray(data.Pages)) return itemsFromUnknown(data.Pages);
-          if (data.Response && Array.isArray(data.Response.Pages)) return itemsFromUnknown(data.Response.Pages);
-          if (Array.isArray(data.search_result)) return data.search_result;
-          if (Array.isArray(data.search_results)) return data.search_results;
-          if (Array.isArray(data.references)) return data.references;
-          if (Array.isArray(data.results)) return data.results;
-          if (data.results && Array.isArray(data.results.web)) return data.results.web;
-          if (data.Result && Array.isArray(data.Result.Documents)) return data.Result.Documents;
-          if (data.data && data.data.webPages && Array.isArray(data.data.webPages.value)) return data.data.webPages.value;
-          return [];
-        }
-        function fetchMcpSearch(url, preferred, query, fallbackArgs) {
-          return mcpRequest(url, '', {
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'initialize',
-            params: {
-              protocolVersion: '2025-06-18',
-              capabilities: {},
-              clientInfo: { name: 'motuo-tab', version: '0.8.9' }
-            }
-          }).then(function (init) {
-            if (init.json && init.json.error) {
-              var err = new Error('搜索API ' + (init.json.error.message || 'initialize 失败'));
-              err.body = JSON.stringify(init.json.error).slice(0, 500);
-              throw err;
-            }
-            return mcpRequest(url, init.session, { jsonrpc: '2.0', method: 'notifications/initialized' }).then(function () {
-              return init.session;
-            }, function () { return init.session; });
-          }).then(function (session) {
-            return mcpRequest(url, session, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }).then(function (listed) {
-              return { session: listed.session || session, listed: listed };
-            }, function () {
-              return { session: session, listed: null };
-            });
-          }).then(function (state) {
-            var tools = state.listed && state.listed.json && state.listed.json.result && state.listed.json.result.tools;
-            var tool = pickMcpTool(tools, preferred);
-            var args = fillMcpArgs(tool, query, fallbackArgs);
-            return mcpRequest(url, state.session, {
-              jsonrpc: '2.0',
-              id: 3,
-              method: 'tools/call',
-              params: { name: (tool && tool.name) || preferred, arguments: args }
-            });
-          }).then(function (called) {
-            if (called.json && called.json.error) {
-              var err = new Error('搜索API ' + (called.json.error.message || 'tools/call 失败'));
-              err.body = JSON.stringify(called.json.error).slice(0, 500);
-              throw err;
-            }
-            var result = called.json && called.json.result;
-            if (result && result.isError) {
-              var err2 = new Error('搜索API 工具返回错误');
-              err2.body = mcpResultText(result).slice(0, 500);
-              throw err2;
-            }
-            var text = mcpResultText(result);
-            var items = itemsFromUnknown(text);
-            if (!items.length) items = itemsFromUnknown(result);
-            return searchItemsToContext(items);
-          }).catch(function (sErr) {
-            return { searchContext: '', resultCount: 0, failed: true, error: sErr };
-          });
-        }
-        function fetchBailian(query) {
-          return fetchMcpSearch('https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp', 'search_pro', query, function () {
-            return { query: query };
-          });
-        }
-        function fetchTencent(query) {
-          return fetchMcpSearch('https://api.wsa.cloud.tencent.com/Mcp', 'SearchPro', query, function () {
-            var args = { Query: clipText(query, 500), Mode: 0, Cnt: 10 };
-            var fresh = searchFreshness();
-            if (fresh === 'day') args.Freshness = 'd1';
-            else if (fresh === 'week') args.Freshness = 'd7';
-            else if (fresh === 'month') args.Freshness = 'm1';
-            return args;
-          });
-        }
-        function fetchWebSearch(query) {
-          var p = searchProvider();
-          if (p === 'deepseek') return fetchDeepSeekSearch(query);
-          if (p === 'zhipu') return fetchZhipu(query);
-          if (p === 'kimi') return fetchKimi(query);
-          if (p === 'bailian') return fetchBailian(query);
-          if (p === 'doubao') return fetchDoubao(query);
-          if (p === 'qianfan') return fetchQianfan(query);
-          if (p === 'you') return fetchYou(query);
-          if (p === 'tencent') return fetchTencent(query);
-          if (p === 'tavily') return fetchTavily(query);
-          if (p === 'custom') return fetchCustomSearch(query);
-          return fetchBocha(query);
-        }
-
-        // 基于当前 aiHistory 发起后续请求并流式读入 accumulated（含第二轮思考展示）
+        // 基于当前 aiHistory 发起后续请求并读入 accumulated（含第二轮思考展示）
         function streamFollowUp() {
           var body = buildChatBody(model, toApiMessages(aiHistory), endpoint);
           return fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+            headers: buildChatHeaders(key),
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(120000)
+            signal: AbortSignal.timeout(timeoutMs())
           }).then(function (res) {
             if (!res.ok) return res.text().then(function (t) { throw new Error('后续请求 HTTP ' + res.status + '：' + String(t).slice(0, 200)); });
-            return new Promise(function (resolve, reject) {
-              var reader = res.body.getReader();
-              var dec = new TextDecoder();
-              var buf = '';
-              (function read() {
-                reader.read().then(function (r) {
-                  if (r.done) return resolve();
-                  buf += dec.decode(r.value, { stream: true });
-                  var lines = buf.split('\n');
-                  buf = lines.pop() || '';
-                  lines.forEach(function (ln) {
-                    ln = ln.trim();
-                    if (ln.indexOf('data: ') !== 0 || ln === 'data: [DONE]') return;
-                    try {
-                      var ch = JSON.parse(ln.slice(6));
-                      if (ch && ch.error) {
-                        var e2 = new Error('API 流式错误：' + (typeof ch.error === 'string' ? ch.error : JSON.stringify(ch.error)));
-                        e2.apiError = true;
-                        throw e2;
-                      }
-                      var d = ch.choices && ch.choices[0] && ch.choices[0].delta;
-                      if (d && d.content) {
-                        accumulated += d.content;
-                        renderStreamBubble(bubble, accumulated, true);
-                        aiMessages.scrollTop = aiMessages.scrollHeight;
-                      }
-                      if (d && d.reasoning_content) {
-                        followReasoningAccum += d.reasoning_content;
-                        if (deepThinkingOn) {
-                          var th = bubble.querySelector('.ai-thinking');
-                          if (th) {
-                            if (!followReasoningTextEl) {
-                              var st = addThinkingStep(th, 'reasoning', '<span class="ai-spinner"></span> <span class="ai-reasoning-text"></span>');
-                              if (st) followReasoningTextEl = st.querySelector('.ai-reasoning-text');
-                            }
-                            if (followReasoningTextEl) followReasoningTextEl.textContent = followReasoningAccum;
-                            aiMessages.scrollTop = aiMessages.scrollHeight;
-                          }
-                        }
-                      }
-                    } catch (e) { if (e && e.apiError) throw e; }
-                  });
-                  read();
-                }, reject);
-              })();
+            return consumeChatResponse(res, {
+              onContent: function (c) {
+                accumulated += c;
+                renderStreamBubble(bubble, accumulated, true);
+                aiMessages.scrollTop = aiMessages.scrollHeight;
+              },
+              onReasoning: function (rc) {
+                followReasoningAccum += rc;
+                if (deepThinkingOn) {
+                  var th = bubble.querySelector('.ai-thinking');
+                  if (th) {
+                    if (!followReasoningTextEl) {
+                      var st = addThinkingStep(th, 'reasoning', '<span class="ai-spinner"></span> <span class="ai-reasoning-text"></span>');
+                      if (st) followReasoningTextEl = st.querySelector('.ai-reasoning-text');
+                    }
+                    if (followReasoningTextEl) followReasoningTextEl.textContent = followReasoningAccum;
+                    aiMessages.scrollTop = aiMessages.scrollHeight;
+                  }
+                }
+              }
             });
           });
         }
@@ -2793,7 +3600,7 @@
               content: r.failed
                 ? searchFailurePrompt(describeSearchError(r.error))
                 : '【联网搜索结果】\n搜索词：' + query + '\n' + (r.searchContext || '未找到相关搜索结果。') +
-                  '\n请基于以上搜索结果回答。若用户还要求添加或修改快捷方式，在回答末尾给出 <ops>。引用处标注来源编号（如 [1]）；不要编造。'
+                  '\n请基于以上搜索结果回答。若用户还要求添加或修改快捷方式，在回答末尾给出 <ops>。' + (shouldCiteSources() ? '引用处标注来源编号（如 [1]）；' : '') + '不要编造。'
             });
             saveAIHistory();
 
@@ -2855,102 +3662,53 @@
 
         fetch(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + key
-          },
+          headers: buildChatHeaders(key),
           body: JSON.stringify(reqBody),
-          signal: AbortSignal.timeout(120000)
+          signal: AbortSignal.timeout(timeoutMs())
         }).then(function (res) {
           if (!res.ok) {
             return res.text().then(function (t) { throw new Error('HTTP ' + res.status + ': ' + t); });
           }
-          var reader = res.body.getReader();
-          var decoder = new TextDecoder();
-          var buffer = '';
-
-          function readChunk() {
-            return reader.read().then(function (result) {
-              if (result.done) {
-                // 流结束，不做处理
-                return;
+          return consumeChatResponse(res, {
+            onFirstDelta: function (delta) {
+              if (window.console && console.log && !window.__aiLoggedFirst) {
+                window.__aiLoggedFirst = true;
+                console.log('[AI] ← first delta:', JSON.stringify(delta, null, 2));
               }
-
-              // ====== 处理每个数据块 ======
-              buffer += decoder.decode(result.value, { stream: true });
-              var lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-              for (var i = 0; i < lines.length; i++) {
-                var line = lines[i].trim();
-                if (line === '' || line.startsWith(':')) continue;
-                if (line === 'data: [DONE]') continue;
-                if (line.startsWith('data: ')) {
-                  try {
-                    var chunk = JSON.parse(line.slice(6));
-                    // 流式错误帧必须往上抛，否则会被下面的 catch 静默吞掉，
-                    // 界面表现就是"思考了一下然后没反应"
-                    if (chunk && chunk.error) {
-                      var _apiErr = new Error('API 流式错误：' + (typeof chunk.error === 'string' ? chunk.error : JSON.stringify(chunk.error)));
-                      _apiErr.apiError = true;
-                      throw _apiErr;
-                    }
-                    var delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
-                    if (!delta) continue;
-
-                    // Debug：第一次拿到 delta 时打一下完整结构
-                    if (window.console && console.log && !window.__aiLoggedFirst) {
-                      window.__aiLoggedFirst = true;
-                      console.log('[AI] ← first delta:', JSON.stringify(delta, null, 2));
-                    }
-
-                    // 处理文本内容
-                    if (delta.content && bubble) {
-                      accumulated += delta.content;
-                      renderStreamBubble(bubble, accumulated, true);
-                      aiMessages.scrollTop = aiMessages.scrollHeight;
-                    }
-
-                    // 处理推理内容（reasoning_content）：无论是否勾选"深度思考"都要累积，
-                    // 因为 DeepSeek 思考模式 + tools 要求把 reasoning_content 回传给 API；
-                    // 但仅在开启"深度思考"时才渲染到思考容器（避免默认信息密度过高）
-                    if (delta.reasoning_content) {
-                      reasoningAccum += delta.reasoning_content;
-                      if (deepThinkingOn) {
-                        // 在思考容器中实时展示：更新已有步骤 or 新建
-                        var _rcEl = bubble.querySelector('.ai-thinking-body');
-                        if (_rcEl) {
-                          if (reasoningTextEl) {
-                            // 已有推理文本元素，直接更新 textContent（高性能）
-                            reasoningTextEl.textContent = reasoningAccum;
-                          } else {
-                            // 首次收到 reasoning_content，创建推理步骤并缓存引用
-                            var _newStep = addThinkingStep(bubble.querySelector('.ai-thinking'), 'reasoning',
-                              '<span class="ai-spinner"></span> <span class="ai-reasoning-text">' + reasoningAccum.replace(/</g, '&lt;') + '</span>');
-                            if (_newStep) reasoningTextEl = _newStep.querySelector('.ai-reasoning-text');
-                          }
-                          aiMessages.scrollTop = aiMessages.scrollHeight;
-                        }
-                      }
-                    }
-
-                    // 处理工具调用（联网搜索）
-                    if (delta.tool_calls) {
-                      for (var tci = 0; tci < delta.tool_calls.length; tci++) {
-                        var tc = delta.tool_calls[tci];
-                        if (tc.id) pendingToolCallId = tc.id;
-                        if (tc.function) {
-                          if (tc.function.name) pendingToolCallName = tc.function.name;
-                          if (tc.function.arguments) pendingToolCallArgs += tc.function.arguments;
-                        }
-                      }
-                    }
-                  } catch (e) { if (e && e.apiError) throw e; }
+            },
+            onContent: function (c) {
+              if (!bubble) return;
+              accumulated += c;
+              renderStreamBubble(bubble, accumulated, true);
+              aiMessages.scrollTop = aiMessages.scrollHeight;
+            },
+            onReasoning: function (rc) {
+              reasoningAccum += rc;
+              if (deepThinkingOn && bubble) {
+                var _rcEl = bubble.querySelector('.ai-thinking-body');
+                if (_rcEl) {
+                  if (reasoningTextEl) {
+                    reasoningTextEl.textContent = reasoningAccum;
+                  } else {
+                    var _newStep = addThinkingStep(bubble.querySelector('.ai-thinking'), 'reasoning',
+                      '<span class="ai-spinner"></span> <span class="ai-reasoning-text">' + reasoningAccum.replace(/</g, '&lt;') + '</span>');
+                    if (_newStep) reasoningTextEl = _newStep.querySelector('.ai-reasoning-text');
+                  }
+                  aiMessages.scrollTop = aiMessages.scrollHeight;
                 }
               }
-              return readChunk();
-            });
-          }
-          return readChunk();
+            },
+            onToolCalls: function (tcs) {
+              for (var tci = 0; tci < tcs.length; tci++) {
+                var tc = tcs[tci];
+                if (tc.id) pendingToolCallId = tc.id;
+                if (tc.function) {
+                  if (tc.function.name) pendingToolCallName = tc.function.name;
+                  if (tc.function.arguments) pendingToolCallArgs += tc.function.arguments;
+                }
+              }
+            }
+          });
         }).catch(function (err) {
           streamFailed = true;
           var errMsg = '对话请求失败：' + (err && err.message ? err.message : err);

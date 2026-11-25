@@ -24,6 +24,8 @@
       var SCRATCHPAD_KEY     = 'newtab.scratchpad.v1';     // 速记本内容
       var THEME_KEY          = 'newtab.theme.v1';          // 主题模式：light / dark / auto
       var GREETING_KEY       = 'newtab.greeting.v1';       // T1 时段问候语开关（默认开）
+      var HERO_LOGO_KEY      = 'newtab.heroLogo.v1';       // T1 起始页 Hero Logo 开关（默认开）
+      var LOGO_STYLE_KEY     = 'newtab.logoStyle.v1';      // T1 Logo 样式：a（流光 M）/ b（叠页星芒）
       var WEBDAV_KEY         = 'newtab.webdav.v1';         // T7b WebDAV 云同步配置
       var BACKUP_META_KEY    = 'newtab.backupMeta.v1';     // 备份提醒状态
       var BACKUP_REMIND_MS   = 30 * 86400000;
@@ -1671,6 +1673,8 @@
                 siteDirectList: readLS('newtab.sitedirect.list.v1'),
                 suggestOnline: readLS('newtab.suggestOnline.v1'),
                 greeting: readLS(GREETING_KEY),
+                heroLogo: readLS(HERO_LOGO_KEY),
+                logoStyle: readLS(LOGO_STYLE_KEY),
                 solidColor: readLS('newtab.solidColor.v1'),
                 blur: readLS('newtab.blur.v1'),
                 alpha: readLS('newtab.alpha.v1'),
@@ -1721,6 +1725,8 @@
           if (st.siteDirectList !== undefined) writeLS('newtab.sitedirect.list.v1', st.siteDirectList);
           writeLS('newtab.suggestOnline.v1', st.suggestOnline);
           if (st.greeting !== undefined) writeLS(GREETING_KEY, st.greeting);
+          if (st.heroLogo !== undefined) writeLS(HERO_LOGO_KEY, st.heroLogo);
+          if (st.logoStyle !== undefined) writeLS(LOGO_STYLE_KEY, st.logoStyle);
           writeLS('newtab.solidColor.v1', st.solidColor);
           writeLS('newtab.blur.v1', st.blur);
           writeLS('newtab.alpha.v1', st.alpha);
@@ -1731,6 +1737,7 @@
             writeLS(THEME_KEY, st.theme);
             applyTheme(st.theme);
           }
+          renderBrandHero();
         }
 
         if (isFull && d.ai) {
@@ -2350,7 +2357,7 @@
       if (shortcutBtn) {
         shortcutBtn.addEventListener('click', function () {
           toggleMenu(false);
-          openSettingsModal('about');
+          openSettingsModal('keys');
         });
       }
       var cfgOpenEngineBtn = document.getElementById('cfgOpenEngineBtn');
@@ -2405,9 +2412,19 @@
         openSettingsModal('general');
       });
 
-      // ========== T1 时段问候语（不显示时钟与日期） ==========
-      var pageTitleEl = document.getElementById('pageTitle') || document.querySelector('.page-title');
+      // ========== T1 起始页 Hero Logo 与时段问候语 ==========
+      var MOTUO_LOGOS = {
+        a: '<svg class="motuo-logo-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 46C12 46 14 21 21 16C26 12.5 30 24 32 29C34 24 38 12.5 43 16C50 21 52 46 52 46C52 48.5 48.5 50 45.5 48C42.5 46 41 32 39 27C37 33 34.5 38.5 32 38.5C29.5 38.5 27 33 25 27C23 32 21.5 46 18.5 48C15.5 50 12 48.5 12 46Z" fill="url(#mtLogoGradV)" stroke="var(--logo-rim)" stroke-width="1"/></svg>',
+        b: '<svg class="motuo-logo-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="13" y="15" width="32" height="32" rx="10" fill="url(#mtLogoGradAlt)" stroke="var(--logo-rim)" stroke-width="1"/><rect x="21" y="21" width="31" height="31" rx="10" fill="url(#mtLogoGradV)" stroke="var(--logo-rim)" stroke-width="1"/><path d="M36.5 29.5C37.2 33.4 38.6 34.8 42.5 35.5C38.6 36.2 37.2 37.6 36.5 41.5C35.8 37.6 34.4 36.2 30.5 35.5C34.4 34.8 35.8 33.4 36.5 29.5Z" fill="var(--logo-accent)"/></svg>'
+      };
+      var heroBrandEl = document.getElementById('heroBrand');
+      var heroLogoWrapEl = document.getElementById('heroLogoWrap');
+      var aboutLogoSlotEl = document.getElementById('aboutLogoSlot');
+      var pageTitleEl = document.getElementById('pageTitle') || document.querySelector('.hero-greeting') || document.querySelector('.page-title');
       var toggleGreetingEl = document.getElementById('toggleGreeting');
+      var toggleHeroLogoEl = document.getElementById('toggleHeroLogo');
+      var logoStyleSwitchEl = document.getElementById('logoStyleSwitch');
+
       function greetingForHour(h) {
         if (h < 5) return '夜深了，早点休息';
         if (h < 9) return '早上好，想干什么';
@@ -2420,21 +2437,93 @@
       function isGreetingEnabled() {
         try { return localStorage.getItem(GREETING_KEY) !== '0'; } catch (e) { return true; }
       }
-      function renderGreeting(hourOverride) {
-        var on = isGreetingEnabled();
-        if (toggleGreetingEl) toggleGreetingEl.checked = on;
-        if (!pageTitleEl) return;
-        var h = typeof hourOverride === 'number' ? hourOverride : new Date().getHours();
-        pageTitleEl.textContent = on ? greetingForHour(h) : 'Motuo Tab';
+      function isHeroLogoEnabled() {
+        try { return localStorage.getItem(HERO_LOGO_KEY) !== '0'; } catch (e) { return true; }
       }
+      function getLogoStyle() {
+        try {
+          var v = localStorage.getItem(LOGO_STYLE_KEY);
+          return v === 'b' ? 'b' : 'a';
+        } catch (e) { return 'a'; }
+      }
+      function setLogoStyle(style) {
+        var next = style === 'b' ? 'b' : 'a';
+        try { localStorage.setItem(LOGO_STYLE_KEY, next); } catch (e) {}
+        renderBrandHero();
+        return next;
+      }
+      function renderLogoThumbPreviews() {
+        if (!logoStyleSwitchEl) return;
+        logoStyleSwitchEl.querySelectorAll('.sys-logo-thumb[data-thumb]').forEach(function (thumb) {
+          var key = thumb.getAttribute('data-thumb');
+          if (!thumb.firstChild && MOTUO_LOGOS[key]) {
+            thumb.innerHTML = MOTUO_LOGOS[key];
+          }
+        });
+      }
+      function renderBrandHero(hourOverride) {
+        var greetOn = isGreetingEnabled();
+        var logoOn = isHeroLogoEnabled();
+        var style = getLogoStyle();
+        var svgMarkup = MOTUO_LOGOS[style] || MOTUO_LOGOS.a;
+
+        if (toggleGreetingEl) toggleGreetingEl.checked = greetOn;
+        if (toggleHeroLogoEl) toggleHeroLogoEl.checked = logoOn;
+        if (logoStyleSwitchEl) {
+          logoStyleSwitchEl.classList.toggle('is-disabled', !logoOn);
+          logoStyleSwitchEl.querySelectorAll('.sys-logo-option').forEach(function (btn) {
+            var active = btn.getAttribute('data-logo-style') === style;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-checked', active ? 'true' : 'false');
+          });
+        }
+        renderLogoThumbPreviews();
+
+        if (heroLogoWrapEl) {
+          if (heroLogoWrapEl.getAttribute('data-logo-style') !== style) {
+            heroLogoWrapEl.innerHTML = svgMarkup;
+            heroLogoWrapEl.setAttribute('data-logo-style', style);
+          }
+          heroLogoWrapEl.hidden = !logoOn;
+        }
+        if (aboutLogoSlotEl && aboutLogoSlotEl.getAttribute('data-logo-style') !== style) {
+          aboutLogoSlotEl.innerHTML = svgMarkup;
+          aboutLogoSlotEl.setAttribute('data-logo-style', style);
+        }
+        if (pageTitleEl) {
+          var h = typeof hourOverride === 'number' ? hourOverride : new Date().getHours();
+          pageTitleEl.textContent = greetOn ? greetingForHour(h) : '';
+          pageTitleEl.hidden = !greetOn;
+        }
+        if (heroBrandEl) {
+          heroBrandEl.hidden = !logoOn && !greetOn;
+        }
+      }
+      var renderGreeting = renderBrandHero;
+
       if (toggleGreetingEl) {
         toggleGreetingEl.addEventListener('change', function () {
           try { localStorage.setItem(GREETING_KEY, this.checked ? '1' : '0'); } catch (e) {}
-          renderGreeting();
+          renderBrandHero();
           flashSysSaved();
         });
       }
-      renderGreeting();
+      if (toggleHeroLogoEl) {
+        toggleHeroLogoEl.addEventListener('change', function () {
+          try { localStorage.setItem(HERO_LOGO_KEY, this.checked ? '1' : '0'); } catch (e) {}
+          renderBrandHero();
+          flashSysSaved();
+        });
+      }
+      if (logoStyleSwitchEl) {
+        logoStyleSwitchEl.addEventListener('click', function (e) {
+          var btn = e.target.closest('.sys-logo-option[data-logo-style]');
+          if (!btn) return;
+          setLogoStyle(btn.getAttribute('data-logo-style'));
+          flashSysSaved();
+        });
+      }
+      renderBrandHero();
 
       // 手动刷新图标缓存（强制全量重抓，失败保留旧缓存）
       var refreshIconsBtn = document.getElementById('refreshIconsBtn');
@@ -3334,9 +3423,13 @@
         apply: applyParsedBookmarks
       };
       window.__motuo.greeting = {
-        render: renderGreeting,
+        render: renderBrandHero,
+        renderHero: renderBrandHero,
         textForHour: greetingForHour,
-        isEnabled: isGreetingEnabled
+        isEnabled: isGreetingEnabled,
+        isLogoEnabled: isHeroLogoEnabled,
+        getLogoStyle: getLogoStyle,
+        setLogoStyle: setLogoStyle
       };
       window.__motuo.iconCache = {
         getSync: getCachedIconSync,

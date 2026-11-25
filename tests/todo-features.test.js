@@ -1,4 +1,4 @@
-// v0.9.0 全量新特性与重构验证：T1 问候语 / T3 自定义站内直达 / T5 分组 / T6 书签导入 / T7b WebDAV / 统一系统设置弹窗
+// v0.9.1 全量新特性与重构验证：T1 Hero Logo+问候语 / T3 自定义站内直达 / T5 分组 / T6 书签导入 / T7b WebDAV / 6栏系统设置弹窗
 'use strict';
 
 const { test, afterEach } = require('node:test');
@@ -65,9 +65,18 @@ function installFullIndexedDB(window) {
   return stores;
 }
 
-test('T1：时段问候语按时段展示且不含时钟日期，关闭后恢复 Motuo Tab', () => {
+test('T1：Hero Logo 与时段问候语居于搜索框上方，可独立开关并切换 A/B 样式', () => {
   const { window, document } = boot();
+  const heroBrand = document.getElementById('heroBrand');
+  const heroLogoWrap = document.getElementById('heroLogoWrap');
+  const aboutLogoSlot = document.getElementById('aboutLogoSlot');
   const title = document.getElementById('pageTitle');
+  const searchWrap = document.querySelector('.search-wrap');
+
+  assert.ok(searchWrap.contains(heroBrand), 'Hero 品牌区应位于 .search-wrap 内');
+  assert.strictEqual(heroLogoWrap.hidden, false, '默认显示起始页 Logo');
+  assert.strictEqual(heroLogoWrap.getAttribute('data-logo-style'), 'a', '默认 Logo 样式为 A');
+  assert.ok(heroLogoWrap.querySelector('.motuo-logo-svg'), 'Hero 区应渲染 SVG Logo');
   assert.ok(title.textContent && title.textContent !== 'Motuo Tab', '默认应展示时段问候语');
   assert.ok(!/\d{1,2}:\d{2}/.test(title.textContent), '不应包含时钟数字');
 
@@ -78,19 +87,53 @@ test('T1：时段问候语按时段展示且不含时钟日期，关闭后恢复
   window.__motuo.greeting.render(22);
   assert.strictEqual(title.textContent, '晚上好，慢慢来');
 
-  // 在系统设置里关闭开关
-  const toggle = document.getElementById('toggleGreeting');
-  toggle.checked = false;
-  toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+  // 关闭问候语：仅隐藏文字、不回退旧 Motuo Tab、Logo 仍保留
+  const toggleGreet = document.getElementById('toggleGreeting');
+  toggleGreet.checked = false;
+  toggleGreet.dispatchEvent(new window.Event('change', { bubbles: true }));
   assert.strictEqual(window.localStorage.getItem('newtab.greeting.v1'), '0');
-  assert.strictEqual(title.textContent, 'Motuo Tab');
+  assert.strictEqual(title.hidden, true);
+  assert.strictEqual(title.textContent, '');
+  assert.strictEqual(heroLogoWrap.hidden, false);
+  assert.strictEqual(heroBrand.hidden, false);
+
+  // 独立关闭 Logo：Logo 与 greeting 都关闭时整个 Hero 折叠
+  const toggleLogo = document.getElementById('toggleHeroLogo');
+  toggleLogo.checked = false;
+  toggleLogo.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.strictEqual(window.localStorage.getItem('newtab.heroLogo.v1'), '0');
+  assert.strictEqual(heroLogoWrap.hidden, true);
+  assert.strictEqual(heroBrand.hidden, true);
+
+  // 重新打开 Logo 并切换为样式 B（叠页星芒），Hero 与关于页同步更新
+  toggleLogo.checked = true;
+  toggleLogo.dispatchEvent(new window.Event('change', { bubbles: true }));
+  document.querySelector('#logoStyleSwitch .sys-logo-option[data-logo-style="b"]').click();
+  assert.strictEqual(window.localStorage.getItem('newtab.logoStyle.v1'), 'b');
+  assert.strictEqual(heroLogoWrap.getAttribute('data-logo-style'), 'b');
+  assert.strictEqual(aboutLogoSlot.getAttribute('data-logo-style'), 'b');
+  assert.ok(aboutLogoSlot.querySelector('.motuo-logo-svg'));
 });
 
-test('统一系统设置弹窗：5 栏切换、个性化直达外观页签、3 卡片主题同步', () => {
+test('统一系统设置弹窗：6 栏切换、个性化/快捷键/关于直达独立页签与主题同步', () => {
   const { window, document } = boot();
+  assert.strictEqual(document.querySelectorAll('#sysConfigNav button[data-pane]').length, 6);
+
+  // 点击菜单「快捷键」→ 打开系统设置并定位到独立快捷键页签
+  document.getElementById('shortcutBtn').click();
+  const modal = document.getElementById('generalConfigModal');
+  assert.ok(modal.classList.contains('open'));
+  assert.ok(document.getElementById('cfgPaneKeys').classList.contains('active'));
+  assert.ok(!document.getElementById('cfgPaneAbout').classList.contains('active'));
+
+  // 点击菜单「关于」→ 定位到独立关于页签并渲染 Logo
+  document.getElementById('aboutBtn').click();
+  assert.ok(document.getElementById('cfgPaneAbout').classList.contains('active'));
+  assert.ok(!document.getElementById('cfgPaneKeys').classList.contains('active'));
+  assert.ok(document.querySelector('#aboutLogoSlot .motuo-logo-svg'));
+
   // 点击菜单「个性化」→ 打开系统设置并定位到外观与壁纸
   document.getElementById('personalizeBtn').click();
-  const modal = document.getElementById('generalConfigModal');
   assert.ok(modal.classList.contains('open'));
   assert.ok(document.getElementById('cfgPaneAppearance').classList.contains('active'));
   assert.strictEqual(document.getElementById('personalizeModal'), null, '旧个性化独立弹窗应已合并移除');
@@ -220,7 +263,7 @@ test('T7b：WebDAV 测试连接、上传排除壁纸与凭证、拉取支持合�
       items: [
         { name: '远端新卡', url: 'https://remote.example', iconSrc: 'color', color: 'blue', letter: '远' }
       ],
-      settings: { theme: 'dark', greeting: '0' },
+      settings: { theme: 'dark', greeting: '0', heroLogo: '1', logoStyle: 'b' },
       ai: {},
       wallpaper: null
     }
@@ -273,5 +316,9 @@ test('T7b：WebDAV 测试连接、上传排除壁纸与凭证、拉取支持合�
   const afterOverwrite = readShortcuts(window);
   assert.strictEqual(afterOverwrite.length, 1);
   assert.strictEqual(document.documentElement.getAttribute('data-theme'), 'dark');
-  assert.strictEqual(document.getElementById('pageTitle').textContent, 'Motuo Tab');
+  assert.strictEqual(document.getElementById('pageTitle').hidden, true);
+  assert.strictEqual(document.getElementById('pageTitle').textContent, '');
+  assert.strictEqual(document.getElementById('heroLogoWrap').hidden, false);
+  assert.strictEqual(window.localStorage.getItem('newtab.logoStyle.v1'), 'b');
+  assert.strictEqual(document.getElementById('aboutLogoSlot').getAttribute('data-logo-style'), 'b');
 });

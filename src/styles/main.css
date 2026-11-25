@@ -24,6 +24,12 @@
     --tile-img-bg: rgba(255,255,255, var(--ui-img-alpha));
     --tile-ltr-bg: rgba(255,255,255, var(--ui-ltr-alpha));
     --overlay-bg: linear-gradient(rgba(255,255,255,0.78), rgba(255,255,255,0.78));
+    --logo-stop-1: rgba(118, 126, 140, 0.56);
+    --logo-stop-2: rgba(164, 172, 184, 0.28);
+    --logo-stop-3: rgba(196, 202, 212, 0.10);
+    --logo-rim: rgba(255, 255, 255, 0.72);
+    --logo-accent: rgba(124, 134, 150, 0.48);
+    --logo-halo: radial-gradient(circle, rgba(130, 140, 158, 0.14) 0%, rgba(130, 140, 158, 0) 70%);
   }
   html[data-theme="dark"] {
     color-scheme: dark;
@@ -36,6 +42,12 @@
     --tile-img-bg: rgba(38,43,52, var(--ui-img-alpha));
     --tile-ltr-bg: rgba(38,43,52, var(--ui-ltr-alpha));
     --overlay-bg: linear-gradient(rgba(12,14,18,0.72), rgba(12,14,18,0.72));
+    --logo-stop-1: rgba(226, 230, 238, 0.50);
+    --logo-stop-2: rgba(182, 188, 198, 0.24);
+    --logo-stop-3: rgba(140, 146, 158, 0.07);
+    --logo-rim: rgba(255, 255, 255, 0.26);
+    --logo-accent: rgba(220, 224, 232, 0.42);
+    --logo-halo: radial-gradient(circle, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 70%);
     scrollbar-color: rgba(255, 255, 255, 0.32) transparent;
   }
   html[data-theme="dark"] *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.28); background-clip: padding-box; }
@@ -76,13 +88,66 @@
     transition: background .3s ease;
   }
 
-  /* 顶部搜索区 */
+  /* 顶部搜索区 + Hero Logo & 问候 */
   .search-wrap {
     display: flex;
-    justify-content: center;
-    padding-top: 30vh;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 17vh;
     transition: padding-top 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   }
+  .hero-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    text-align: center;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .hero-brand.is-empty { display: none; }
+  .hero-logo-wrap {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .hero-logo-wrap[hidden] { display: none !important; }
+  .hero-logo-wrap::before {
+    content: '';
+    position: absolute;
+    inset: -14px;
+    background: var(--logo-halo);
+    border-radius: 50%;
+    pointer-events: none;
+    animation: heroHaloBreath 5s ease-in-out infinite;
+  }
+  .motuo-logo-svg {
+    width: 56px;
+    height: 56px;
+    display: block;
+    animation: heroLogoFloat 5s ease-in-out infinite;
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+  }
+  .hero-logo-wrap:hover .motuo-logo-svg { transform: translateY(-2px) scale(1.06); }
+  @keyframes heroLogoFloat {
+    0%, 100% { transform: translateY(0px); opacity: 0.90; }
+    50%      { transform: translateY(-3px); opacity: 1; }
+  }
+  @keyframes heroHaloBreath {
+    0%, 100% { transform: scale(0.95); opacity: 0.65; }
+    50%      { transform: scale(1.08); opacity: 1; }
+  }
+  .hero-greeting {
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--text-1);
+    letter-spacing: 0.01em;
+    line-height: 1.35;
+  }
+  .hero-greeting[hidden] { display: none !important; }
   .search-box {
     display: flex;
     align-items: center;
@@ -99,20 +164,7 @@
       0 18px 40px rgba(31, 35, 41, 0.08),
       0 4px 10px rgba(31, 35, 41, 0.04);
   }
-  /* 页面标题 */
-  .page-title {
-    position: fixed;
-    top: 20px;
-    left: 24px;
-    font-size: 15px;
-    font-weight: 600;
-    color: #1f2329;
-    letter-spacing: 0.5px;
-    pointer-events: none;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-      "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
-    transition: opacity 0.2s ease;
-  }
+  /* 已迁移至搜索框正上方的 .hero-greeting */
 
   /* 蓝色带圆点图标（仿百度风格） */
   .search-box .logo {
@@ -1073,7 +1125,7 @@
   .edit-banner button:hover { background: rgba(255, 255, 255, 0.25); }
 
   /* 专注模式：内容淡出 + 搜索框居中 */
-  body.focus-mode .page-title,
+  body.focus-mode .hero-brand,
   body.focus-mode .fab,
   body.focus-mode .ai-fab,
   body.focus-mode .note-fab,
@@ -1089,7 +1141,7 @@
     pointer-events: none !important;
     transform: translateY(80px) !important;
   }
-  body.focus-mode .search-wrap { padding-top: 34vh; }
+  body.focus-mode .search-wrap { padding-top: 24vh; }
   body.focus-mode .ai-panel.open { display: none; }
   body.focus-mode .site-direct-pill { display: none !important; }
 
@@ -1106,7 +1158,7 @@
   @media (max-width: 460px) {
     .shortcuts { gap: 14px; }
     .shortcut .tile, .slot { width: 60px; height: 60px; }
-    .search-wrap { padding-top: 22vh; }
+    .search-wrap { padding-top: 14vh; }
   }
 
   /* ========== AI 助手 ========== */
@@ -2859,7 +2911,7 @@
       linear-gradient(180deg, #161920 0%, #10131a 100%);
     color: var(--text-1);
   }
-  html[data-theme="dark"] .page-title { color: var(--text-1); }
+  html[data-theme="dark"] .hero-greeting { color: var(--text-1); }
 
   /* 搜索区 */
   html[data-theme="dark"] .search-box {
@@ -3537,7 +3589,200 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* ========== 起始页 Logo 样式选择器与独立关于页 ========== */
+  .hero-brand[hidden] { display: none !important; }
+  .sys-logo-picker {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+    transition: opacity 0.16s ease;
+  }
+  .sys-logo-picker.is-disabled {
+    opacity: 0.48;
+  }
+  .sys-logo-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--ai-card-border);
+    border-radius: var(--ai-radius-choice);
+    background: var(--ai-surf-card);
+    color: var(--ai-ink-1);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+  }
+  .sys-logo-option:hover {
+    background: var(--ai-surf-card-hover);
+  }
+  .sys-logo-option.active {
+    background: var(--ai-surf-card-active);
+    border-color: var(--ai-card-active-border);
+  }
+  .sys-logo-thumb {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-border-subtle);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .sys-logo-thumb svg {
+    width: 26px;
+    height: 26px;
+    display: block;
+    animation: none;
+  }
+  .sys-logo-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .sys-logo-name {
+    font-size: 13.5px;
+    font-weight: 550;
+    color: var(--ai-ink-1);
+  }
+  .sys-logo-sub {
+    font-size: 12px;
+    color: var(--ai-ink-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #cfgPaneAbout {
+    padding-top: 6px;
+  }
+  .about-hero {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 24px 20px 20px;
+    margin-bottom: 14px;
+    border-radius: var(--ai-radius-card);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
+  }
+  .about-logo-stage {
+    position: relative;
+    width: 82px;
+    height: 82px;
+    border-radius: 24px;
+    background: var(--ai-dlg-bg);
+    border: 1px solid var(--ai-border-subtle);
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14px;
+  }
+  html[data-theme="dark"] .about-logo-stage {
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+  }
+  .about-logo-stage .motuo-logo-svg {
+    width: 52px;
+    height: 52px;
+  }
+  .about-name-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .about-name {
+    font-size: 20px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: var(--ai-ink-1);
+  }
+  .about-ver {
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: var(--ai-radius-pill);
+    background: var(--ai-surf-soft);
+    border: 1px solid var(--ai-border-subtle);
+    color: var(--ai-ink-2);
+  }
+  .about-tagline {
+    margin: 0;
+    max-width: 440px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--ai-ink-2);
+  }
+  .about-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .about-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    border-radius: var(--ai-radius-choice);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
+  }
+  .about-card-k {
+    font-size: 11.5px;
+    color: var(--ai-ink-3);
+  }
+  .about-card-v {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--ai-ink-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .about-card-v a {
+    color: #2468f2;
+    text-decoration: none;
+  }
+  html[data-theme="dark"] .about-card-v a {
+    color: #6ea8ff;
+  }
+  .about-card-v a:hover {
+    text-decoration: underline;
+  }
+  .about-features {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+  .about-pill-tag {
+    font-size: 12px;
+    padding: 5px 11px;
+    border-radius: var(--ai-radius-pill);
+    background: var(--ai-surf-soft);
+    border: 1px solid var(--ai-border-subtle);
+    color: var(--ai-ink-2);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .motuo-logo-svg,
+    .hero-logo-wrap::before {
+      animation: none !important;
+    }
+  }
+
   @media (max-width: 640px) {
     .sys-webdav-grid { grid-template-columns: 1fr; }
     .sys-theme-grid { gap: 8px; }
+    .sys-logo-picker { grid-template-columns: 1fr; }
+    .about-grid { grid-template-columns: 1fr; }
   }

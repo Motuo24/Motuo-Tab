@@ -23,6 +23,8 @@
      newtab.sitedirect.list.v1  站内搜索直达规则列表
      newtab.suggestOnline.v1    联网搜索建议开关（百度，默认开）
      newtab.greeting.v1         时段问候语开关（默认开）
+     newtab.heroLogo.v1         起始页搜索框上方 Logo 开关（默认开）
+     newtab.logoStyle.v1        Logo 样式选择（a 流光 M / b 叠页星芒，默认 a）
      newtab.shortcuts.v1        快捷方式与分组数据
      newtab.solidColor.v1       纯色壁纸
      newtab.blur.v1             壁纸模糊度
@@ -49,9 +51,27 @@
 <body>
   <div id="bgContainer"><video id="bgVideo" muted loop playsinline preload="auto"></video></div>
 
-  <!-- 顶部问候 / 标题与搜索框 -->
-  <div class="page-title" id="pageTitle">Motuo Tab</div>
+  <!-- 全局原创 Logo 渐变定义 -->
+  <svg width="0" height="0" style="position:absolute;pointer-events:none;opacity:0;" aria-hidden="true">
+    <defs>
+      <linearGradient id="mtLogoGradV" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="var(--logo-stop-1)" />
+        <stop offset="55%" stop-color="var(--logo-stop-2)" />
+        <stop offset="100%" stop-color="var(--logo-stop-3)" />
+      </linearGradient>
+      <linearGradient id="mtLogoGradAlt" x1="15%" y1="0%" x2="85%" y2="100%">
+        <stop offset="0%" stop-color="var(--logo-stop-1)" />
+        <stop offset="100%" stop-color="var(--logo-stop-3)" />
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- 顶部 Hero（Logo + 时段问候）与搜索框 -->
   <div class="search-wrap">
+    <div class="hero-brand" id="heroBrand">
+      <div class="hero-logo-wrap" id="heroLogoWrap" aria-hidden="true"></div>
+      <div class="hero-greeting" id="pageTitle"></div>
+    </div>
     <form class="search-box" id="searchForm" autocomplete="off">
       <span class="logo" id="engineTrigger" aria-label="切换搜索引擎" title="切换搜索引擎">
         <img id="engineIcon" src="https://www.baidu.com/favicon.ico" alt="" width="26" height="26" style="border-radius:4px;" onerror="this.style.display='none';this.nextElementSibling.style.display=''" />
@@ -165,9 +185,13 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
               <span>数据管理</span>
             </button>
+            <button type="button" data-pane="keys">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M7 10h.01M11 10h.01M15 10h.01M17 10h.01M8 14h8"/></svg>
+              <span>快捷键</span>
+            </button>
             <button type="button" data-pane="about">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>
-              <span>快捷键与关于</span>
+              <span>关于</span>
             </button>
           </nav>
           <div class="ai-sidebar-status">
@@ -210,10 +234,38 @@
               <div class="ai-row">
                 <div class="ai-row-meta">
                   <div class="ai-row-title">时段问候语</div>
-                  <div class="ai-row-desc">搜索框上方按当前时段展示轻问候，关闭时显示 Motuo Tab</div>
+                  <div class="ai-row-desc">搜索框上方按当前时段展示轻问候，关闭时仅隐藏问候文字</div>
                 </div>
                 <div class="ai-row-ctrl">
                   <label class="ai-switch"><input type="checkbox" id="toggleGreeting" checked aria-label="时段问候语" /><span class="ai-switch-slider"></span></label>
+                </div>
+              </div>
+
+              <div class="ai-row stack">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">起始页 Logo</div>
+                    <div class="ai-row-desc">在搜索框上方展示淡雅简约品牌标识，可独立开关或切换样式</div>
+                  </div>
+                  <div class="ai-row-ctrl">
+                    <label class="ai-switch"><input type="checkbox" id="toggleHeroLogo" checked aria-label="起始页 Logo" /><span class="ai-switch-slider"></span></label>
+                  </div>
+                </div>
+                <div class="sys-logo-picker" id="logoStyleSwitch" role="radiogroup" aria-label="选择 Logo 样式">
+                  <button type="button" class="sys-logo-option active" data-logo-style="a">
+                    <span class="sys-logo-thumb" data-thumb="a"></span>
+                    <span class="sys-logo-meta">
+                      <span class="sys-logo-name">流光 M</span>
+                      <span class="sys-logo-sub">圆润双翼 · 雾银渐变</span>
+                    </span>
+                  </button>
+                  <button type="button" class="sys-logo-option" data-logo-style="b">
+                    <span class="sys-logo-thumb" data-thumb="b"></span>
+                    <span class="sys-logo-meta">
+                      <span class="sys-logo-name">叠页星芒</span>
+                      <span class="sys-logo-sub">双层页签 · 微光星点</span>
+                    </span>
+                  </button>
                 </div>
               </div>
 
@@ -443,16 +495,17 @@
               </div>
             </section>
 
-            <!-- 5. 快捷键与关于 -->
-            <section class="ai-config-pane" data-pane="about" id="cfgPaneAbout">
-              <div class="ai-row stack">
+            <!-- 5. 快捷键 -->
+            <section class="ai-config-pane" data-pane="keys" id="cfgPaneKeys">
+              <div class="ai-row stack ai-row-last">
                 <div class="ai-row-meta">
                   <div class="ai-row-title">键盘快捷键</div>
+                  <div class="ai-row-desc">常用全局快捷操作，Mac 设备将 Ctrl 替换为 ⌘</div>
                 </div>
                 <div class="sys-shortcuts-list">
                   <div class="sys-shortcut-item">
                     <span class="shortcut-keys"><kbd class="shortcut-kbd">Esc</kbd></span>
-                    <span class="shortcut-desc">关闭当前弹窗或菜单</span>
+                    <span class="shortcut-desc">关闭当前弹窗或浮层菜单</span>
                   </div>
                   <div class="sys-shortcut-item">
                     <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">E</kbd></span>
@@ -464,7 +517,7 @@
                   </div>
                   <div class="sys-shortcut-item">
                     <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">A</kbd></span>
-                    <span class="shortcut-desc">快速打开 AI 助手</span>
+                    <span class="shortcut-desc">快速打开 AI 助手侧边栏</span>
                   </div>
                   <div class="sys-shortcut-item">
                     <span class="shortcut-keys"><kbd class="shortcut-kbd">Ctrl</kbd><span class="shortcut-sep">/</span><kbd class="shortcut-kbd">⌘</kbd><span class="shortcut-sep">+</span><kbd class="shortcut-kbd">V</kbd></span>
@@ -472,14 +525,42 @@
                   </div>
                 </div>
               </div>
+            </section>
 
-              <div class="ai-row ai-row-last">
-                <div class="ai-row-meta">
-                  <div class="ai-row-title">Motuo-Tab · v__APP_VERSION__</div>
-                  <div class="ai-row-desc">
-                    开发者：Motuo24 · 博客 <a class="help-link" href="https://pod.xr24.cn" target="_blank" rel="noopener">pod.xr24.cn</a> · GitHub <a class="help-link" href="https://github.com/Motuo24/Motuo-Tab" target="_blank" rel="noopener">github.com/Motuo24/Motuo-Tab</a>
-                  </div>
+            <!-- 6. 关于 -->
+            <section class="ai-config-pane" data-pane="about" id="cfgPaneAbout">
+              <div class="about-hero">
+                <div class="about-logo-stage" id="aboutLogoSlot"></div>
+                <div class="about-name-row">
+                  <span class="about-name">Motuo-Tab</span>
+                  <span class="about-ver">v__APP_VERSION__</span>
                 </div>
+                <p class="about-tagline">简洁高效、本地优先的浏览器起始页 · 快捷分组、书签导入、个性壁纸与 AI 智能助手</p>
+              </div>
+
+              <div class="about-grid">
+                <div class="about-card">
+                  <span class="about-card-k">开发者</span>
+                  <span class="about-card-v">Motuo24</span>
+                </div>
+                <div class="about-card">
+                  <span class="about-card-k">个人博客</span>
+                  <span class="about-card-v"><a href="https://pod.xr24.cn" target="_blank" rel="noopener">pod.xr24.cn</a></span>
+                </div>
+                <div class="about-card">
+                  <span class="about-card-k">开源仓库</span>
+                  <span class="about-card-v"><a href="https://github.com/Motuo24/Motuo-Tab" target="_blank" rel="noopener">github.com/Motuo24/Motuo-Tab</a></span>
+                </div>
+                <div class="about-card">
+                  <span class="about-card-k">反馈交流（QQ 群）</span>
+                  <span class="about-card-v">570699053</span>
+                </div>
+              </div>
+
+              <div class="about-features">
+                <span class="about-pill-tag">数据本地存储 · 支持 WebDAV 云同步</span>
+                <span class="about-pill-tag">单文件 HTML / MV3 扩展双形态</span>
+                <span class="about-pill-tag">MIT License</span>
               </div>
             </section>
           </div>

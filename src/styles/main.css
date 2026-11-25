@@ -26,6 +26,7 @@
     --overlay-bg: linear-gradient(rgba(255,255,255,0.78), rgba(255,255,255,0.78));
   }
   html[data-theme="dark"] {
+    color-scheme: dark;
     --text-1: #e6e9ef; --text-2: #c2c7d1; --text-3: #8b93a1; --text-4: #a9b0bd; --text-link: #5a9bff;
     --accent: #5a9bff; --danger: #ff6b6b;
     --surface: #1c2027; --surface-2: #2a2f3a; --surface-3: #232833;
@@ -1347,15 +1348,28 @@
 
   /* AI 配置窗口：左侧分栏 + 右侧一项 */
   #aiConfigModal { z-index: 1100; }
-  /* ========== AI 设置独立单窗口（分级圆角 + 克制中性灰） ========== */
+  /* ========== AI 设置独立单窗口（分级圆角 + 克制中性灰 / DeepSeek 深炭灰） ========== */
   #aiConfigModal {
+    --ai-mask-bg: rgba(15, 18, 24, 0.36);
     --ai-dlg-bg: #ffffff;
     --ai-dlg-shadow: 0 28px 80px rgba(15, 18, 24, 0.16), 0 4px 16px rgba(15, 18, 24, 0.06);
+    --ai-well-bg: #f4f5f7;
+    --ai-well-focus: #ffffff;
+    --ai-well-border: transparent;
     --ai-surf-soft: #f4f5f7;
     --ai-surf-hover: #eceef2;
     --ai-surf-active: #eaecf0;
+    --ai-nav-hover: #f4f5f7;
+    --ai-seg-active: #ffffff;
+    --ai-seg-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
     --ai-surf-card: #ffffff;
+    --ai-surf-card-hover: #f4f5f7;
     --ai-surf-card-active: #f4f5f7;
+    --ai-card-border: rgba(20, 22, 26, 0.09);
+    --ai-card-active-border: rgba(20, 22, 26, 0.22);
+    --ai-chip-active-bg: #181a1f;
+    --ai-chip-active-ink: #ffffff;
+    --ai-chip-active-ring: transparent;
     --ai-ink-1: #16181d;
     --ai-ink-2: #4f5561;
     --ai-ink-3: #8c93a0;
@@ -1366,6 +1380,7 @@
     --ai-border-strong: rgba(20, 22, 26, 0.22);
     --ai-switch-track: #dcdfe5;
     --ai-switch-knob: #ffffff;
+    --ai-range-track: #eaecf0;
     --ai-ok-dot: #1ea672;
     --ai-ok-text: #167c54;
     --ai-ok-bg: rgba(30, 166, 114, 0.10);
@@ -1380,29 +1395,49 @@
     --ai-radius-tag: 8px;
   }
   html[data-theme="dark"] #aiConfigModal {
-    --ai-dlg-bg: #1a1c21;
-    --ai-dlg-shadow: 0 30px 90px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(255, 255, 255, 0.06);
-    --ai-surf-soft: #23262d;
-    --ai-surf-hover: #2a2e37;
-    --ai-surf-active: #2c303a;
-    --ai-surf-card: #1f2228;
-    --ai-surf-card-active: #272b34;
-    --ai-ink-1: #eef0f4;
-    --ai-ink-2: #a9b0bc;
-    --ai-ink-3: #727986;
-    --ai-ink-solid: #eef0f4;
-    --ai-ink-on-solid: #14161a;
-    --ai-hairline: rgba(255, 255, 255, 0.075);
-    --ai-border-subtle: rgba(255, 255, 255, 0.10);
+    color-scheme: dark;
+    --ai-mask-bg: rgba(0, 0, 0, 0.64);
+    --ai-dlg-bg: #2b2b2e;
+    --ai-dlg-shadow: 0 32px 90px rgba(0, 0, 0, 0.62), 0 0 0 1px rgba(255, 255, 255, 0.085);
+    --ai-well-bg: #212225;
+    --ai-well-focus: #1d1e21;
+    --ai-well-border: rgba(255, 255, 255, 0.07);
+    --ai-surf-soft: #3e3f44;
+    --ai-surf-hover: #494a50;
+    --ai-surf-active: #48494e;
+    --ai-nav-hover: #36373c;
+    --ai-seg-active: #48494e;
+    --ai-seg-shadow: 0 1px 4px rgba(0, 0, 0, 0.24);
+    --ai-surf-card: transparent;
+    --ai-surf-card-hover: #36373c;
+    --ai-surf-card-active: #48494e;
+    --ai-card-border: rgba(255, 255, 255, 0.14);
+    --ai-card-active-border: rgba(255, 255, 255, 0.24);
+    --ai-chip-active-bg: #4c4d54;
+    --ai-chip-active-ink: #ffffff;
+    --ai-chip-active-ring: rgba(255, 255, 255, 0.22);
+    --ai-ink-1: #f2f2f5;
+    --ai-ink-2: #b9bbc2;
+    --ai-ink-3: #8a8d95;
+    --ai-ink-solid: #e8e9ed;
+    --ai-ink-on-solid: #1a1b1e;
+    --ai-hairline: rgba(255, 255, 255, 0.09);
+    --ai-border-subtle: rgba(255, 255, 255, 0.12);
     --ai-border-strong: rgba(255, 255, 255, 0.28);
-    --ai-switch-track: #353a45;
-    --ai-switch-knob: #ffffff;
+    --ai-switch-track: #46474d;
+    --ai-switch-knob: #f2f2f5;
+    --ai-range-track: #414248;
     --ai-ok-dot: #34c98e;
     --ai-ok-text: #4ad89f;
-    --ai-ok-bg: rgba(52, 201, 142, 0.14);
-    --ai-muted-dot: #585f6d;
-    --ai-danger-text: #ff7070;
-    --ai-danger-bg: rgba(255, 112, 112, 0.12);
+    --ai-ok-bg: rgba(52, 201, 142, 0.15);
+    --ai-muted-dot: #6b6e76;
+    --ai-danger-text: #ff7a7a;
+    --ai-danger-bg: rgba(255, 122, 122, 0.14);
+  }
+  #aiConfigModal.modal-mask { background: var(--ai-mask-bg); }
+  #aiConfigModal select option {
+    background: var(--ai-dlg-bg);
+    color: var(--ai-ink-1);
   }
   #aiConfigModal .ai-config-dialog,
   html[data-theme="dark"] #aiConfigModal .ai-config-dialog {
@@ -1473,7 +1508,7 @@
     transition: opacity 0.14s ease;
   }
   .ai-config-nav button:hover {
-    background: var(--ai-surf-soft);
+    background: var(--ai-nav-hover);
     color: var(--ai-ink-1);
   }
   .ai-config-nav button.active {
@@ -1656,9 +1691,9 @@
     width: 108px;
     height: 32px;
     padding: 0 11px;
-    border: 1px solid transparent;
+    border: 1px solid var(--ai-well-border);
     border-radius: var(--ai-radius-pill);
-    background: var(--ai-surf-soft);
+    background: var(--ai-well-bg);
     color: var(--ai-ink-1);
     font: inherit;
     font-size: 12.5px;
@@ -1666,7 +1701,7 @@
     transition: background 0.14s ease, border-color 0.14s ease;
   }
   .ai-inline-name:focus {
-    background: var(--ai-dlg-bg);
+    background: var(--ai-well-focus);
     border-color: var(--ai-border-strong);
   }
   .ai-pill-btn {
@@ -1720,13 +1755,13 @@
     display: flex;
     align-items: center;
     width: 100%;
-    background: var(--ai-surf-soft);
-    border: 1px solid transparent;
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
     border-radius: var(--ai-radius-item);
     transition: background 0.15s ease, border-color 0.15s ease;
   }
   .ai-input-box:focus-within {
-    background: var(--ai-dlg-bg);
+    background: var(--ai-well-focus);
     border-color: var(--ai-border-strong);
   }
   .ai-input-box input {
@@ -1788,8 +1823,9 @@
   }
   .ai-chip:hover { background: var(--ai-surf-hover); color: var(--ai-ink-1); }
   .ai-chip.active {
-    background: var(--ai-ink-solid);
-    color: var(--ai-ink-on-solid);
+    background: var(--ai-chip-active-bg);
+    color: var(--ai-chip-active-ink);
+    box-shadow: inset 0 0 0 1px var(--ai-chip-active-ring);
     font-weight: 500;
   }
   .ai-choice-grid {
@@ -1799,7 +1835,7 @@
     width: 100%;
   }
   .ai-choice-card {
-    border: 1px solid var(--ai-border-subtle);
+    border: 1px solid var(--ai-card-border);
     border-radius: var(--ai-radius-choice);
     background: var(--ai-surf-card);
     padding: 13px 10px;
@@ -1812,10 +1848,10 @@
     color: var(--ai-ink-2);
     transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
   }
-  .ai-choice-card:hover { background: var(--ai-surf-soft); color: var(--ai-ink-1); }
+  .ai-choice-card:hover { background: var(--ai-surf-card-hover); color: var(--ai-ink-1); }
   .ai-choice-card.active {
     background: var(--ai-surf-card-active);
-    border-color: var(--ai-border-strong);
+    border-color: var(--ai-card-active-border);
     color: var(--ai-ink-1);
   }
   .ai-choice-card svg { width: 18px; height: 18px; }
@@ -1825,7 +1861,8 @@
     display: inline-flex;
     align-items: center;
     padding: 3px;
-    background: var(--ai-surf-soft);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
     border-radius: var(--ai-radius-pill);
     gap: 2px;
   }
@@ -1844,10 +1881,10 @@
   }
   .ai-seg-btn:hover { color: var(--ai-ink-1); }
   .ai-seg-btn.active {
-    background: var(--ai-dlg-bg);
+    background: var(--ai-seg-active);
     color: var(--ai-ink-1);
     font-weight: 550;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    box-shadow: var(--ai-seg-shadow);
   }
   .ai-switch {
     position: relative;
@@ -1878,7 +1915,7 @@
     transition: transform 0.18s ease;
   }
   .ai-switch input:checked + .ai-switch-slider { background: var(--ai-ink-solid); }
-  html[data-theme="dark"] .ai-switch input:checked + .ai-switch-slider::after { background: #14161a; }
+  html[data-theme="dark"] .ai-switch input:checked + .ai-switch-slider::after { background: var(--ai-ink-on-solid); }
   .ai-switch input:checked + .ai-switch-slider::after { transform: translateX(18px); }
   .ai-slider-wrap { display: flex; align-items: center; gap: 12px; width: 100%; }
   .ai-range {
@@ -1887,7 +1924,7 @@
     appearance: none;
     height: 4px;
     border-radius: 999px;
-    background: var(--ai-surf-active);
+    background: var(--ai-range-track);
     outline: none;
     cursor: pointer;
   }
@@ -1970,7 +2007,8 @@
     display: none;
     padding: 12px 14px;
     border-radius: var(--ai-radius-item);
-    background: var(--ai-surf-soft);
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
     font-size: 12px;
     line-height: 1.65;
     color: var(--ai-ink-2);
@@ -1993,14 +2031,17 @@
   .ai-var-btn:hover { background: var(--ai-surf-hover); color: var(--ai-ink-1); }
   .ai-editor-shell {
     border-radius: var(--ai-radius-card);
-    background: var(--ai-surf-soft);
-    border: 1px solid transparent;
+    background: var(--ai-well-bg);
+    border: 1px solid var(--ai-well-border);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     transition: border-color 0.15s ease, background 0.15s ease;
   }
-  .ai-editor-shell:focus-within { border-color: var(--ai-border-subtle); }
+  .ai-editor-shell:focus-within {
+    background: var(--ai-well-focus);
+    border-color: var(--ai-border-strong);
+  }
   #aiSystemPrompt,
   #aiContextPrompt {
     width: 100%;
@@ -2042,14 +2083,18 @@
     width: 78px;
     height: 32px;
     padding: 0 10px;
-    border: none;
+    border: 1px solid var(--ai-well-border);
     border-radius: var(--ai-radius-pill);
-    background: var(--ai-surf-soft);
+    background: var(--ai-well-bg);
     color: var(--ai-ink-1);
     font: inherit;
     font-size: 12.5px;
     text-align: center;
     outline: none;
+  }
+  .ai-inline-num:focus {
+    background: var(--ai-well-focus);
+    border-color: var(--ai-border-strong);
   }
   .ai-json-fields { display: flex; flex-direction: column; gap: 10px; }
   .ai-json-label { margin-bottom: 5px; color: var(--ai-ink-2); }
@@ -2059,7 +2104,7 @@
     padding: 10px 12px;
     border: 1px solid var(--ai-border-subtle);
     border-radius: var(--ai-radius-item);
-    background: var(--ai-dlg-bg);
+    background: var(--ai-well-focus);
     color: var(--ai-ink-1);
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12px;

@@ -20,9 +20,12 @@ function boot(opts) {
   return ctx;
 }
 
-test('折叠详情按钮使用 SVG 箭头且禁用文本符号，滚动区启用 scrollbar-gutter: stable', () => {
+test('折叠详情按钮使用 SVG 箭头且禁用文本符号，滚动区启用 scrollbar-gutter: stable，深色模式采用中性深炭灰三级层次', () => {
   const { document } = boot({});
   assert.ok(HTML.includes('scrollbar-gutter: stable'), 'CSS 中应配置 scrollbar-gutter: stable 防止展开抖动');
+  assert.ok(HTML.includes('color-scheme: dark'), '深色模式应启用 color-scheme: dark 适配原生控件');
+  assert.ok(HTML.includes('--ai-dlg-bg: #2b2b2e'), '深色模式弹窗底色应采用中性深炭灰 #2b2b2e');
+  assert.ok(HTML.includes('--ai-well-bg: #212225'), '深色模式凹陷输入容器应采用 #212225 区分层级');
 
   ['aiToggleSearchMetaBtn', 'aiToggleCustomJsonBtn'].forEach((id) => {
     const btn = document.getElementById(id);

@@ -452,6 +452,7 @@
         if (delSep) delSep.hidden = !cur || isBuiltin;
         if (ren) ren.hidden = !cur || isBuiltin;
         if (rst) rst.hidden = !cur || !isBuiltin;
+        if (typeof syncCustomSelect === 'function') syncCustomSelect(sel);
       }
       function commitPromptLayers() {
         commitLayer('system');
@@ -717,6 +718,7 @@
           if (activeProfile && p.id === activeProfile.id) opt.selected = true;
           sel.appendChild(opt);
         });
+        if (typeof syncCustomSelect === 'function') syncCustomSelect(sel);
       }
 
       var AI_VENDORS = {
@@ -1641,6 +1643,7 @@
         syncParamsUI();
         syncPromptUI();
         syncSidebarStatus();
+        if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
         if (!quiet) {
           var cfgModal = document.getElementById('aiConfigModal');
           if (cfgModal && cfgModal.classList.contains('open')) flashSaved();
@@ -1757,6 +1760,7 @@
         syncParamsUI();
         syncPromptUI();
         syncSidebarStatus();
+        if (typeof syncAllCustomSelects === 'function') syncAllCustomSelects();
         return migrated;
       }
 
@@ -1966,7 +1970,116 @@
       bindDisclosure('aiToggleSearchMetaBtn', 'aiSearchMetaDetail', '收起接口与计费详情', '查看接口与计费详情');
       bindDisclosure('aiToggleCustomJsonBtn', 'aiCustomJsonBody', '收起自定义请求头与额外参数', '自定义请求头与额外参数');
 
+      var openSelectEl = null;
+      var openSelectTrigger = null;
+      function closeCustomSelect() {
+        var menu = document.getElementById('aiSelectPortalMenu');
+        if (menu) { menu.hidden = true; menu.innerHTML = ''; }
+        if (openSelectTrigger) {
+          openSelectTrigger.classList.remove('open');
+          openSelectTrigger.setAttribute('aria-expanded', 'false');
+        }
+        openSelectEl = null;
+        openSelectTrigger = null;
+      }
+      function syncCustomSelect(sel) {
+        if (!sel || !sel.parentNode) return;
+        var trig = sel.parentNode.querySelector('.ai-select-trigger');
+        if (!trig) return;
+        var opt = sel.options && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+        var lbl = trig.querySelector('.ai-select-label');
+        if (lbl) lbl.textContent = opt ? opt.textContent : '';
+      }
+      function syncAllCustomSelects() {
+        var modal = document.getElementById('aiConfigModal');
+        if (!modal) return;
+        modal.querySelectorAll('select.ai-pill-select').forEach(syncCustomSelect);
+      }
+      function positionCustomSelectMenu(trigger, menu) {
+        var rect = trigger.getBoundingClientRect ? trigger.getBoundingClientRect() : { top: 0, bottom: 34, right: 200, width: 160 };
+        var mw = Math.max(176, Math.round(rect.width || 160), menu.offsetWidth || 176);
+        menu.style.minWidth = Math.max(176, Math.round(rect.width || 160)) + 'px';
+        var mh = menu.offsetHeight || Math.min(292, menu.children.length * 38 + 12);
+        var vw = window.innerWidth || 1024;
+        var vh = window.innerHeight || 768;
+        var left = Math.max(12, Math.min((rect.right || 200) - mw, vw - mw - 12));
+        var top = (rect.bottom || 34) + 6;
+        if (top + mh > vh - 14 && (rect.top || 0) - mh - 6 >= 12) {
+          top = (rect.top || 0) - mh - 6;
+        }
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+      }
+      function openCustomSelect(sel, trigger) {
+        var menu = document.getElementById('aiSelectPortalMenu');
+        if (!menu || !sel) return;
+        closeAllPopMenus();
+        menu.innerHTML = '';
+        var checkSvg = '<svg class="ai-select-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+        Array.prototype.forEach.call(sel.options || [], function (opt, idx) {
+          var item = document.createElement('button');
+          item.type = 'button';
+          item.className = 'ai-select-option' + (idx === sel.selectedIndex ? ' selected' : '');
+          item.setAttribute('role', 'option');
+          item.setAttribute('aria-selected', idx === sel.selectedIndex ? 'true' : 'false');
+          item.setAttribute('data-value', opt.value);
+          var txt = document.createElement('span');
+          txt.className = 'ai-select-option-text';
+          txt.textContent = opt.textContent;
+          item.appendChild(txt);
+          if (idx === sel.selectedIndex) {
+            item.insertAdjacentHTML('beforeend', checkSvg);
+          }
+          item.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            var val = opt.value;
+            sel.value = val;
+            syncCustomSelect(sel);
+            closeCustomSelect();
+            try { sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (e2) {}
+          });
+          menu.appendChild(item);
+        });
+        menu.hidden = false;
+        trigger.classList.add('open');
+        trigger.setAttribute('aria-expanded', 'true');
+        openSelectEl = sel;
+        openSelectTrigger = trigger;
+        positionCustomSelectMenu(trigger, menu);
+      }
+      function initCustomSelects() {
+        var modal = document.getElementById('aiConfigModal');
+        if (!modal) return;
+        modal.querySelectorAll('.ai-pill-select-wrap').forEach(function (wrap) {
+          var sel = wrap.querySelector('select.ai-pill-select');
+          if (!sel || wrap.querySelector('.ai-select-trigger')) return;
+          sel.classList.add('ai-select-native');
+          sel.tabIndex = -1;
+          var trig = document.createElement('button');
+          trig.type = 'button';
+          trig.className = 'ai-select-trigger';
+          trig.setAttribute('aria-haspopup', 'listbox');
+          trig.setAttribute('aria-expanded', 'false');
+          if (sel.getAttribute('aria-label')) trig.setAttribute('aria-label', sel.getAttribute('aria-label'));
+          trig.innerHTML = '<span class="ai-select-label"></span><svg class="ai-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+          wrap.appendChild(trig);
+          syncCustomSelect(sel);
+          sel.addEventListener('change', function () { syncCustomSelect(sel); });
+          trig.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            if (openSelectEl === sel) { closeCustomSelect(); return; }
+            openCustomSelect(sel, trig);
+          });
+          trig.addEventListener('keydown', function (ev) {
+            if (ev.key === 'ArrowDown' || ev.key === 'Enter' || ev.key === ' ') {
+              ev.preventDefault();
+              if (openSelectEl !== sel) openCustomSelect(sel, trig);
+            }
+          });
+        });
+      }
       function closeAllPopMenus() {
+        closeCustomSelect();
         var modal = document.getElementById('aiConfigModal');
         if (!modal) return;
         modal.querySelectorAll('.ai-pop-menu').forEach(function (m) { m.hidden = true; });
@@ -1988,20 +2101,25 @@
       bindPopMenu('aiSystemPresetMoreBtn', 'aiSystemPresetMenu');
       bindPopMenu('aiContextPresetMoreBtn', 'aiContextPresetMenu');
       document.addEventListener('click', function (e) {
-        if (!e.target || !e.target.closest || !e.target.closest('#aiConfigModal .ai-pop-wrap')) {
-          closeAllPopMenus();
-        }
+        var inPop = e.target && e.target.closest && (e.target.closest('#aiConfigModal .ai-pop-wrap') || e.target.closest('#aiSelectPortalMenu') || e.target.closest('.ai-select-trigger'));
+        if (!inPop) closeAllPopMenus();
       });
+      var panesBox = document.querySelector('#aiConfigModal .ai-config-panes');
+      if (panesBox) panesBox.addEventListener('scroll', closeCustomSelect);
+      window.addEventListener('resize', closeCustomSelect);
       document.addEventListener('keydown', function (e) {
         if (e.key !== 'Escape') return;
         var modal = document.getElementById('aiConfigModal');
         if (!modal) return;
-        var hasOpenMenu = Array.prototype.some.call(modal.querySelectorAll('.ai-pop-menu'), function (m) { return !m.hidden; });
+        var selMenu = document.getElementById('aiSelectPortalMenu');
+        var hasOpenSelect = !!(selMenu && !selMenu.hidden);
+        var hasOpenMenu = hasOpenSelect || Array.prototype.some.call(modal.querySelectorAll('.ai-pop-menu'), function (m) { return !m.hidden; });
         if (hasOpenMenu) {
           closeAllPopMenus();
           e.stopPropagation();
         }
       }, true);
+      initCustomSelects();
 
       function beginInlineRename(selectWrapId, inputId, getOriginal, onCommit) {
         var wrap = document.getElementById(selectWrapId);
@@ -2352,6 +2470,7 @@
         configNav.addEventListener('click', function (e) {
           var btn = e.target.closest ? e.target.closest('button[data-pane]') : null;
           if (!btn) return;
+          if (typeof closeAllPopMenus === 'function') closeAllPopMenus();
           var id = btn.getAttribute('data-pane');
           configNav.querySelectorAll('button').forEach(function (b) {
             b.classList.toggle('active', b === btn);

@@ -324,3 +324,45 @@ test('配置方案与提示词预设采用「单胶囊 + ··· 菜单 + 原地�
   assert.strictEqual(box.value, orig);
   assert.strictEqual(document.getElementById('aiPromptResetBtn').hidden, true);
 });
+
+test('设置弹窗内全部下拉菜单采用自定义圆角浮层与勾选标志，Esc 仅关闭下拉不关闭弹窗', () => {
+  const { window, document } = boot({});
+  document.getElementById('aiConfigToggle').click();
+  const modal = document.getElementById('aiConfigModal');
+  const nativeSelects = Array.from(modal.querySelectorAll('select.ai-pill-select'));
+  assert.ok(nativeSelects.length >= 6, '应增强弹窗内所有下拉控件');
+  nativeSelects.forEach((sel) => {
+    assert.ok(sel.classList.contains('ai-select-native'), sel.id + ' 应保留原生 select 但隐藏视觉样式');
+    const trig = sel.parentNode.querySelector('.ai-select-trigger');
+    assert.ok(trig, sel.id + ' 应生成自定义 .ai-select-trigger');
+  });
+
+  // 切换联网搜索服务：打开浮层 -> 校验全部选项与当前勾选 -> 选中智谱 -> 验证同步与条件字段显示
+  const spSel = document.getElementById('aiSearchProvider');
+  const spTrig = spSel.parentNode.querySelector('.ai-select-trigger');
+  assert.ok(spTrig.textContent.includes('博查'));
+  spTrig.click();
+
+  const portal = document.getElementById('aiSelectPortalMenu');
+  assert.strictEqual(portal.hidden, false);
+  assert.ok(spTrig.classList.contains('open'));
+  const opts = Array.from(portal.querySelectorAll('.ai-select-option'));
+  assert.strictEqual(opts.length, spSel.options.length);
+  const selectedOpt = opts.find((o) => o.classList.contains('selected'));
+  assert.ok(selectedOpt && selectedOpt.querySelector('.ai-select-check'), '当前选中项应带有 SVG 对勾');
+
+  const zhipuOpt = opts.find((o) => o.getAttribute('data-value') === 'zhipu');
+  zhipuOpt.click();
+  assert.strictEqual(spSel.value, 'zhipu');
+  assert.ok(spTrig.textContent.includes('智谱'));
+  assert.strictEqual(portal.hidden, true);
+  assert.notStrictEqual(document.getElementById('zhipuEngineField').style.display, 'none');
+
+  // Esc 关闭打开的下拉浮层时，不关闭设置弹窗本体
+  const toTrig = document.getElementById('aiTimeoutSec').parentNode.querySelector('.ai-select-trigger');
+  toTrig.click();
+  assert.strictEqual(portal.hidden, false);
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.strictEqual(portal.hidden, true);
+  assert.ok(modal.classList.contains('open'), 'Esc 应只关闭下拉浮层，保持 AI 设置弹窗打开');
+});

@@ -33,7 +33,8 @@
      newtab.toggleImg.v1        图标卡片透明开关
      newtab.toggleLtr.v1        文字卡片透明开关
      newtab.ai.config.v1        AI 配置（方案/搜索/提示词/参数）
-     newtab.ai.history.v1       AI 对话历史
+     newtab.ai.history.v1       AI 当前会话历史（兼容镜像）
+     newtab.ai.sessions.v1      AI 多对话会话列表（含标题与消息）
      newtab.ai.snapshot.v1      AI 操作前的快照（用于撤销）
      newtab.scratchpad.v1       速记本内容
      newtab.theme.v1            主题模式（light / dark / auto）
@@ -1457,36 +1458,47 @@
   <div class="ai-panel" id="aiPanel">
     <div class="ai-panel-header">
       <div class="ai-header-title">
-        <svg class="ai-header-logo" viewBox="0 0 100 92" width="30" height="28" aria-hidden="true" focusable="false">
-          <defs>
-            <linearGradient id="aiPillGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#dbefff"/>
-              <stop offset="1" stop-color="#a9d6fb"/>
-            </linearGradient>
-            <linearGradient id="aiTxtGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#3f8fd8"/>
-              <stop offset="1" stop-color="#1e6bb8"/>
-            </linearGradient>
-          </defs>
-          <text class="ai-letter" x="50" y="40" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="800" fill="#0d0d0d">AI</text>
-          <rect x="5" y="47" width="90" height="35" rx="17.5" fill="url(#aiPillGrad)"/>
-          <text x="50" y="72" text-anchor="middle" font-family="'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif" font-size="28" font-weight="700" fill="url(#aiTxtGrad)">助手</text>
-        </svg>
+        <button class="ai-icon-btn" id="aiSessionsToggle" type="button" title="历史对话" aria-label="历史对话" aria-expanded="false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>
+        </button>
+        <span class="ai-header-chat-title" id="aiHeaderTitleText">AI 助手</span>
         <span class="ai-header-model" id="aiModelBadge" style="display:none;"></span>
       </div>
       <div class="ai-header-actions">
-        <button class="ai-icon-btn ai-clear" id="aiClear" title="清空对话" aria-label="清空对话">
+        <button class="ai-icon-btn" id="aiNewChatBtn" type="button" title="开启新对话" aria-label="开启新对话">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button class="ai-icon-btn ai-clear" id="aiClear" type="button" title="清空当前对话" aria-label="清空当前对话">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m1 0v14a2 2 0 01-2 2H8a2 2 0 01-2-2V6h12z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <span class="ai-header-divider" aria-hidden="true"></span>
-        <button class="ai-icon-btn ai-config-btn" id="aiConfigToggle" title="AI 配置" aria-label="AI 配置">
+        <button class="ai-icon-btn ai-config-btn" id="aiConfigToggle" type="button" title="AI 配置" aria-label="AI 配置">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button class="ai-icon-btn ai-close" id="aiClose" title="关闭" aria-label="关闭">
+        <button class="ai-icon-btn ai-close" id="aiClose" type="button" title="关闭" aria-label="关闭">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
       </div>
     </div>
+
+    <!-- 侧边栏内嵌多对话抽屉（尺寸严格限制在 #aiPanel 内部） -->
+    <div class="ai-sessions-drawer" id="aiSessionsDrawer" aria-hidden="true">
+      <div class="ai-sessions-scrim" id="aiSessionsScrim"></div>
+      <aside class="ai-sessions-sheet" aria-label="历史对话列表">
+        <div class="ai-sessions-sheet-head">
+          <span>历史对话</span>
+          <button type="button" class="ai-icon-btn" id="aiSessionsClose" title="收起列表" aria-label="收起历史对话">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <button type="button" class="ai-new-chat-pill" id="aiDrawerNewChat">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          <span>开启新对话</span>
+        </button>
+        <div class="ai-sessions-list" id="aiSessionsList" role="list"></div>
+      </aside>
+    </div>
+
     <div class="ai-messages" id="aiMessages" role="log" aria-label="对话记录">
       <div class="ai-msg ai-msg-assistant ai-msg-persist" style="white-space:normal;">
         你好！我是 Motuo-Tab 小助手，可以帮你：<br>
@@ -1496,27 +1508,30 @@
         问我关于这个工具的问题也可以哦
       </div>
     </div>
-    <button class="ai-scroll-bottom" id="aiScrollBottom" title="回到底部" aria-label="回到底部">
+    <button class="ai-scroll-bottom" id="aiScrollBottom" type="button" title="回到底部" aria-label="回到底部">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14m0 0l-6-6m6 6l6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <div class="ai-toast" id="aiToast" role="status"></div>
-    <div class="ai-input-row">
-      <textarea class="ai-input" id="aiInput" rows="1" placeholder="输入指令，如「把知乎移到最前面」" style="resize:none;"></textarea>
-      <div class="ai-footer-bar">
-        <div class="ai-footer-toggles">
-          <label class="ai-mode-btn" title="让模型先推理再回答，响应会稍慢">
-            <input type="checkbox" id="aiDeepSearch" />
-            <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 18h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10 22h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            <span>深度思考</span>
-          </label>
-          <label class="ai-mode-btn" title="联网搜索。提供商和密钥在配置窗口的「联网搜索」里">
-            <input type="checkbox" id="aiWebSearch" />
-            <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span>联网搜索</span>
-          </label>
+    <div class="ai-composer-wrap">
+      <div class="ai-composer">
+        <textarea class="ai-input" id="aiInput" rows="1" placeholder="给 AI 助手发送消息，或输入快捷方式指令…" style="resize:none;"></textarea>
+        <div class="ai-footer-bar">
+          <div class="ai-footer-toggles">
+            <label class="ai-mode-btn" title="让模型先推理再回答，响应会稍慢">
+              <input type="checkbox" id="aiDeepSearch" />
+              <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 18h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10 22h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <span>深度思考</span>
+            </label>
+            <label class="ai-mode-btn" title="联网搜索。提供商和密钥在配置窗口的「联网搜索」里">
+              <input type="checkbox" id="aiWebSearch" />
+              <svg class="ai-mode-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>联网搜索</span>
+            </label>
+          </div>
+          <button class="ai-send" id="aiSend" type="button" title="发送" aria-label="发送"><svg class="ai-send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5m0 0l-6 6m6-6l6 6" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="ai-send-label">发送</span></button>
         </div>
-        <button class="ai-send" id="aiSend">发送</button>
       </div>
+      <div class="ai-footer-disclaimer">内容由 AI 生成，请仔细甄别</div>
     </div>
   </div>
 

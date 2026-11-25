@@ -24,9 +24,18 @@
       var aiMessages = document.getElementById('aiMessages');
       var aiInput = document.getElementById('aiInput');
       var aiSend = document.getElementById('aiSend');
+      var aiSendLabel = aiSend ? aiSend.querySelector('.ai-send-label') : null;
       var aiModelBadge = document.getElementById('aiModelBadge');
       var aiToastEl = document.getElementById('aiToast');
       var aiScrollBottom = document.getElementById('aiScrollBottom');
+      var aiHeaderTitleText = document.getElementById('aiHeaderTitleText');
+      var aiSessionsToggle = document.getElementById('aiSessionsToggle');
+      var aiSessionsDrawer = document.getElementById('aiSessionsDrawer');
+      var aiSessionsScrim = document.getElementById('aiSessionsScrim');
+      var aiSessionsClose = document.getElementById('aiSessionsClose');
+      var aiSessionsList = document.getElementById('aiSessionsList');
+      var aiNewChatBtn = document.getElementById('aiNewChatBtn');
+      var aiDrawerNewChat = document.getElementById('aiDrawerNewChat');
 
       var aiEndpoint = document.getElementById('aiEndpoint');
       var aiKey = document.getElementById('aiKey');
@@ -35,7 +44,11 @@
       var aiBochaKey = document.getElementById('aiBochaKey');
       var aiDeepSearch = document.getElementById('aiDeepSearch');
 
-      // 对话历史
+      // 多对话与对话历史
+      var AI_SESSIONS_KEY = 'newtab.ai.sessions.v1';
+      var AI_MAX_SESSIONS = 30;
+      var aiSessions = [];
+      var activeSessionId = '';
       var aiHistory = [];
       var aiSending = false; // 是否正在请求中
       var lastSearchQuery = '';
@@ -539,33 +552,66 @@
         return body;
       }
 
-      // 加载历史
-      (function loadAIHistory() {
-        try {
-          var raw = localStorage.getItem(AI_HISTORY_KEY);
-          if (raw) {
-            aiHistory = JSON.parse(raw);
-            if (!Array.isArray(aiHistory)) aiHistory = [];
+      // 多对话与历史管理
+      function genSessionId() {
+        return 'ses_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+      }
+      function deriveSessionTitle(msgs) {
+        if (!Array.isArray(msgs)) return '新对话';
+        for (var i = 1; i < msgs.length; i++) {
+          var m = msgs[i];
+          if (m && m.role === 'user' && !m.hidden && m.content) {
+            var cleaned = String(m.content).replace(/\s+/g, ' ').trim();
+            if (cleaned) return cleaned.length > 18 ? cleaned.slice(0, 18) + '…' : cleaned;
           }
-        } catch (e) {}
-        // 一次性迁移：旧历史存的是"渲染后的 HTML 快照"（rendered），样式被冻结；
-        // 改为只存纯文本 + 语义标签（<think>/<tool_call>/<ops>），渲染时由前端套用样式。
-        migrateAIHistory();
-        // 不再过滤 tool 相关消息：联网搜索需要保留 assistant(tool_calls) + tool 历史
-        // 如果历史为空或首条不是 system，插入初始 system 消息
-        if (aiHistory.length === 0 || aiHistory[0].role !== 'system') {
-          aiHistory.unshift({ role: 'system', content: buildSystemPrompt() });
         }
-      })();
+        return '新对话';
+      }
+      function isSessionEmpty(msgs) {
+        if (!Array.isArray(msgs)) return true;
+        for (var i = 1; i < msgs.length; i++) {
+          var m = msgs[i];
+          if (m && !m.hidden && m.role !== 'tool' && !m.tool_calls) return false;
+        }
+        return true;
+      }
+      function createSessionObject(messages, title, customTitle) {
+        var now = Date.now();
+        var msgs = Array.isArray(messages) ? messages : [];
+        if (msgs.length === 0 || msgs[0].role !== 'system') {
+          msgs = [{ role: 'system', content: buildSystemPrompt() }].concat(msgs);
+        }
+        return {
+          id: genSessionId(),
+          title: title || deriveSessionTitle(msgs),
+          customTitle: !!customTitle,
+          createdAt: now,
+          updatedAt: now,
+          messages: msgs
+        };
+      }
+      function getActiveSession() {
+        for (var i = 0; i < aiSessions.length; i++) {
+          if (aiSessions[i] && aiSessions[i].id === activeSessionId) return aiSessions[i];
+        }
+        return null;
+      }
+      function syncSessionHeaderTitle() {
+        if (!aiHeaderTitleText) return;
+        var ses = getActiveSession();
+        var title = ses && ses.title && ses.title !== '新对话' ? ses.title : 'AI 助手';
+        aiHeaderTitleText.textContent = title;
+        aiHeaderTitleText.title = title;
+      }
 
       // 迁移旧历史：把 rendered HTML 快照中的思考文本抽回 <think> 标签，并删除 rendered
-      function migrateAIHistory() {
+      function migrateMessagesArray(msgs) {
         var changed = false;
-        aiHistory.forEach(function (m) {
+        if (!Array.isArray(msgs)) return false;
+        msgs.forEach(function (m) {
           if (!m || m.role !== 'assistant') return;
           if (!m.rendered) return;
           var content = m.content;
-          // 内容里没有语义标签时，尝试从旧 HTML 快照提取思考文本
           if (typeof content !== 'string' || !/<think>|<tool_call>|<ops>/i.test(content)) {
             try {
               var tmp = document.createElement('div');
@@ -579,8 +625,58 @@
           delete m.rendered;
           changed = true;
         });
-        if (changed) saveAIHistory();
+        return changed;
       }
+
+      // 加载多对话会话（若无则从旧版 newtab.ai.history.v1 自动迁移）
+      (function loadAIHistory() {
+        var migratedFromLegacy = false;
+        try {
+          var rawSessions = localStorage.getItem(AI_SESSIONS_KEY);
+          if (rawSessions) {
+            var parsed = JSON.parse(rawSessions);
+            if (parsed && Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
+              aiSessions = parsed.sessions.filter(function (s) { return s && s.id && Array.isArray(s.messages); });
+              activeSessionId = typeof parsed.activeId === 'string' ? parsed.activeId : '';
+            }
+          }
+        } catch (e) {}
+
+        if (aiSessions.length === 0) {
+          var legacyMsgs = [];
+          try {
+            var raw = localStorage.getItem(AI_HISTORY_KEY);
+            if (raw) {
+              legacyMsgs = JSON.parse(raw);
+              if (!Array.isArray(legacyMsgs)) legacyMsgs = [];
+            }
+          } catch (e2) {}
+          migrateMessagesArray(legacyMsgs);
+          var initialSes = createSessionObject(legacyMsgs);
+          aiSessions = [initialSes];
+          activeSessionId = initialSes.id;
+          migratedFromLegacy = true;
+        } else {
+          var anyMigrated = false;
+          aiSessions.forEach(function (s) {
+            if (s.messages.length === 0 || s.messages[0].role !== 'system') {
+              s.messages.unshift({ role: 'system', content: buildSystemPrompt() });
+            }
+            if (migrateMessagesArray(s.messages)) anyMigrated = true;
+            if (!s.title) s.title = deriveSessionTitle(s.messages);
+          });
+          migratedFromLegacy = anyMigrated;
+        }
+
+        var active = getActiveSession() || aiSessions[0];
+        activeSessionId = active.id;
+        aiHistory = active.messages;
+        if (migratedFromLegacy) {
+          try {
+            localStorage.setItem(AI_SESSIONS_KEY, JSON.stringify({ activeId: activeSessionId, sessions: aiSessions }));
+          } catch (e3) {}
+        }
+      })();
 
       // 历史裁剪：防止联网搜索的 hidden 结果无限堆积导致上下文超长（HTTP 400）
       var AI_MAX_MESSAGES = 60;   // system 之后最多保留的消息条数
@@ -599,9 +695,36 @@
         aiHistory = [sys].concat(rest);
       }
 
+      function persistSessionsStore() {
+        while (aiSessions.length > AI_MAX_SESSIONS) {
+          var oldestIdx = -1;
+          var oldestTime = Infinity;
+          for (var si = 0; si < aiSessions.length; si++) {
+            if (aiSessions[si].id === activeSessionId) continue;
+            var t = aiSessions[si].updatedAt || 0;
+            if (t < oldestTime) { oldestTime = t; oldestIdx = si; }
+          }
+          if (oldestIdx === -1) break;
+          aiSessions.splice(oldestIdx, 1);
+        }
+        try { localStorage.setItem(AI_SESSIONS_KEY, JSON.stringify({ activeId: activeSessionId, sessions: aiSessions })); } catch (e) {}
+        try { localStorage.setItem(AI_HISTORY_KEY, JSON.stringify(aiHistory)); } catch (e2) {}
+      }
+
       function saveAIHistory() {
         pruneAIHistory();
-        try { localStorage.setItem(AI_HISTORY_KEY, JSON.stringify(aiHistory)); } catch (e) {}
+        var active = getActiveSession();
+        if (!active) {
+          active = createSessionObject(aiHistory);
+          aiSessions.unshift(active);
+          activeSessionId = active.id;
+        }
+        active.messages = aiHistory;
+        active.updatedAt = Date.now();
+        if (!active.customTitle) active.title = deriveSessionTitle(aiHistory);
+        persistSessionsStore();
+        syncSessionHeaderTitle();
+        renderSessionsList();
       }
 
       // 发送给模型前清洗历史：<think>/<tool_call>/<ops> 只是前端渲染用的语义标签，
@@ -2143,19 +2266,298 @@
         if (_h) _h.setAttribute('aria-expanded', 'false');
       }
 
+      var AI_COPY_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+      var AI_CHECK_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      var AI_REGEN_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
+      var AI_EDIT_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+      var AI_TRASH_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m1 0v14a2 2 0 01-2 2H8a2 2 0 01-2-2V6h12z"/></svg>';
+
+      function setAISendState(sending) {
+        aiSending = !!sending;
+        if (!aiSend) return;
+        aiSend.disabled = !!sending;
+        aiSend.classList.toggle('is-sending', !!sending);
+        if (aiSendLabel) {
+          aiSendLabel.textContent = sending ? '处理中…' : '发送';
+        } else {
+          aiSend.textContent = sending ? '处理中…' : '发送';
+        }
+        aiSend.title = sending ? '处理中…' : '发送';
+      }
+
+      function toggleSessionsDrawer(open) {
+        if (!aiSessionsDrawer) return;
+        var next = !!open;
+        aiSessionsDrawer.classList.toggle('open', next);
+        aiSessionsDrawer.setAttribute('aria-hidden', next ? 'false' : 'true');
+        if (aiSessionsToggle) aiSessionsToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+        if (next) renderSessionsList();
+      }
+
+      function renderSessionsList() {
+        if (!aiSessionsList) return;
+        aiSessionsList.innerHTML = '';
+        var sorted = aiSessions.slice().sort(function (a, b) {
+          return (b.updatedAt || 0) - (a.updatedAt || 0);
+        });
+        var now = new Date();
+        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        var sevenDaysAgo = todayStart - 6 * 86400000;
+        var groups = [
+          { label: '今天', items: [] },
+          { label: '7 天内', items: [] },
+          { label: '更早', items: [] }
+        ];
+        sorted.forEach(function (s) {
+          var t = s.updatedAt || s.createdAt || Date.now();
+          if (t >= todayStart) groups[0].items.push(s);
+          else if (t >= sevenDaysAgo) groups[1].items.push(s);
+          else groups[2].items.push(s);
+        });
+        groups.forEach(function (g) {
+          if (!g.items.length) return;
+          var lbl = document.createElement('div');
+          lbl.className = 'ai-session-group-label';
+          lbl.textContent = g.label;
+          aiSessionsList.appendChild(lbl);
+          g.items.forEach(function (s) {
+            var row = document.createElement('div');
+            row.className = 'ai-session-item' + (s.id === activeSessionId ? ' active' : '');
+            row.setAttribute('role', 'listitem');
+            row.setAttribute('data-session-id', s.id);
+
+            var sel = document.createElement('button');
+            sel.type = 'button';
+            sel.className = 'ai-session-select';
+            sel.setAttribute('data-act', 'select');
+            sel.textContent = s.title || '新对话';
+            sel.title = s.title || '新对话';
+
+            var ops = document.createElement('div');
+            ops.className = 'ai-session-ops';
+
+            var renBtn = document.createElement('button');
+            renBtn.type = 'button';
+            renBtn.className = 'ai-session-op-btn';
+            renBtn.setAttribute('data-act', 'rename');
+            renBtn.title = '重命名';
+            renBtn.setAttribute('aria-label', '重命名对话');
+            renBtn.innerHTML = AI_EDIT_SVG;
+
+            var delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'ai-session-op-btn del';
+            delBtn.setAttribute('data-act', 'delete');
+            delBtn.title = '删除对话';
+            delBtn.setAttribute('aria-label', '删除对话');
+            delBtn.innerHTML = AI_TRASH_SVG;
+
+            ops.appendChild(renBtn);
+            ops.appendChild(delBtn);
+            row.appendChild(sel);
+            row.appendChild(ops);
+            aiSessionsList.appendChild(row);
+          });
+        });
+      }
+
+      function switchAISession(id) {
+        if (aiSending) { showAIToast('当前正在生成回复，请稍候'); return false; }
+        var target = null;
+        for (var i = 0; i < aiSessions.length; i++) {
+          if (aiSessions[i] && aiSessions[i].id === id) { target = aiSessions[i]; break; }
+        }
+        if (!target) return false;
+        activeSessionId = target.id;
+        if (!Array.isArray(target.messages) || target.messages.length === 0 || target.messages[0].role !== 'system') {
+          target.messages = [{ role: 'system', content: buildSystemPrompt() }].concat(target.messages || []);
+        }
+        aiHistory = target.messages;
+        persistSessionsStore();
+        syncSessionHeaderTitle();
+        renderSessionsList();
+        renderAIHistory();
+        toggleSessionsDrawer(false);
+        return true;
+      }
+
+      function createNewAISession() {
+        if (aiSending) { showAIToast('当前正在生成回复，请稍候'); return null; }
+        if (isSessionEmpty(aiHistory)) {
+          toggleSessionsDrawer(false);
+          syncSessionHeaderTitle();
+          renderSessionsList();
+          if (aiInput) aiInput.focus();
+          return getActiveSession();
+        }
+        var ses = createSessionObject();
+        aiSessions.unshift(ses);
+        activeSessionId = ses.id;
+        aiHistory = ses.messages;
+        persistSessionsStore();
+        syncSessionHeaderTitle();
+        renderSessionsList();
+        renderAIHistory();
+        toggleSessionsDrawer(false);
+        if (aiInput) aiInput.focus();
+        return ses;
+      }
+
+      function renameAISession(id) {
+        var target = null;
+        for (var i = 0; i < aiSessions.length; i++) {
+          if (aiSessions[i] && aiSessions[i].id === id) { target = aiSessions[i]; break; }
+        }
+        if (!target) return false;
+        var next = prompt('请输入对话名称：', target.title || '新对话');
+        if (next === null) return false;
+        var trimmed = String(next).trim().slice(0, 32);
+        if (!trimmed) return false;
+        target.title = trimmed;
+        target.customTitle = true;
+        persistSessionsStore();
+        syncSessionHeaderTitle();
+        renderSessionsList();
+        return true;
+      }
+
+      function deleteAISession(id) {
+        if (aiSending) { showAIToast('当前正在生成回复，请稍候'); return false; }
+        var idx = -1;
+        for (var i = 0; i < aiSessions.length; i++) {
+          if (aiSessions[i] && aiSessions[i].id === id) { idx = i; break; }
+        }
+        if (idx === -1) return false;
+        aiSessions.splice(idx, 1);
+        if (aiSessions.length === 0) {
+          var fresh = createSessionObject();
+          aiSessions.push(fresh);
+        }
+        if (activeSessionId === id || !getActiveSession()) {
+          activeSessionId = aiSessions[0].id;
+          aiHistory = aiSessions[0].messages;
+        }
+        persistSessionsStore();
+        syncSessionHeaderTitle();
+        renderSessionsList();
+        renderAIHistory();
+        showAIToast('已删除对话');
+        return true;
+      }
+
+      function extractCopyableText(content) {
+        return String(content || '')
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+          .replace(/<ops>[\s\S]*?<\/ops>/gi, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      }
+
+      function copyTextToClipboard(text) {
+        var s = String(text || '');
+        if (!s) return Promise.resolve(false);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return navigator.clipboard.writeText(s).then(function () { return true; }).catch(function () {
+            return fallbackCopyText(s);
+          });
+        }
+        return Promise.resolve(fallbackCopyText(s));
+      }
+
+      function fallbackCopyText(text) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          var ok = document.execCommand && document.execCommand('copy');
+          document.body.removeChild(ta);
+          return !!ok;
+        } catch (e) { return false; }
+      }
+
+      function buildMessageActions(role) {
+        var bar = document.createElement('div');
+        bar.className = 'ai-msg-actions';
+        var copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'ai-act-btn ai-act-copy';
+        copyBtn.title = '复制';
+        copyBtn.setAttribute('aria-label', '复制');
+        copyBtn.innerHTML = AI_COPY_SVG;
+        bar.appendChild(copyBtn);
+
+        if (role === 'assistant') {
+          var regenBtn = document.createElement('button');
+          regenBtn.type = 'button';
+          regenBtn.className = 'ai-act-btn ai-act-regen';
+          regenBtn.title = '重新回答';
+          regenBtn.setAttribute('aria-label', '重新回答');
+          regenBtn.innerHTML = AI_REGEN_SVG;
+          bar.appendChild(regenBtn);
+        } else if (role === 'user') {
+          var editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'ai-act-btn ai-act-edit';
+          editBtn.title = '修改消息';
+          editBtn.setAttribute('aria-label', '修改已发送消息');
+          editBtn.innerHTML = AI_EDIT_SVG;
+          bar.appendChild(editBtn);
+        }
+        return bar;
+      }
+
+      function attachAssistantFooter(group, msgIndex, isError) {
+        if (!group) return;
+        if (typeof msgIndex === 'number' && msgIndex >= 1) {
+          group.setAttribute('data-msg-index', String(msgIndex));
+        }
+        if (!isError && !group.querySelector('.ai-msg-disclaimer')) {
+          var disc = document.createElement('div');
+          disc.className = 'ai-msg-disclaimer';
+          disc.textContent = '本回答由 AI 生成，内容仅供参考，请仔细甄别';
+          group.appendChild(disc);
+        }
+        if (!group.querySelector('.ai-msg-actions')) {
+          group.appendChild(buildMessageActions('assistant'));
+        }
+      }
+
+      function createMessageGroup(role, msgIndex, bubbleEl, opts) {
+        var o = opts || {};
+        var group = document.createElement('div');
+        group.className = 'ai-msg-group ai-msg-group-' + role;
+        if (typeof msgIndex === 'number' && msgIndex >= 1) {
+          group.setAttribute('data-msg-index', String(msgIndex));
+        }
+        group.appendChild(bubbleEl);
+        if (role === 'assistant') {
+          attachAssistantFooter(group, msgIndex, !!o.isError);
+        } else if (role === 'user') {
+          group.appendChild(buildMessageActions('user'));
+        }
+        return group;
+      }
+
       function toggleAI(open) {
         aiPanel.classList.toggle('open', open);
         aiOverlay.classList.toggle('open', open);
         if (open) {
+          syncSessionHeaderTitle();
           if (aiSending) {
             // 请求中：不渲染历史，气泡还在 DOM 里，继续流
             aiMessages.scrollTop = aiMessages.scrollHeight;
           } else {
             // 空闲状态：恢复按钮并渲染历史
-            aiSend.disabled = false;
-            aiSend.textContent = '发送';
+            setAISendState(false);
             renderAIHistory();
           }
+        } else {
+          toggleSessionsDrawer(false);
         }
       }
 
@@ -2354,16 +2756,21 @@
           //  - msg.hidden：新版文本协议注入的搜索结果（user 角色，但不该显示）
           if (msg.role === 'tool' || msg.tool_calls || msg.hidden) continue;
 
+          var isErr = !!(msg.isError);
           var div = document.createElement('div');
-          div.className = 'ai-msg ai-msg-' + msg.role;
+          div.className = isErr ? 'ai-msg ai-msg-error' : ('ai-msg ai-msg-' + msg.role);
 
           // assistant 消息：从"纯文本 + 语义标签"重新渲染（样式由前端定义，不冻结）
           if (msg.role === 'assistant') {
             var content = msg.content;
             if (content !== null && content !== undefined) {
               div.style.whiteSpace = 'normal';
-              var frag = renderAIContent(content);
-              if (frag.childNodes.length) div.appendChild(frag);
+              if (isErr) {
+                div.innerHTML = renderMarkdown(content);
+              } else {
+                var frag = renderAIContent(content);
+                if (frag.childNodes.length) div.appendChild(frag);
+              }
               // 含 <ops> 的历史消息补"撤销"按钮：点击由 aiMessages 上的
               // 事件委托（applyAIUndo）统一处理，重渲染后依然可点
               if (typeof content === 'string' && /<ops>/i.test(content)) {
@@ -2380,7 +2787,9 @@
             div.innerHTML = renderMarkdown(msg.content || '');
           }
 
-          aiMessages.appendChild(div);
+          var groupRole = msg.role === 'user' ? 'user' : 'assistant';
+          var group = createMessageGroup(groupRole, i, div, { isError: isErr });
+          aiMessages.appendChild(group);
         }
         aiMessages.scrollTop = aiMessages.scrollHeight;
       }
@@ -3018,10 +3427,38 @@
       aiFab.addEventListener('click', function () { toggleAI(true); });
       aiClose.addEventListener('click', function () { toggleAI(false); });
       aiOverlay.addEventListener('click', function () { toggleAI(false); });
+      if (aiSessionsToggle) {
+        aiSessionsToggle.addEventListener('click', function () {
+          var isOpen = aiSessionsDrawer && aiSessionsDrawer.classList.contains('open');
+          toggleSessionsDrawer(!isOpen);
+        });
+      }
+      if (aiSessionsClose) aiSessionsClose.addEventListener('click', function () { toggleSessionsDrawer(false); });
+      if (aiSessionsScrim) aiSessionsScrim.addEventListener('click', function () { toggleSessionsDrawer(false); });
+      if (aiNewChatBtn) aiNewChatBtn.addEventListener('click', function () { createNewAISession(); });
+      if (aiDrawerNewChat) aiDrawerNewChat.addEventListener('click', function () { createNewAISession(); });
+      if (aiSessionsList) {
+        aiSessionsList.addEventListener('click', function (e) {
+          var actEl = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
+          if (!actEl) return;
+          var row = actEl.closest('.ai-session-item[data-session-id]');
+          if (!row) return;
+          var sid = row.getAttribute('data-session-id');
+          var act = actEl.getAttribute('data-act');
+          if (act === 'select') switchAISession(sid);
+          else if (act === 'rename') renameAISession(sid);
+          else if (act === 'delete') deleteAISession(sid);
+        });
+      }
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && aiSessionsDrawer && aiSessionsDrawer.classList.contains('open')) {
+          toggleSessionsDrawer(false);
+        }
+      });
       document.getElementById('aiClear').addEventListener('click', function () {
         if (aiSending) return;
         // 破坏性操作：仅在有历史时二次确认，防止误触
-        if (aiHistory.length > 1 && !confirm('确定清空全部对话？清空后不可恢复。')) return;
+        if (aiHistory.length > 1 && !confirm('确定清空当前对话？清空后不可恢复。')) return;
         clearAIConversation();
         showAIToast('对话已清空');
       });
@@ -3049,6 +3486,8 @@
       // 清空对话
       function clearAIConversation() {
         if (aiSending) return;
+        var ses = getActiveSession();
+        if (ses) ses.customTitle = false;
         aiHistory = [{ role: 'system', content: buildSystemPrompt() }];
         saveAIHistory();
         renderAIHistory();
@@ -3063,7 +3502,7 @@
         undoBtn.classList.add('ai-undo-done');
       }
 
-      // 执行撤销：恢复快照 → 标记已撤销 → 自动以原指令重发（触发新一轮联网搜索）
+      // 执行撤销：恢复快照 → 标记已撤销
       function applyAIUndo(undoBtn) {
         try {
           var snap = null;
@@ -3097,10 +3536,177 @@
         }
       }
 
-      // 事件委托：实时创建或历史重渲染出来的 .ai-undo-btn 都能正常响应点击
+      function cancelInlineEdit(group) {
+        if (!group) return;
+        var box = group.querySelector('.ai-edit-box');
+        if (box && box.parentNode) box.parentNode.removeChild(box);
+        var msgEl = group.querySelector('.ai-msg');
+        if (msgEl) msgEl.style.display = '';
+        var actEl = group.querySelector('.ai-msg-actions');
+        if (actEl) actEl.style.display = '';
+      }
+
+      function submitEditedUserMessage(group, msgIdx, newText) {
+        if (aiSending) return;
+        var trimmed = String(newText || '').trim();
+        if (!trimmed) { showAIToast('消息内容不能为空'); return; }
+        var endpoint = aiEndpoint.value.trim();
+        var key = aiKey.value.trim();
+        if (!endpoint || !key) {
+          addAIMessage('请先点击右上角 ⚙ 打开配置窗口，填写 API 地址和密钥。', 'error');
+          return;
+        }
+        if (typeof msgIdx !== 'number' || msgIdx < 1 || msgIdx >= aiHistory.length) return;
+        pendingSnapshotId = null;
+        aiHistory[0].content = buildSystemPrompt();
+        aiHistory = aiHistory.slice(0, msgIdx);
+        aiHistory.push({ role: 'user', content: trimmed });
+        var active = getActiveSession();
+        if (active && !active.customTitle) active.title = deriveSessionTitle(aiHistory);
+        saveAIHistory();
+        renderAIHistory();
+        runAIRequest(trimmed);
+      }
+
+      function startEditUserMessage(group, msgIdx) {
+        if (aiSending || !group) return;
+        if (typeof msgIdx !== 'number' || msgIdx < 1 || !aiHistory[msgIdx] || aiHistory[msgIdx].role !== 'user') return;
+        var existing = aiMessages.querySelector('.ai-edit-box');
+        if (existing) cancelInlineEdit(existing.closest('.ai-msg-group'));
+
+        var msgEl = group.querySelector('.ai-msg');
+        var actEl = group.querySelector('.ai-msg-actions');
+        if (msgEl) msgEl.style.display = 'none';
+        if (actEl) actEl.style.display = 'none';
+
+        var box = document.createElement('div');
+        box.className = 'ai-edit-box';
+        var ta = document.createElement('textarea');
+        ta.className = 'ai-edit-input';
+        ta.rows = 2;
+        ta.value = String(aiHistory[msgIdx].content || '');
+
+        var bar = document.createElement('div');
+        bar.className = 'ai-edit-bar';
+        var cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'ai-edit-btn ai-edit-cancel';
+        cancelBtn.textContent = '取消';
+        var saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'ai-edit-btn primary ai-edit-save';
+        saveBtn.textContent = '发送';
+        bar.appendChild(cancelBtn);
+        bar.appendChild(saveBtn);
+        box.appendChild(ta);
+        box.appendChild(bar);
+        group.appendChild(box);
+
+        ta.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Escape') {
+            ev.preventDefault();
+            cancelInlineEdit(group);
+          } else if (ev.key === 'Enter' && !ev.shiftKey) {
+            ev.preventDefault();
+            submitEditedUserMessage(group, msgIdx, ta.value);
+          }
+        });
+        ta.addEventListener('input', function () {
+          this.style.height = 'auto';
+          this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+        });
+        try {
+          ta.focus();
+          ta.setSelectionRange(ta.value.length, ta.value.length);
+        } catch (e) {}
+      }
+
+      function regenerateAt(msgIdx) {
+        if (aiSending) return;
+        var endpoint = aiEndpoint.value.trim();
+        var key = aiKey.value.trim();
+        if (!endpoint || !key) {
+          addAIMessage('请先点击右上角 ⚙ 打开配置窗口，填写 API 地址和密钥。', 'error');
+          return;
+        }
+        var maxIdx = (typeof msgIdx === 'number' && msgIdx >= 1 && msgIdx < aiHistory.length)
+          ? msgIdx
+          : aiHistory.length;
+        var userIdx = -1;
+        for (var u = Math.min(maxIdx - 1, aiHistory.length - 1); u >= 1; u--) {
+          if (aiHistory[u] && aiHistory[u].role === 'user' && !aiHistory[u].hidden) {
+            userIdx = u;
+            break;
+          }
+        }
+        if (userIdx === -1) {
+          showAIToast('找不到对应的提问，无法重新回答');
+          return;
+        }
+        var userText = String(aiHistory[userIdx].content || '');
+        pendingSnapshotId = null;
+        aiHistory[0].content = buildSystemPrompt();
+        aiHistory = aiHistory.slice(0, userIdx + 1);
+        saveAIHistory();
+        renderAIHistory();
+        runAIRequest(userText);
+      }
+
+      // 事件委托：撤销 + 复制 / 重新回答 / 修改已发送消息
       aiMessages.addEventListener('click', function (e) {
-        var btn = e.target && e.target.closest ? e.target.closest('.ai-undo-btn') : null;
-        if (btn) applyAIUndo(btn);
+        var target = e.target;
+        if (!target || !target.closest) return;
+        var undoBtn = target.closest('.ai-undo-btn');
+        if (undoBtn) { applyAIUndo(undoBtn); return; }
+
+        var group = target.closest('.ai-msg-group');
+        var msgIdx = group ? parseInt(group.getAttribute('data-msg-index'), 10) : NaN;
+
+        var copyBtn = target.closest('.ai-act-copy');
+        if (copyBtn && group) {
+          var rawMsg = !isNaN(msgIdx) && aiHistory[msgIdx] ? aiHistory[msgIdx] : null;
+          var copyText = '';
+          if (rawMsg) {
+            copyText = rawMsg.role === 'assistant' ? extractCopyableText(rawMsg.content) : String(rawMsg.content || '');
+          }
+          if (!copyText) {
+            var bubbleEl = group.querySelector('.ai-msg');
+            copyText = bubbleEl ? String(bubbleEl.textContent || '').trim() : '';
+          }
+          copyTextToClipboard(copyText).then(function (ok) {
+            if (!ok) { showAIToast('复制失败'); return; }
+            copyBtn.classList.add('copied');
+            copyBtn.innerHTML = AI_CHECK_SVG;
+            showAIToast('已复制');
+            setTimeout(function () {
+              copyBtn.classList.remove('copied');
+              copyBtn.innerHTML = AI_COPY_SVG;
+            }, 1400);
+          });
+          return;
+        }
+
+        var regenBtn = target.closest('.ai-act-regen');
+        if (regenBtn) {
+          regenerateAt(isNaN(msgIdx) ? undefined : msgIdx);
+          return;
+        }
+
+        var editBtn = target.closest('.ai-act-edit');
+        if (editBtn && group && !isNaN(msgIdx)) {
+          startEditUserMessage(group, msgIdx);
+          return;
+        }
+
+        if (target.closest('.ai-edit-cancel') && group) {
+          cancelInlineEdit(group);
+          return;
+        }
+
+        if (target.closest('.ai-edit-save') && group && !isNaN(msgIdx)) {
+          var ta = group.querySelector('.ai-edit-input');
+          submitEditedUserMessage(group, msgIdx, ta ? ta.value : '');
+        }
       });
 
       aiSend.addEventListener('click', sendAI);
@@ -3136,18 +3742,18 @@
 
       // 统一收尾：任何路径结束都复位发送态（避免卡在"处理中…"）
       function endAISend() {
-        aiSending = false;
-        aiSend.disabled = false;
-        aiSend.textContent = '发送';
+        setAISendState(false);
       }
 
-      function pushAssistant(content) {
+      function pushAssistant(content, opts) {
         var msg = { role: 'assistant', content: content };
+        if (opts && opts.isError) msg.isError = true;
         if (pendingSnapshotId) {
           msg.snapshotId = pendingSnapshotId;
           pendingSnapshotId = null;
         }
         aiHistory.push(msg);
+        return msg;
       }
 
       function consumeChatResponse(res, opts) {
@@ -3314,43 +3920,27 @@
         });
       }
 
-      function sendAI() {
+      function runAIRequest(text) {
         if (aiSending) return;
-        var text = aiInput.value.trim();
-        if (!text) return;
-
         var endpoint = aiEndpoint.value.trim();
         var key = aiKey.value.trim();
         var model = aiModel.value.trim() || 'deepseek-flash';
-
         if (!endpoint || !key) {
           addAIMessage('请先点击右上角 ⚙ 打开配置窗口，填写 API 地址和密钥。', 'error');
           return;
         }
         pendingSnapshotId = null;
-
         try {
           aiHistory[0].content = buildSystemPrompt();
-          aiHistory.push({ role: 'user', content: text });
-          saveAIHistory();
-
-          var userDiv = document.createElement('div');
-          userDiv.className = 'ai-msg ai-msg-user';
-          userDiv.textContent = text;
-          aiMessages.appendChild(userDiv);
-          aiMessages.scrollTop = aiMessages.scrollHeight;
-
-          aiInput.value = '';
-          aiInput.style.height = 'auto';
-
-          aiSending = true;
-          aiSend.disabled = true;
-          aiSend.textContent = '处理中…';
+          setAISendState(true);
 
           var url = buildChatUrl(endpoint);
           var bubble = document.createElement('div');
           bubble.className = 'ai-msg ai-msg-assistant';
-          aiMessages.appendChild(bubble);
+          var group = document.createElement('div');
+          group.className = 'ai-msg-group ai-msg-group-assistant';
+          group.appendChild(bubble);
+          aiMessages.appendChild(group);
           aiMessages.scrollTop = aiMessages.scrollHeight;
 
           var ctx = {
@@ -3445,8 +4035,9 @@
             bubble.innerHTML = renderMarkdown(errMsg);
             bubble.style.whiteSpace = 'normal';
             bubble.className = 'ai-msg ai-msg-error';
-            aiHistory.push({ role: 'assistant', content: errMsg });
+            var errObj = pushAssistant(errMsg, { isError: true });
             saveAIHistory();
+            attachAssistantFooter(group, aiHistory.indexOf(errObj), true);
           }).then(function () {
             if (ctx.streamFailed) { endAISend(); return; }
             if (ctx.webSearchEnabled && !(ctx.pendingToolCallName === 'web_search' && ctx.pendingToolCallArgs)) {
@@ -3492,8 +4083,9 @@
                   finalContent += stripToolMarkup(ctx.accumulated)
                     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
                     .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '');
-                  pushAssistant(finalContent);
+                  var sMsg = pushAssistant(finalContent);
                   saveAIHistory();
+                  attachAssistantFooter(group, aiHistory.indexOf(sMsg), false);
                   endAISend();
                 }).catch(function (fErr) {
                   var fErrMsg = '联网搜索后回答失败：' + (fErr && fErr.message ? fErr.message : fErr);
@@ -3503,8 +4095,9 @@
                   ctx.reasoningTextEl = null;
                   var _et = bubble.querySelector('.ai-thinking');
                   if (_et) finishThinking(_et);
-                  aiHistory.push({ role: 'assistant', content: fErrMsg });
+                  var feMsg = pushAssistant(fErrMsg, { isError: true });
                   saveAIHistory();
+                  attachAssistantFooter(group, aiHistory.indexOf(feMsg), true);
                   endAISend();
                 });
               }
@@ -3530,8 +4123,9 @@
               if (ctx.reasoningAccum) {
                 finalContent = '<think>' + stripToolMarkup(ctx.reasoningAccum) + '</think>\n' + finalContent;
               }
-              pushAssistant(finalContent);
+              var nMsg = pushAssistant(finalContent);
               saveAIHistory();
+              attachAssistantFooter(group, aiHistory.indexOf(nMsg), false);
               endAISend();
             };
 
@@ -3559,5 +4153,60 @@
           endAISend();
         }
       }
+
+      function sendAI() {
+        if (aiSending) return;
+        var text = aiInput.value.trim();
+        if (!text) return;
+
+        var endpoint = aiEndpoint.value.trim();
+        var key = aiKey.value.trim();
+        if (!endpoint || !key) {
+          addAIMessage('请先点击右上角 ⚙ 打开配置窗口，填写 API 地址和密钥。', 'error');
+          return;
+        }
+        pendingSnapshotId = null;
+
+        try {
+          aiHistory[0].content = buildSystemPrompt();
+          var userMsg = { role: 'user', content: text };
+          aiHistory.push(userMsg);
+          saveAIHistory();
+          var userIdx = aiHistory.indexOf(userMsg);
+
+          var userDiv = document.createElement('div');
+          userDiv.className = 'ai-msg ai-msg-user';
+          userDiv.style.whiteSpace = 'normal';
+          userDiv.innerHTML = renderMarkdown(text);
+          var userGroup = createMessageGroup('user', userIdx, userDiv);
+          aiMessages.appendChild(userGroup);
+          aiMessages.scrollTop = aiMessages.scrollHeight;
+
+          aiInput.value = '';
+          aiInput.style.height = 'auto';
+
+          runAIRequest(text);
+        } catch (e) {
+          console.warn('[AI] 发送异常:', e);
+          addAIMessage('发送失败：' + e.message, 'error');
+          endAISend();
+        }
+      }
+
+      syncSessionHeaderTitle();
+      renderSessionsList();
   window.__motuo.toggleAI = toggleAI;
+  window.__motuo.aiSessions = {
+    list: function () {
+      return aiSessions.map(function (s) {
+        return { id: s.id, title: s.title, updatedAt: s.updatedAt, count: s.messages.length };
+      });
+    },
+    activeId: function () { return activeSessionId; },
+    createNew: createNewAISession,
+    switchTo: switchAISession,
+    rename: renameAISession,
+    remove: deleteAISession,
+    openDrawer: toggleSessionsDrawer
+  };
 })();

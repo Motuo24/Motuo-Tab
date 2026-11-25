@@ -1689,7 +1689,8 @@
                 config: (window.__motuo && window.__motuo.redactAIConfigJson)
                   ? window.__motuo.redactAIConfigJson(readLS('newtab.ai.config.v1'))
                   : readLS('newtab.ai.config.v1'),
-                history: readLS('newtab.ai.history.v1')
+                history: readLS('newtab.ai.history.v1'),
+                sessions: readLS('newtab.ai.sessions.v1')
               },
               wallpaper: wallpaperDataUrl
             }
@@ -1746,6 +1747,7 @@
         if (isFull && d.ai) {
           writeLS('newtab.ai.config.v1', d.ai.config);
           writeLS('newtab.ai.history.v1', d.ai.history);
+          if (d.ai.sessions !== undefined) writeLS('newtab.ai.sessions.v1', d.ai.sessions);
         }
 
         list = items;

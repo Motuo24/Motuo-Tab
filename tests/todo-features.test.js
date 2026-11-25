@@ -65,7 +65,7 @@ function installFullIndexedDB(window) {
   return stores;
 }
 
-test('T1：Hero Logo 与时段问候语居于搜索框上方，可独立开关并切换 A/B 样式', () => {
+test('T1：Hero Logo 与时段问候语居于搜索框上方，可独立开关、切换 A/C 样式与调节透明度', () => {
   const { window, document } = boot();
   const heroBrand = document.getElementById('heroBrand');
   const heroLogoWrap = document.getElementById('heroLogoWrap');
@@ -76,7 +76,11 @@ test('T1：Hero Logo 与时段问候语居于搜索框上方，可独立开关�
   assert.ok(searchWrap.contains(heroBrand), 'Hero 品牌区应位于 .search-wrap 内');
   assert.strictEqual(heroLogoWrap.hidden, false, '默认显示起始页 Logo');
   assert.strictEqual(heroLogoWrap.getAttribute('data-logo-style'), 'a', '默认 Logo 样式为 A');
+  assert.strictEqual(document.querySelector('#logoStyleSwitch .sys-logo-option[data-logo-style="b"]'), null, '应已排除款式 B');
+  assert.ok(document.querySelector('#logoStyleSwitch .sys-logo-option[data-logo-style="c"]'), '应提供款式 C（折角新页）');
   assert.ok(heroLogoWrap.querySelector('.motuo-logo-svg'), 'Hero 区应渲染 SVG Logo');
+  assert.strictEqual(document.documentElement.style.getPropertyValue('--hero-logo-alpha'), '0.65');
+  assert.strictEqual(document.getElementById('heroLogoAlphaVal').textContent, '65%');
   assert.ok(title.textContent && title.textContent !== 'Motuo Tab', '默认应展示时段问候语');
   assert.ok(!/\d{1,2}:\d{2}/.test(title.textContent), '不应包含时钟数字');
 
@@ -97,22 +101,31 @@ test('T1：Hero Logo 与时段问候语居于搜索框上方，可独立开关�
   assert.strictEqual(heroLogoWrap.hidden, false);
   assert.strictEqual(heroBrand.hidden, false);
 
-  // 独立关闭 Logo：Logo 与 greeting 都关闭时整个 Hero 折叠
+  // 独立关闭 Logo：Logo 与 greeting 都关闭时整个 Hero 折叠，滑块同步禁用
   const toggleLogo = document.getElementById('toggleHeroLogo');
   toggleLogo.checked = false;
   toggleLogo.dispatchEvent(new window.Event('change', { bubbles: true }));
   assert.strictEqual(window.localStorage.getItem('newtab.heroLogo.v1'), '0');
   assert.strictEqual(heroLogoWrap.hidden, true);
   assert.strictEqual(heroBrand.hidden, true);
+  assert.strictEqual(document.getElementById('heroLogoAlphaSlider').disabled, true);
 
-  // 重新打开 Logo 并切换为样式 B（叠页星芒），Hero 与关于页同步更新
+  // 重新打开 Logo 并切换为样式 C（折角新页），Hero 与关于页同步更新，并调节透明度到 95%
   toggleLogo.checked = true;
   toggleLogo.dispatchEvent(new window.Event('change', { bubbles: true }));
-  document.querySelector('#logoStyleSwitch .sys-logo-option[data-logo-style="b"]').click();
-  assert.strictEqual(window.localStorage.getItem('newtab.logoStyle.v1'), 'b');
-  assert.strictEqual(heroLogoWrap.getAttribute('data-logo-style'), 'b');
-  assert.strictEqual(aboutLogoSlot.getAttribute('data-logo-style'), 'b');
+  document.querySelector('#logoStyleSwitch .sys-logo-option[data-logo-style="c"]').click();
+  assert.strictEqual(window.localStorage.getItem('newtab.logoStyle.v1'), 'c');
+  assert.strictEqual(heroLogoWrap.getAttribute('data-logo-style'), 'c');
+  assert.strictEqual(aboutLogoSlot.getAttribute('data-logo-style'), 'c');
   assert.ok(aboutLogoSlot.querySelector('.motuo-logo-svg'));
+
+  const alphaSlider = document.getElementById('heroLogoAlphaSlider');
+  alphaSlider.value = '0.95';
+  alphaSlider.dispatchEvent(new window.Event('input', { bubbles: true }));
+  alphaSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.strictEqual(window.localStorage.getItem('newtab.heroLogoAlpha.v1'), '0.95');
+  assert.strictEqual(document.documentElement.style.getPropertyValue('--hero-logo-alpha'), '0.95');
+  assert.strictEqual(document.getElementById('heroLogoAlphaVal').textContent, '95%');
 });
 
 test('统一系统设置弹窗：6 栏切换、个性化/快捷键/关于直达独立页签与主题同步', () => {
@@ -263,7 +276,7 @@ test('T7b：WebDAV 测试连接、上传排除壁纸与凭证、拉取支持合�
       items: [
         { name: '远端新卡', url: 'https://remote.example', iconSrc: 'color', color: 'blue', letter: '远' }
       ],
-      settings: { theme: 'dark', greeting: '0', heroLogo: '1', logoStyle: 'b' },
+      settings: { theme: 'dark', greeting: '0', heroLogo: '1', logoStyle: 'c', heroLogoAlpha: '0.9' },
       ai: {},
       wallpaper: null
     }
@@ -319,6 +332,9 @@ test('T7b：WebDAV 测试连接、上传排除壁纸与凭证、拉取支持合�
   assert.strictEqual(document.getElementById('pageTitle').hidden, true);
   assert.strictEqual(document.getElementById('pageTitle').textContent, '');
   assert.strictEqual(document.getElementById('heroLogoWrap').hidden, false);
-  assert.strictEqual(window.localStorage.getItem('newtab.logoStyle.v1'), 'b');
-  assert.strictEqual(document.getElementById('aboutLogoSlot').getAttribute('data-logo-style'), 'b');
+  assert.strictEqual(window.localStorage.getItem('newtab.logoStyle.v1'), 'c');
+  assert.strictEqual(document.getElementById('aboutLogoSlot').getAttribute('data-logo-style'), 'c');
+  assert.strictEqual(window.localStorage.getItem('newtab.heroLogoAlpha.v1'), '0.9');
+  assert.strictEqual(document.documentElement.style.getPropertyValue('--hero-logo-alpha'), '0.9');
+  assert.strictEqual(document.getElementById('heroLogoAlphaVal').textContent, '90%');
 });

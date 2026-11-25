@@ -25,7 +25,8 @@
       var THEME_KEY          = 'newtab.theme.v1';          // 主题模式：light / dark / auto
       var GREETING_KEY       = 'newtab.greeting.v1';       // T1 时段问候语开关（默认开）
       var HERO_LOGO_KEY      = 'newtab.heroLogo.v1';       // T1 起始页 Hero Logo 开关（默认开）
-      var LOGO_STYLE_KEY     = 'newtab.logoStyle.v1';      // T1 Logo 样式：a（流光 M）/ b（叠页星芒）
+      var LOGO_STYLE_KEY     = 'newtab.logoStyle.v1';      // T1 Logo 样式：a（流光 M）/ c（折角新页）
+      var HERO_LOGO_ALPHA_KEY = 'newtab.heroLogoAlpha.v1'; // T1 起始页 Logo 透明度（0.2–1.0，默认 0.65）
       var WEBDAV_KEY         = 'newtab.webdav.v1';         // T7b WebDAV 云同步配置
       var BACKUP_META_KEY    = 'newtab.backupMeta.v1';     // 备份提醒状态
       var BACKUP_REMIND_MS   = 30 * 86400000;
@@ -1675,6 +1676,7 @@
                 greeting: readLS(GREETING_KEY),
                 heroLogo: readLS(HERO_LOGO_KEY),
                 logoStyle: readLS(LOGO_STYLE_KEY),
+                heroLogoAlpha: readLS(HERO_LOGO_ALPHA_KEY),
                 solidColor: readLS('newtab.solidColor.v1'),
                 blur: readLS('newtab.blur.v1'),
                 alpha: readLS('newtab.alpha.v1'),
@@ -1727,6 +1729,7 @@
           if (st.greeting !== undefined) writeLS(GREETING_KEY, st.greeting);
           if (st.heroLogo !== undefined) writeLS(HERO_LOGO_KEY, st.heroLogo);
           if (st.logoStyle !== undefined) writeLS(LOGO_STYLE_KEY, st.logoStyle);
+          if (st.heroLogoAlpha !== undefined) writeLS(HERO_LOGO_ALPHA_KEY, st.heroLogoAlpha);
           writeLS('newtab.solidColor.v1', st.solidColor);
           writeLS('newtab.blur.v1', st.blur);
           writeLS('newtab.alpha.v1', st.alpha);
@@ -2415,7 +2418,7 @@
       // ========== T1 起始页 Hero Logo 与时段问候语 ==========
       var MOTUO_LOGOS = {
         a: '<svg class="motuo-logo-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 46C12 46 14 21 21 16C26 12.5 30 24 32 29C34 24 38 12.5 43 16C50 21 52 46 52 46C52 48.5 48.5 50 45.5 48C42.5 46 41 32 39 27C37 33 34.5 38.5 32 38.5C29.5 38.5 27 33 25 27C23 32 21.5 46 18.5 48C15.5 50 12 48.5 12 46Z" fill="url(#mtLogoGradV)" stroke="var(--logo-rim)" stroke-width="1"/></svg>',
-        b: '<svg class="motuo-logo-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="13" y="15" width="32" height="32" rx="10" fill="url(#mtLogoGradAlt)" stroke="var(--logo-rim)" stroke-width="1"/><rect x="21" y="21" width="31" height="31" rx="10" fill="url(#mtLogoGradV)" stroke="var(--logo-rim)" stroke-width="1"/><path d="M36.5 29.5C37.2 33.4 38.6 34.8 42.5 35.5C38.6 36.2 37.2 37.6 36.5 41.5C35.8 37.6 34.4 36.2 30.5 35.5C34.4 34.8 35.8 33.4 36.5 29.5Z" fill="var(--logo-accent)"/></svg>'
+        c: '<svg class="motuo-logo-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22 14H37L50 27V44C50 48.4 46.4 52 42 52H22C17.6 52 14 48.4 14 44V22C14 17.6 17.6 14 22 14Z" fill="url(#mtLogoGradV)" stroke="var(--logo-rim)" stroke-width="1"/><path d="M37 14V23C37 25.2 38.8 27 41 27H50L37 14Z" fill="var(--logo-accent)"/><path d="M23 39V30L32 37L41 30V39" stroke="var(--logo-rim)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
       };
       var heroBrandEl = document.getElementById('heroBrand');
       var heroLogoWrapEl = document.getElementById('heroLogoWrap');
@@ -2424,6 +2427,9 @@
       var toggleGreetingEl = document.getElementById('toggleGreeting');
       var toggleHeroLogoEl = document.getElementById('toggleHeroLogo');
       var logoStyleSwitchEl = document.getElementById('logoStyleSwitch');
+      var heroLogoAlphaRowEl = document.getElementById('heroLogoAlphaRow');
+      var heroLogoAlphaSliderEl = document.getElementById('heroLogoAlphaSlider');
+      var heroLogoAlphaValEl = document.getElementById('heroLogoAlphaVal');
 
       function greetingForHour(h) {
         if (h < 5) return '夜深了，早点休息';
@@ -2443,12 +2449,30 @@
       function getLogoStyle() {
         try {
           var v = localStorage.getItem(LOGO_STYLE_KEY);
-          return v === 'b' ? 'b' : 'a';
+          return v === 'c' ? 'c' : 'a';
         } catch (e) { return 'a'; }
       }
       function setLogoStyle(style) {
-        var next = style === 'b' ? 'b' : 'a';
+        var next = style === 'c' ? 'c' : 'a';
         try { localStorage.setItem(LOGO_STYLE_KEY, next); } catch (e) {}
+        renderBrandHero();
+        return next;
+      }
+      function clampHeroLogoAlpha(val) {
+        var n = parseFloat(val);
+        if (!isFinite(n)) return 0.65;
+        n = Math.max(0.2, Math.min(1, n));
+        return Math.round(n * 100) / 100;
+      }
+      function getHeroLogoAlpha() {
+        try {
+          var raw = localStorage.getItem(HERO_LOGO_ALPHA_KEY);
+          return raw === null ? 0.65 : clampHeroLogoAlpha(raw);
+        } catch (e) { return 0.65; }
+      }
+      function setHeroLogoAlpha(val) {
+        var next = clampHeroLogoAlpha(val);
+        try { localStorage.setItem(HERO_LOGO_ALPHA_KEY, String(next)); } catch (e) {}
         renderBrandHero();
         return next;
       }
@@ -2465,10 +2489,21 @@
         var greetOn = isGreetingEnabled();
         var logoOn = isHeroLogoEnabled();
         var style = getLogoStyle();
+        var alpha = getHeroLogoAlpha();
+        var sliderPct = Math.round(((alpha - 0.2) / 0.8) * 1000) / 10;
         var svgMarkup = MOTUO_LOGOS[style] || MOTUO_LOGOS.a;
+
+        document.documentElement.style.setProperty('--hero-logo-alpha', String(alpha));
+        document.documentElement.style.setProperty('--hero-logo-slider-pct', sliderPct + '%');
 
         if (toggleGreetingEl) toggleGreetingEl.checked = greetOn;
         if (toggleHeroLogoEl) toggleHeroLogoEl.checked = logoOn;
+        if (heroLogoAlphaRowEl) heroLogoAlphaRowEl.classList.toggle('is-disabled', !logoOn);
+        if (heroLogoAlphaSliderEl) {
+          heroLogoAlphaSliderEl.value = String(alpha);
+          heroLogoAlphaSliderEl.disabled = !logoOn;
+        }
+        if (heroLogoAlphaValEl) heroLogoAlphaValEl.textContent = Math.round(alpha * 100) + '%';
         if (logoStyleSwitchEl) {
           logoStyleSwitchEl.classList.toggle('is-disabled', !logoOn);
           logoStyleSwitchEl.querySelectorAll('.sys-logo-option').forEach(function (btn) {
@@ -2520,6 +2555,15 @@
           var btn = e.target.closest('.sys-logo-option[data-logo-style]');
           if (!btn) return;
           setLogoStyle(btn.getAttribute('data-logo-style'));
+          flashSysSaved();
+        });
+      }
+      if (heroLogoAlphaSliderEl) {
+        heroLogoAlphaSliderEl.addEventListener('input', function () {
+          setHeroLogoAlpha(this.value);
+        });
+        heroLogoAlphaSliderEl.addEventListener('change', function () {
+          setHeroLogoAlpha(this.value);
           flashSysSaved();
         });
       }
@@ -3429,7 +3473,9 @@
         isEnabled: isGreetingEnabled,
         isLogoEnabled: isHeroLogoEnabled,
         getLogoStyle: getLogoStyle,
-        setLogoStyle: setLogoStyle
+        setLogoStyle: setLogoStyle,
+        getLogoAlpha: getHeroLogoAlpha,
+        setLogoAlpha: setHeroLogoAlpha
       };
       window.__motuo.iconCache = {
         getSync: getCachedIconSync,

@@ -24,7 +24,8 @@
      newtab.suggestOnline.v1    联网搜索建议开关（百度，默认开）
      newtab.greeting.v1         时段问候语开关（默认开）
      newtab.heroLogo.v1         起始页搜索框上方 Logo 开关（默认开）
-     newtab.logoStyle.v1        Logo 样式选择（a 流光 M / b 叠页星芒，默认 a）
+     newtab.logoStyle.v1        Logo 样式选择（a 流光 M / c 折角新页，默认 a）
+     newtab.heroLogoAlpha.v1    起始页 Logo 透明度（0.2–1.0，默认 0.65）
      newtab.shortcuts.v1        快捷方式与分组数据
      newtab.solidColor.v1       纯色壁纸
      newtab.blur.v1             壁纸模糊度
@@ -259,13 +260,18 @@
                       <span class="sys-logo-sub">圆润双翼 · 雾银渐变</span>
                     </span>
                   </button>
-                  <button type="button" class="sys-logo-option" data-logo-style="b">
-                    <span class="sys-logo-thumb" data-thumb="b"></span>
+                  <button type="button" class="sys-logo-option" data-logo-style="c">
+                    <span class="sys-logo-thumb" data-thumb="c"></span>
                     <span class="sys-logo-meta">
-                      <span class="sys-logo-name">叠页星芒</span>
-                      <span class="sys-logo-sub">双层页签 · 微光星点</span>
+                      <span class="sys-logo-name">折角新页</span>
+                      <span class="sys-logo-sub">圆角标签页 · 折角 M</span>
                     </span>
                   </button>
+                </div>
+                <div class="sys-slider-line sys-logo-alpha-row" id="heroLogoAlphaRow">
+                  <span class="sys-slider-label">Logo 透明度</span>
+                  <input type="range" id="heroLogoAlphaSlider" class="ai-range" min="0.2" max="1" step="0.05" value="0.65" aria-label="起始页 Logo 透明度" />
+                  <span class="sys-slider-val" id="heroLogoAlphaVal">65%</span>
                 </div>
               </div>
 

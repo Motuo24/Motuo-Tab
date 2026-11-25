@@ -24,11 +24,12 @@
     --tile-img-bg: rgba(255,255,255, var(--ui-img-alpha));
     --tile-ltr-bg: rgba(255,255,255, var(--ui-ltr-alpha));
     --overlay-bg: linear-gradient(rgba(255,255,255,0.78), rgba(255,255,255,0.78));
-    --logo-stop-1: rgba(118, 126, 140, 0.56);
-    --logo-stop-2: rgba(164, 172, 184, 0.28);
-    --logo-stop-3: rgba(196, 202, 212, 0.10);
-    --logo-rim: rgba(255, 255, 255, 0.72);
-    --logo-accent: rgba(124, 134, 150, 0.48);
+    --hero-logo-alpha: 0.65;
+    --logo-stop-1: rgba(102, 112, 128, 0.92);
+    --logo-stop-2: rgba(142, 152, 168, 0.58);
+    --logo-stop-3: rgba(178, 186, 198, 0.26);
+    --logo-rim: rgba(255, 255, 255, 0.88);
+    --logo-accent: rgba(108, 118, 136, 0.72);
     --logo-halo: radial-gradient(circle, rgba(130, 140, 158, 0.14) 0%, rgba(130, 140, 158, 0) 70%);
   }
   html[data-theme="dark"] {
@@ -42,11 +43,11 @@
     --tile-img-bg: rgba(38,43,52, var(--ui-img-alpha));
     --tile-ltr-bg: rgba(38,43,52, var(--ui-ltr-alpha));
     --overlay-bg: linear-gradient(rgba(12,14,18,0.72), rgba(12,14,18,0.72));
-    --logo-stop-1: rgba(226, 230, 238, 0.50);
-    --logo-stop-2: rgba(182, 188, 198, 0.24);
-    --logo-stop-3: rgba(140, 146, 158, 0.07);
-    --logo-rim: rgba(255, 255, 255, 0.26);
-    --logo-accent: rgba(220, 224, 232, 0.42);
+    --logo-stop-1: rgba(236, 240, 246, 0.90);
+    --logo-stop-2: rgba(190, 198, 210, 0.52);
+    --logo-stop-3: rgba(148, 156, 170, 0.22);
+    --logo-rim: rgba(255, 255, 255, 0.42);
+    --logo-accent: rgba(226, 232, 240, 0.68);
     --logo-halo: radial-gradient(circle, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 70%);
     scrollbar-color: rgba(255, 255, 255, 0.32) transparent;
   }
@@ -113,6 +114,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    opacity: var(--hero-logo-alpha, 0.65);
+    transition: opacity 0.16s ease;
   }
   .hero-logo-wrap[hidden] { display: none !important; }
   .hero-logo-wrap::before {
@@ -1511,6 +1514,9 @@
   }
   #generalConfigModal #blurSlider {
     background: linear-gradient(to right, var(--ai-ink-solid) 0%, var(--ai-ink-solid) var(--blur-slider-pct, 15%), var(--ai-range-track) var(--blur-slider-pct, 15%));
+  }
+  #generalConfigModal #heroLogoAlphaSlider {
+    background: linear-gradient(to right, var(--ai-ink-solid) 0%, var(--ai-ink-solid) var(--hero-logo-slider-pct, 56.3%), var(--ai-range-track) var(--hero-logo-slider-pct, 56.3%));
   }
   #aiConfigModal.modal-mask,
   #generalConfigModal.modal-mask,
@@ -3771,6 +3777,14 @@
     background: var(--ai-surf-soft);
     border: 1px solid var(--ai-border-subtle);
     color: var(--ai-ink-2);
+  }
+
+  .sys-logo-alpha-row.is-disabled {
+    opacity: 0.48;
+  }
+  #aboutLogoSlot .motuo-logo-svg,
+  .sys-logo-thumb .motuo-logo-svg {
+    opacity: 0.78;
   }
 
   @media (prefers-reduced-motion: reduce) {

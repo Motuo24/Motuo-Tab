@@ -437,19 +437,41 @@
         return card;
       }
 
-      // 就地更新某张卡片的内容（编辑后用，不重绘避免闪烁）
+      // 就地更新某张卡片的内容（编辑/入组后用，保持原 DOM 节点避免整页重建卡顿）
       function updateCardContent(card, item) {
+        if (!card || !item) return;
         cardItemMap.set(card, item);
         var folder = isFolderItem(item);
-        card.className = 'shortcut' + (folder ? ' shortcut-folder' : '');
+        card.className = 'shortcut no-enter-anim' + (folder ? ' shortcut-folder' : '');
         card.href = folder ? '#' : (item.url || '#');
         card.dataset.iconSrc = folder ? 'folder' : (item.iconSrc || 'color');
         if (folder && item.id) card.dataset.folderId = item.id;
         else card.removeAttribute('data-folder-id');
+        card.setAttribute('draggable', editing ? 'true' : 'false');
         var tile = card.querySelector('.tile');
         var label = card.querySelector('.label');
-        fillTile(tile, item);
-        label.textContent = item.name;
+        if (tile) fillTile(tile, item);
+        if (label) label.textContent = item.name;
+      }
+
+      function pulseFolderAbsorb(cardEl) {
+        if (!cardEl) return;
+        cardEl.classList.remove('folder-absorb');
+        void cardEl.offsetWidth;
+        cardEl.classList.add('folder-absorb');
+        setTimeout(function () { cardEl.classList.remove('folder-absorb'); }, 320);
+      }
+
+      function findCardElementByItem(item) {
+        if (!item) return null;
+        var cards = nav.querySelectorAll('.shortcut');
+        for (var i = 0; i < cards.length; i++) {
+          if (cardItemMap.get(cards[i]) === item) return cards[i];
+        }
+        if (isFolderItem(item) && item.id) {
+          return nav.querySelector('.shortcut-folder[data-folder-id="' + item.id + '"]');
+        }
+        return null;
       }
 
       // 删除一张卡片（带退场动画），动画结束后自动从 DOM 移除
@@ -469,17 +491,19 @@
         setTimeout(finish, 300);
       }
 
-      // FLIP：让重排时其他卡片平滑滑动到新位置
-      // （被拖的卡片自身不参与，避免 .dragging 的 transform 干扰位置测量）
-      function animateReorder(change) {
-        var cards = Array.from(nav.querySelectorAll('.shortcut'));
+      // FLIP：让重排时其他卡片平滑滑动到新位置（支持主页 nav 或文件夹 folderGrid）
+      function animateReorder(change, container, ignoreEl) {
+        var root = container || nav;
+        var skip = ignoreEl === undefined ? dragSrc : ignoreEl;
+        var cards = Array.from(root.querySelectorAll('.shortcut'));
         var firstRects = new Map();
         cards.forEach(function (c) { firstRects.set(c, c.getBoundingClientRect()); });
 
         change(); // 改 DOM
 
-        cards.forEach(function (c) {
-          if (c === dragSrc) return;
+        var postCards = Array.from(root.querySelectorAll('.shortcut'));
+        postCards.forEach(function (c) {
+          if (c === skip) return;
           var first = firstRects.get(c);
           if (!first) return;
           var last = c.getBoundingClientRect();
@@ -491,15 +515,18 @@
           }
         });
         // 下一帧开始播放过渡
-        requestAnimationFrame(function () {
-          requestAnimationFrame(function () {
-            cards.forEach(function (c) {
-              if (c === dragSrc) return;
-              c.style.transition = '';
-              c.style.transform = '';
-            });
+        var play = function () {
+          postCards.forEach(function (c) {
+            if (c === skip) return;
+            c.style.transition = '';
+            c.style.transform = '';
           });
-        });
+        };
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(function () { requestAnimationFrame(play); });
+        } else {
+          play();
+        }
       }
 
       var list = load();
@@ -1060,8 +1087,315 @@
         setEditing(false);
       });
 
-      // ========== 编辑模式：HTML5 拖拽排序 + 拖到底部删除 ==========
-      var dragSrc = null; // 当前拖拽的卡片元素
+      // ========== 编辑模式：智能拖拽（缝隙排序 / 主体入组 / 悬停建组 / 拖到底部删除） ==========
+      var dragSrc = null; // 当前拖拽的主页卡片元素
+      var lastDraggedEl = null;
+      var justDraggedAt = 0;
+      var dragInsertLine = document.getElementById('dragInsertLine');
+      var dragIntentBadge = document.getElementById('dragIntentBadge');
+      var dragIntent = { mode: 'none' };
+      var mergeHoverTimer = null;
+      var mergeCandidateEl = null;
+      var MERGE_HOLD_MS = 450;
+      var STICKY_MARGIN = 8;
+
+      function cancelMergeTimer() {
+        if (mergeHoverTimer) {
+          clearTimeout(mergeHoverTimer);
+          mergeHoverTimer = null;
+        }
+        mergeCandidateEl = null;
+      }
+
+      function hideDragVisuals() {
+        nav.querySelectorAll('.shortcut.drop-into-folder').forEach(function (el) { el.classList.remove('drop-into-folder'); });
+        nav.querySelectorAll('.shortcut.drop-merge-folder').forEach(function (el) { el.classList.remove('drop-merge-folder'); });
+        if (dragInsertLine) dragInsertLine.classList.remove('visible');
+        if (dragIntentBadge) dragIntentBadge.classList.remove('visible');
+      }
+
+      function clearDragFeedback() {
+        cancelMergeTimer();
+        hideDragVisuals();
+        dragIntent = { mode: 'none' };
+      }
+
+      function getNormRect(el) {
+        var r = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+        if (!r) return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+        var w = r.width || 0;
+        var h = r.height || 0;
+        var left = r.left || 0;
+        var top = r.top || 0;
+        var right = typeof r.right === 'number' ? r.right : left + w;
+        var bottom = typeof r.bottom === 'number' ? r.bottom : top + h;
+        return { left: left, top: top, right: right, bottom: bottom, width: w, height: h };
+      }
+
+      function getTileNormRect(cardEl) {
+        var tr = getNormRect(cardEl && cardEl.querySelector('.tile'));
+        return tr.width > 0 ? tr : getNormRect(cardEl);
+      }
+
+      function showDragBadgeOver(cardEl, text) {
+        if (!dragIntentBadge || !cardEl) return;
+        var r = getTileNormRect(cardEl);
+        if (r.width > 0) {
+          dragIntentBadge.style.left = Math.round(r.left + r.width / 2) + 'px';
+          dragIntentBadge.style.top = Math.max(8, Math.round(r.top - 10)) + 'px';
+        }
+        dragIntentBadge.textContent = text;
+        dragIntentBadge.classList.add('visible');
+      }
+
+      function applyDragFeedback() {
+        hideDragVisuals();
+        if (dragIntent.mode === 'into-folder' && dragIntent.folderEl) {
+          dragIntent.folderEl.classList.add('drop-into-folder');
+          showDragBadgeOver(dragIntent.folderEl, '移入「' + ((dragIntent.folderItem && dragIntent.folderItem.name) || '分组') + '」');
+        } else if (dragIntent.mode === 'merge-folder' && dragIntent.targetEl) {
+          dragIntent.targetEl.classList.add('drop-merge-folder');
+          showDragBadgeOver(dragIntent.targetEl, '松手合并为新分组');
+        } else if (dragIntent.mode === 'reorder' && dragInsertLine) {
+          dragInsertLine.style.left = Math.round((dragIntent.indicatorX || 0) - 1.5) + 'px';
+          dragInsertLine.style.top = Math.round(dragIntent.indicatorY || 0) + 'px';
+          dragInsertLine.style.height = Math.max(24, Math.round(dragIntent.indicatorH || 64)) + 'px';
+          dragInsertLine.classList.add('visible');
+        }
+      }
+
+      function moveCardIntoFolderInPlace(srcCardEl, srcItem, folderEl, dstFolder) {
+        var srcIdx = list.indexOf(srcItem);
+        if (!srcItem || isFolderItem(srcItem) || !dstFolder || !isFolderItem(dstFolder) || srcIdx === -1) return false;
+        list.splice(srcIdx, 1);
+        if (!Array.isArray(dstFolder.children)) dstFolder.children = [];
+        dstFolder.children.push(srcItem);
+        save(list);
+        var cardEl = srcCardEl || findCardElementByItem(srcItem);
+        var targetFolderEl = folderEl || findCardElementByItem(dstFolder);
+        animateReorder(function () {
+          if (cardEl && cardEl.parentNode) cardEl.parentNode.removeChild(cardEl);
+        }, nav, cardEl);
+        if (targetFolderEl) {
+          updateCardContent(targetFolderEl, dstFolder);
+          pulseFolderAbsorb(targetFolderEl);
+        }
+        if (openFolderId === dstFolder.id) renderFolderGrid(dstFolder);
+        return true;
+      }
+
+      function mergeCardsIntoNewFolderInPlace(srcCardEl, srcItem, dstCardEl, dstItem) {
+        var srcIdx = list.indexOf(srcItem);
+        var dstIdx = list.indexOf(dstItem);
+        if (!srcItem || !dstItem || srcItem === dstItem || isFolderItem(srcItem) || isFolderItem(dstItem) || srcIdx === -1 || dstIdx === -1) return false;
+        var newFolder = { type: 'folder', id: makeFolderId(), name: '新建分组', children: [dstItem, srcItem] };
+        list.splice(dstIdx, 1, newFolder);
+        var removeSrcIdx = list.indexOf(srcItem);
+        if (removeSrcIdx !== -1) list.splice(removeSrcIdx, 1);
+        save(list);
+        var sEl = srcCardEl || findCardElementByItem(srcItem);
+        var dEl = dstCardEl || findCardElementByItem(dstItem);
+        animateReorder(function () {
+          if (sEl && sEl.parentNode) sEl.parentNode.removeChild(sEl);
+        }, nav, sEl);
+        if (dEl) {
+          updateCardContent(dEl, newFolder);
+          pulseFolderAbsorb(dEl);
+        }
+        return true;
+      }
+
+      function scheduleMergeCandidate(targetCard, targetItem) {
+        if (mergeCandidateEl === targetCard) return;
+        cancelMergeTimer();
+        mergeCandidateEl = targetCard;
+        mergeHoverTimer = setTimeout(function () {
+          mergeHoverTimer = null;
+          if (!dragSrc || mergeCandidateEl !== targetCard) return;
+          dragIntent = { mode: 'merge-folder', targetEl: targetCard, targetItem: targetItem };
+          applyDragFeedback();
+        }, MERGE_HOLD_MS);
+      }
+
+      function isPointInRect(x, y, rect, padX, padY) {
+        return rect && x >= rect.left - padX && x <= rect.right + padX && y >= rect.top - padY && y <= rect.bottom + padY;
+      }
+
+      function computeGapReorderIntent(allCards, clientX, clientY, edgeInsertBeforeEl, edgeIndicatorX, edgeTileRect) {
+        var insertBeforeEl = edgeInsertBeforeEl;
+        var indicatorX = edgeIndicatorX;
+        var indicatorY = edgeTileRect ? edgeTileRect.top : 0;
+        var indicatorH = edgeTileRect ? edgeTileRect.height : 64;
+
+        if (!edgeInsertBeforeEl && edgeInsertBeforeEl !== null) {
+          // 按垂直中心分组为视觉行，再匹配最接近的一行
+          var rows = [];
+          allCards.forEach(function (c) {
+            var r = getNormRect(c);
+            var tr = getTileNormRect(c);
+            if (r.width <= 0) return;
+            var cy = tr.top + tr.height / 2;
+            var entry = { el: c, rect: r, tileRect: tr, midX: r.left + r.width / 2, cy: cy };
+            var matchedRow = null;
+            for (var i = 0; i < rows.length; i++) {
+              if (Math.abs(rows[i].cy - cy) < 42) { matchedRow = rows[i]; break; }
+            }
+            if (!matchedRow) {
+              matchedRow = { cy: cy, cards: [] };
+              rows.push(matchedRow);
+            }
+            matchedRow.cards.push(entry);
+          });
+          if (!rows.length) {
+            dragIntent = { mode: 'none' };
+            return;
+          }
+          rows.sort(function (a, b) { return a.cy - b.cy; });
+          var bestRow = rows[0];
+          var bestDist = Math.abs(clientY - bestRow.cy);
+          for (var ri = 1; ri < rows.length; ri++) {
+            var d = Math.abs(clientY - rows[ri].cy);
+            if (d < bestDist) { bestDist = d; bestRow = rows[ri]; }
+          }
+          var rowCards = bestRow.cards.slice().sort(function (a, b) { return a.rect.left - b.rect.left; });
+          var placed = false;
+          for (var ci = 0; ci < rowCards.length; ci++) {
+            var cur = rowCards[ci];
+            if (clientX < cur.midX) {
+              insertBeforeEl = cur.el;
+              indicatorY = cur.tileRect.top;
+              indicatorH = cur.tileRect.height;
+              if (ci > 0) {
+                indicatorX = (rowCards[ci - 1].rect.right + cur.rect.left) / 2;
+              } else {
+                indicatorX = cur.rect.left - 11;
+              }
+              placed = true;
+              break;
+            }
+          }
+          if (!placed) {
+            var lastInRow = rowCards[rowCards.length - 1];
+            var nextDom = lastInRow.el.nextElementSibling;
+            while (nextDom && (nextDom === dragSrc || (!nextDom.classList.contains('shortcut') && nextDom !== slot))) {
+              nextDom = nextDom.nextElementSibling;
+            }
+            insertBeforeEl = (nextDom && nextDom.classList.contains('shortcut')) ? nextDom : slot;
+            indicatorY = lastInRow.tileRect.top;
+            indicatorH = lastInRow.tileRect.height;
+            indicatorX = lastInRow.rect.right + 11;
+          }
+        }
+
+        // 若插入位置紧贴 dragSrc 当前位置，则属于无效空操作，不展示误导性竖线
+        var nextActive = dragSrc ? dragSrc.nextElementSibling : null;
+        if (insertBeforeEl === dragSrc || insertBeforeEl === nextActive) {
+          dragIntent = { mode: 'none' };
+          return;
+        }
+        dragIntent = {
+          mode: 'reorder',
+          insertBeforeEl: insertBeforeEl || slot,
+          indicatorX: indicatorX,
+          indicatorY: indicatorY,
+          indicatorH: indicatorH
+        };
+      }
+
+      function resolveMainDragIntent(clientX, clientY, fallbackCard) {
+        if (!dragSrc) return;
+        var srcItem = cardItemMap.get(dragSrc);
+        var allCards = Array.from(nav.querySelectorAll('.shortcut')).filter(function (c) { return c !== dragSrc; });
+        var hasLayout = allCards.some(function (c) {
+          return getNormRect(c).width > 0;
+        });
+
+        // 无几何布局环境（如 jsdom 单测且未 mock getBoundingClientRect）时的保底回退
+        if (!hasLayout) {
+          if (fallbackCard && fallbackCard !== dragSrc) {
+            var fbDst = cardItemMap.get(fallbackCard);
+            if (srcItem && !isFolderItem(srcItem) && fbDst && isFolderItem(fbDst)) {
+              cancelMergeTimer();
+              dragIntent = { mode: 'into-folder', folderEl: fallbackCard, folderItem: fbDst };
+              return;
+            }
+            if (srcItem && !isFolderItem(srcItem) && fbDst && !isFolderItem(fbDst)) {
+              if (dragIntent.mode === 'merge-folder' && dragIntent.targetEl === fallbackCard) return;
+              scheduleMergeCandidate(fallbackCard, fbDst);
+            } else {
+              cancelMergeTimer();
+            }
+            dragIntent = { mode: 'reorder', insertBeforeEl: fallbackCard, indicatorX: 0, indicatorY: 0, indicatorH: 64 };
+            return;
+          }
+          cancelMergeTimer();
+          dragIntent = { mode: 'reorder', insertBeforeEl: slot, indicatorX: 0, indicatorY: 0, indicatorH: 64 };
+          return;
+        }
+
+        // 迟滞锁定：已锁定「移入分组」或「合并建组」时，若指针仍在缓冲边距内且未进入其它卡片主体，保持原意图不抖动
+        if ((dragIntent.mode === 'into-folder' && dragIntent.folderEl) || (dragIntent.mode === 'merge-folder' && dragIntent.targetEl)) {
+          var lockedEl = dragIntent.folderEl || dragIntent.targetEl;
+          var lockedRect = getNormRect(lockedEl);
+          var enteredOtherCard = allCards.some(function (c) {
+            return c !== lockedEl && isPointInRect(clientX, clientY, getNormRect(c), 0, 2);
+          });
+          if (!enteredOtherCard && isPointInRect(clientX, clientY, lockedRect, STICKY_MARGIN, STICKY_MARGIN)) {
+            return;
+          }
+        }
+
+        var hitCard = null;
+        for (var i = 0; i < allCards.length; i++) {
+          if (isPointInRect(clientX, clientY, getNormRect(allCards[i]), 0, 4)) {
+            hitCard = allCards[i];
+            break;
+          }
+        }
+
+        if (hitCard) {
+          var dstItem = cardItemMap.get(hitCard);
+          var rect = getNormRect(hitCard);
+          var tileRect = getTileNormRect(hitCard);
+          var ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0.5;
+
+          if (srcItem && !isFolderItem(srcItem) && dstItem && isFolderItem(dstItem)) {
+            cancelMergeTimer();
+            if (ratio >= 0.12 && ratio <= 0.88) {
+              dragIntent = { mode: 'into-folder', folderEl: hitCard, folderItem: dstItem };
+              return;
+            }
+            // 分组最外侧窄边按前后缝隙插队处理
+            if (ratio < 0.12) {
+              var prev = hitCard.previousElementSibling;
+              while (prev && (prev === dragSrc || !prev.classList.contains('shortcut'))) prev = prev.previousElementSibling;
+              var leftX = prev ? (getNormRect(prev).right + rect.left) / 2 : rect.left - 11;
+              computeGapReorderIntent(allCards, clientX, clientY, hitCard, leftX, tileRect);
+            } else {
+              var nxt = hitCard.nextElementSibling;
+              while (nxt && (nxt === dragSrc || (!nxt.classList.contains('shortcut') && nxt !== slot))) nxt = nxt.nextElementSibling;
+              var nextTarget = (nxt && nxt.classList.contains('shortcut')) ? nxt : slot;
+              var rightX = (nxt && nxt.classList && nxt.classList.contains('shortcut')) ? (rect.right + getNormRect(nxt).left) / 2 : rect.right + 11;
+              computeGapReorderIntent(allCards, clientX, clientY, nextTarget, rightX, tileRect);
+            }
+            return;
+          }
+
+          if (srcItem && !isFolderItem(srcItem) && dstItem && !isFolderItem(dstItem)) {
+            if (ratio >= 0.22 && ratio <= 0.78 && clientY >= tileRect.top && clientY <= tileRect.bottom) {
+              if (dragIntent.mode === 'merge-folder' && dragIntent.targetEl === hitCard) return;
+              scheduleMergeCandidate(hitCard, dstItem);
+            } else {
+              cancelMergeTimer();
+            }
+            computeGapReorderIntent(allCards, clientX, clientY);
+            return;
+          }
+        }
+
+        cancelMergeTimer();
+        computeGapReorderIntent(allCards, clientX, clientY);
+      }
 
       // 给所有 shortcut 绑定拖拽相关事件（委托在 nav 上）
       nav.addEventListener('dragstart', function (e) {
@@ -1069,16 +1403,18 @@
         var card = e.target.closest('.shortcut');
         if (!card) return;
         dragSrc = card;
+        clearDragFeedback();
         card.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
-        // 必须 setData 才能在 Firefox 里触发拖拽
         try { e.dataTransfer.setData('text/plain', ''); } catch (err) {}
       });
 
       nav.addEventListener('dragend', function () {
-        nav.querySelectorAll('.shortcut').forEach(function (el) {
+        justDraggedAt = Date.now();
+        lastDraggedEl = dragSrc;
+        clearDragFeedback();
+        nav.querySelectorAll('.shortcut.dragging').forEach(function (el) {
           el.classList.remove('dragging');
-          el.classList.remove('drop-target');
         });
         dragSrc = null;
       });
@@ -1087,97 +1423,65 @@
         if (!editing || !dragSrc) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        var card = e.target.closest('.shortcut');
-        nav.querySelectorAll('.shortcut.drop-target').forEach(function (el) { el.classList.remove('drop-target'); });
-        nav.querySelectorAll('.shortcut.drop-into-folder').forEach(function (el) { el.classList.remove('drop-into-folder'); });
-        if (card && card !== dragSrc) {
-          var srcData = cardItemMap.get(dragSrc);
-          var dstData = cardItemMap.get(card);
-          var rect = card.getBoundingClientRect ? card.getBoundingClientRect() : null;
-          var ratio = (rect && rect.width > 0) ? (e.clientX - rect.left) / rect.width : 0;
-          if (dstData && isFolderItem(dstData) && srcData && !isFolderItem(srcData) && ratio >= 0.22 && ratio <= 0.78) {
-            card.classList.add('drop-into-folder');
-          } else {
-            card.classList.add('drop-target');
-          }
-        }
+        var fallbackCard = e.target && e.target.closest ? e.target.closest('.shortcut') : null;
+        resolveMainDragIntent(e.clientX, e.clientY, fallbackCard);
+        applyDragFeedback();
       });
 
       nav.addEventListener('dragleave', function (e) {
-        var card = e.target.closest('.shortcut');
-        if (card) {
-          card.classList.remove('drop-target');
-          card.classList.remove('drop-into-folder');
+        // 仅当指针真正离开整个 nav 容器时才清除反馈，彻底杜绝子元素冒泡误清入组状态
+        if (!e.relatedTarget || !nav.contains(e.relatedTarget)) {
+          clearDragFeedback();
         }
       });
 
       nav.addEventListener('drop', function (e) {
         if (!editing || !dragSrc) return;
         e.preventDefault();
-        var target = e.target.closest('.shortcut');
-        if (target && target !== dragSrc && target.classList.contains('drop-into-folder')) {
-          target.classList.remove('drop-into-folder');
-          var srcItem = cardItemMap.get(dragSrc);
-          var dstFolder = cardItemMap.get(target);
-          var srcIdx = list.indexOf(srcItem);
-          if (srcItem && !isFolderItem(srcItem) && dstFolder && isFolderItem(dstFolder) && srcIdx !== -1) {
-            list.splice(srcIdx, 1);
-            if (!Array.isArray(dstFolder.children)) dstFolder.children = [];
-            dstFolder.children.push(srcItem);
+        justDraggedAt = Date.now();
+        lastDraggedEl = dragSrc;
+        var fallbackCard = e.target && e.target.closest ? e.target.closest('.shortcut') : null;
+        if (dragIntent.mode === 'none') {
+          resolveMainDragIntent(e.clientX, e.clientY, fallbackCard);
+        }
+        var executedIntent = dragIntent;
+        var srcEl = dragSrc;
+        var srcItem = cardItemMap.get(srcEl);
+        clearDragFeedback();
+        if (srcEl) srcEl.classList.remove('dragging');
+        dragSrc = null;
+
+        if (executedIntent.mode === 'into-folder' && executedIntent.folderEl) {
+          moveCardIntoFolderInPlace(srcEl, srcItem, executedIntent.folderEl, executedIntent.folderItem);
+          return;
+        }
+        if (executedIntent.mode === 'merge-folder' && executedIntent.targetEl) {
+          mergeCardsIntoNewFolderInPlace(srcEl, srcItem, executedIntent.targetEl, executedIntent.targetItem);
+          return;
+        }
+        if (executedIntent.mode === 'reorder' && srcEl) {
+          var targetBefore = executedIntent.insertBeforeEl || slot;
+          if (targetBefore !== srcEl && srcEl.nextElementSibling !== targetBefore) {
+            animateReorder(function () {
+              if (targetBefore && targetBefore.parentNode === nav) {
+                nav.insertBefore(srcEl, targetBefore);
+              } else {
+                nav.insertBefore(srcEl, slot);
+              }
+            }, nav, srcEl);
+
+            var cards = Array.prototype.slice.call(nav.querySelectorAll('.shortcut'));
+            var newOrder = cards.map(function (el) {
+              var mapped = cardItemMap.get(el);
+              if (mapped && list.indexOf(mapped) !== -1) return mapped;
+              var lbl = el.querySelector('.label');
+              var name = lbl ? lbl.textContent : '';
+              return list.find(function (it) { return it.name === name; });
+            }).filter(Boolean);
+            list = newOrder;
             save(list);
-            render(list);
-            return;
           }
         }
-        nav.querySelectorAll('.shortcut.drop-into-folder').forEach(function (el) { el.classList.remove('drop-into-folder'); });
-
-        // 用 FLIP 包住整个 DOM 变更，让其他卡片平滑滑动
-        animateReorder(function () {
-          // 关键修复：根据鼠标在目标卡片上的左右位置决定插入到前面还是后面
-          if (target && target !== dragSrc) {
-            var rect = target.getBoundingClientRect();
-            var dropAfter = (e.clientX - rect.left) > rect.width / 2;
-            // 修复 no-op：如果原插入方向不会改变 DOM 顺序（dragSrc 已经在那个位置），
-            // 自动翻向，让"落到任何卡上"都能产生动作（实际就是和邻居 swap）
-            if (dropAfter && target.nextElementSibling === dragSrc) {
-              dropAfter = false;
-            } else if (!dropAfter && target.previousElementSibling === dragSrc) {
-              dropAfter = true;
-            }
-            if (dropAfter) {
-              // 插到 target 后面
-              var next = target.nextElementSibling;
-              if (next && next.classList.contains('shortcut')) {
-                nav.insertBefore(dragSrc, next);
-              } else {
-                // target 是最后一张卡片
-                nav.insertBefore(dragSrc, slot);
-              }
-            } else {
-              // 插到 target 前面
-              nav.insertBefore(dragSrc, target);
-            }
-          } else if (!target) {
-            // 拖到 nav 空白处：插到末尾（slot 前面）
-            nav.insertBefore(dragSrc, slot);
-          }
-        });
-
-        // 同步到 list（DOM 顺序已经反映新顺序）
-        var cards = Array.prototype.slice.call(nav.querySelectorAll('.shortcut'));
-        var newOrder = cards.map(function (el) {
-          var mapped = cardItemMap.get(el);
-          if (mapped && list.indexOf(mapped) !== -1) return mapped;
-          var lbl = el.querySelector('.label');
-          var name = lbl ? lbl.textContent : '';
-          return list.find(function (it) { return it.name === name; });
-        }).filter(Boolean);
-        list = newOrder;
-        save(list);
-
-        nav.querySelectorAll('.shortcut.drop-target').forEach(function (el) {
-          el.classList.remove('drop-target');
-        });
       });
 
       // 删除区：拖入即删除
@@ -1185,6 +1489,7 @@
         if (!editing || !dragSrc) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
+        clearDragFeedback();
         dropzone.classList.add('active');
       });
 
@@ -1195,6 +1500,8 @@
       dropzone.addEventListener('drop', function (e) {
         if (!editing || !dragSrc) return;
         e.preventDefault();
+        justDraggedAt = Date.now();
+        clearDragFeedback();
         // 通过 DOM 位置找对应的 list 索引，避免同名卡片删错
         var cards = nav.querySelectorAll('.shortcut');
         var idx = Array.prototype.indexOf.call(cards, dragSrc);
@@ -1236,6 +1543,7 @@
       var folderModal = document.getElementById('folderModal');
       var folderTitleInput = document.getElementById('folderTitleInput');
       var folderGrid = document.getElementById('folderGrid');
+      var folderDragOutZone = document.getElementById('folderDragOutZone');
       var folderAddItemBtn = document.getElementById('folderAddItemBtn');
       var folderDissolveBtn = document.getElementById('folderDissolveBtn');
       var editNewFolderBtn = document.getElementById('editNewFolderBtn');
@@ -1247,12 +1555,15 @@
         if (!kids.length) {
           var em = document.createElement('div');
           em.className = 'folder-grid-empty';
-          em.textContent = '该分组暂无卡片，点击右上角「+ 添加卡片」或右键主页卡片「移入分组」';
+          em.textContent = '该分组暂无卡片，点击右上角「+ 添加卡片」或拖动主页卡片放入此分组';
           folderGrid.appendChild(em);
           return;
         }
         kids.forEach(function (child) {
-          folderGrid.appendChild(buildCard(child));
+          var c = buildCard(child);
+          c.classList.add('no-enter-anim');
+          c.setAttribute('draggable', 'true');
+          folderGrid.appendChild(c);
         });
       }
 
@@ -1265,17 +1576,53 @@
         openModal(folderModal);
       }
 
+      function moveCardOutOfFolderInPlace(parentFolder, childIdx) {
+        if (!parentFolder || !Array.isArray(parentFolder.children)) return false;
+        if (childIdx < 0 || childIdx >= parentFolder.children.length) return false;
+        var item = parentFolder.children.splice(childIdx, 1)[0];
+        var pIdx = list.indexOf(parentFolder);
+        list.splice(pIdx >= 0 ? pIdx + 1 : list.length, 0, item);
+        save(list);
+        var folderEl = findCardElementByItem(parentFolder);
+        animateReorder(function () {
+          var newCard = buildCard(item);
+          newCard.classList.add('no-enter-anim');
+          newCard.setAttribute('draggable', editing ? 'true' : 'false');
+          if (folderEl && folderEl.parentNode === nav) {
+            nav.insertBefore(newCard, folderEl.nextElementSibling || slot);
+          } else {
+            nav.insertBefore(newCard, slot);
+          }
+        }, nav, null);
+        if (folderEl) updateCardContent(folderEl, parentFolder);
+        renderFolderGrid(parentFolder);
+        return true;
+      }
+
       function dissolveFolderAt(idx) {
         var folder = list[idx];
         if (!folder || !isFolderItem(folder)) return;
-        var kids = Array.isArray(folder.children) ? folder.children : [];
+        var kids = Array.isArray(folder.children) ? folder.children.slice() : [];
         Array.prototype.splice.apply(list, [idx, 1].concat(kids));
         if (openFolderId === folder.id && folderModal) {
           openFolderId = null;
           closeModal(folderModal);
         }
         save(list);
-        render(list);
+        var folderEl = findCardElementByItem(folder);
+        if (folderEl && folderEl.parentNode === nav) {
+          animateReorder(function () {
+            kids.forEach(function (child) {
+              var c = buildCard(child);
+              c.classList.add('no-enter-anim');
+              c.setAttribute('draggable', editing ? 'true' : 'false');
+              nav.insertBefore(c, folderEl);
+            });
+            folderEl.parentNode.removeChild(folderEl);
+          }, nav, null);
+        } else {
+          render(list);
+        }
       }
 
       function commitFolderRename() {
@@ -1321,15 +1668,216 @@
         });
       }
 
-      // 主页点击分组卡片打开分组弹窗（编辑模式阻止点击跳转）
+      // 主页点击分组卡片打开分组弹窗（编辑模式下也可点开分组进行内部管理；仅屏蔽刚被拖拽卡片自身的误触 click）
       nav.addEventListener('click', function (e) {
-        var folderEl = e.target.closest('.shortcut-folder');
-        if (!folderEl) return;
-        e.preventDefault();
-        if (editing) return;
-        var item = cardItemMap.get(folderEl);
-        if (item && isFolderItem(item)) openFolderModal(item.id);
+        var card = e.target.closest('.shortcut');
+        if (!card) return;
+        if (card === lastDraggedEl && (Date.now() - justDraggedAt < 200)) {
+          e.preventDefault();
+          return;
+        }
+        var isFld = card.classList.contains('shortcut-folder');
+        if (isFld) {
+          e.preventDefault();
+          var item = cardItemMap.get(card);
+          if (item && isFolderItem(item)) openFolderModal(item.id);
+          return;
+        }
+        if (editing) e.preventDefault();
       });
+
+      // 分组弹窗内部：拖拽排序 + 拖出到主页 + 编辑模式下点击子卡直接编辑
+      if (folderGrid) {
+        var folderDragSrc = null;
+        var folderDragInsertBefore = undefined;
+
+        function clearFolderDragState() {
+          if (dragInsertLine) dragInsertLine.classList.remove('visible');
+          if (folderDragOutZone) folderDragOutZone.classList.remove('active');
+          if (folderModal) folderModal.classList.remove('folder-dragging');
+          if (folderDragSrc) folderDragSrc.classList.remove('dragging');
+          folderDragSrc = null;
+          folderDragInsertBefore = undefined;
+        }
+
+        function resolveFolderGridInsert(clientX, clientY, fallbackEl) {
+          var cards = Array.from(folderGrid.querySelectorAll('.shortcut')).filter(function (c) { return c !== folderDragSrc; });
+          var hasLayout = cards.some(function (c) {
+            return getNormRect(c).width > 0;
+          });
+          if (!hasLayout) {
+            folderDragInsertBefore = (fallbackEl && fallbackEl !== folderDragSrc) ? fallbackEl : null;
+            return;
+          }
+          var rows = [];
+          cards.forEach(function (c) {
+            var r = getNormRect(c);
+            var tr = getTileNormRect(c);
+            if (r.width <= 0) return;
+            var cy = tr.top + tr.height / 2;
+            var row = rows.find(function (rw) { return Math.abs(rw.cy - cy) < 42; });
+            if (!row) { row = { cy: cy, cards: [] }; rows.push(row); }
+            row.cards.push({ el: c, rect: r, tileRect: tr, midX: r.left + r.width / 2 });
+          });
+          if (!rows.length) { folderDragInsertBefore = null; return; }
+          rows.sort(function (a, b) { return a.cy - b.cy; });
+          var bestRow = rows[0];
+          var bestDist = Math.abs(clientY - bestRow.cy);
+          for (var i = 1; i < rows.length; i++) {
+            var d = Math.abs(clientY - rows[i].cy);
+            if (d < bestDist) { bestDist = d; bestRow = rows[i]; }
+          }
+          var rowCards = bestRow.cards.slice().sort(function (a, b) { return a.rect.left - b.rect.left; });
+          var insertBefore = null;
+          var ix = 0, iy = 0, ih = 64;
+          var placed = false;
+          for (var ci = 0; ci < rowCards.length; ci++) {
+            var cur = rowCards[ci];
+            if (clientX < cur.midX) {
+              insertBefore = cur.el;
+              iy = cur.tileRect.top;
+              ih = cur.tileRect.height;
+              ix = ci > 0 ? (rowCards[ci - 1].rect.right + cur.rect.left) / 2 : (cur.rect.left - 7);
+              placed = true;
+              break;
+            }
+          }
+          if (!placed) {
+            var last = rowCards[rowCards.length - 1];
+            var nxt = last.el.nextElementSibling;
+            while (nxt && nxt === folderDragSrc) nxt = nxt.nextElementSibling;
+            insertBefore = (nxt && nxt.classList && nxt.classList.contains('shortcut')) ? nxt : null;
+            iy = last.tileRect.top;
+            ih = last.tileRect.height;
+            ix = last.rect.right + 7;
+          }
+          var curNext = folderDragSrc ? folderDragSrc.nextElementSibling : undefined;
+          if (insertBefore === folderDragSrc || insertBefore === curNext) {
+            folderDragInsertBefore = undefined;
+            if (dragInsertLine) dragInsertLine.classList.remove('visible');
+            return;
+          }
+          folderDragInsertBefore = insertBefore;
+          if (dragInsertLine) {
+            dragInsertLine.style.left = Math.round(ix - 1.5) + 'px';
+            dragInsertLine.style.top = Math.round(iy) + 'px';
+            dragInsertLine.style.height = Math.max(24, Math.round(ih)) + 'px';
+            dragInsertLine.classList.add('visible');
+          }
+        }
+
+        folderGrid.addEventListener('dragstart', function (e) {
+          var card = e.target.closest('.shortcut');
+          if (!card || !openFolderId) return;
+          folderDragSrc = card;
+          card.classList.add('dragging');
+          if (folderModal) folderModal.classList.add('folder-dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          try { e.dataTransfer.setData('text/plain', ''); } catch (err) {}
+        });
+
+        folderGrid.addEventListener('dragover', function (e) {
+          if (!folderDragSrc || !openFolderId) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (folderDragOutZone) folderDragOutZone.classList.remove('active');
+          resolveFolderGridInsert(e.clientX, e.clientY, e.target && e.target.closest ? e.target.closest('.shortcut') : null);
+        });
+
+        folderGrid.addEventListener('dragleave', function (e) {
+          if (!e.relatedTarget || !folderGrid.contains(e.relatedTarget)) {
+            if (dragInsertLine) dragInsertLine.classList.remove('visible');
+          }
+        });
+
+        folderGrid.addEventListener('drop', function (e) {
+          if (!folderDragSrc || !openFolderId) return;
+          e.preventDefault();
+          justDraggedAt = Date.now();
+          lastDraggedEl = folderDragSrc;
+          var folder = findFolderById(openFolderId);
+          var srcEl = folderDragSrc;
+          if (folderDragInsertBefore === undefined) {
+            resolveFolderGridInsert(e.clientX, e.clientY, e.target && e.target.closest ? e.target.closest('.shortcut') : null);
+          }
+          var insertBefore = folderDragInsertBefore;
+          clearFolderDragState();
+          if (!folder || !Array.isArray(folder.children) || insertBefore === undefined) return;
+          if (insertBefore !== srcEl && srcEl.nextElementSibling !== insertBefore) {
+            animateReorder(function () {
+              folderGrid.insertBefore(srcEl, insertBefore || null);
+            }, folderGrid, srcEl);
+            var domCards = Array.from(folderGrid.querySelectorAll('.shortcut'));
+            folder.children = domCards.map(function (el) { return cardItemMap.get(el); }).filter(Boolean);
+            save(list);
+            var rootF = findCardElementByItem(folder);
+            if (rootF) updateCardContent(rootF, folder);
+          }
+        });
+
+        folderGrid.addEventListener('dragend', function () {
+          justDraggedAt = Date.now();
+          lastDraggedEl = folderDragSrc;
+          clearFolderDragState();
+        });
+
+        folderGrid.addEventListener('click', function (e) {
+          var card = e.target.closest('.shortcut');
+          if (!card || !openFolderId) return;
+          if (card === lastDraggedEl && (Date.now() - justDraggedAt < 200)) { e.preventDefault(); return; }
+          if (!editing) return;
+          e.preventDefault();
+          var folder = findFolderById(openFolderId);
+          if (!folder || !Array.isArray(folder.children)) return;
+          var cards = folderGrid.querySelectorAll('.shortcut');
+          var idx = Array.prototype.indexOf.call(cards, card);
+          if (idx < 0 || idx >= folder.children.length) return;
+          targetFolderId = openFolderId;
+          openAddModal(targetFolderId);
+          editingIndex = idx;
+          fillAddFormFromItem(folder.children[idx]);
+        });
+
+        function handleFolderDragOutDrop(e) {
+          if (!folderDragSrc || !openFolderId) return;
+          e.preventDefault();
+          e.stopPropagation();
+          justDraggedAt = Date.now();
+          var folder = findFolderById(openFolderId);
+          var cards = folderGrid.querySelectorAll('.shortcut');
+          var childIdx = Array.prototype.indexOf.call(cards, folderDragSrc);
+          clearFolderDragState();
+          if (folder && childIdx !== -1) moveCardOutOfFolderInPlace(folder, childIdx);
+        }
+
+        if (folderDragOutZone) {
+          folderDragOutZone.addEventListener('dragover', function (e) {
+            if (!folderDragSrc || !openFolderId) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (dragInsertLine) dragInsertLine.classList.remove('visible');
+            folderDragOutZone.classList.add('active');
+          });
+          folderDragOutZone.addEventListener('dragleave', function () {
+            folderDragOutZone.classList.remove('active');
+          });
+          folderDragOutZone.addEventListener('drop', handleFolderDragOutDrop);
+        }
+
+        if (folderModal) {
+          folderModal.addEventListener('dragover', function (e) {
+            if (!folderDragSrc || !openFolderId || e.target !== folderModal) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (dragInsertLine) dragInsertLine.classList.remove('visible');
+            if (folderDragOutZone) folderDragOutZone.classList.add('active');
+          });
+          folderModal.addEventListener('drop', function (e) {
+            if (!folderDragSrc || !openFolderId || e.target !== folderModal) return;
+            handleFolderDragOutDrop(e);
+          });
+        }
+      }
 
       // 卡片 / 分组右键菜单
       var ctxMenu = document.getElementById('ctxMenu');
@@ -1435,11 +1983,7 @@
             moveFolderMenu.classList.remove('open');
             var cardItem = list[cardIndex];
             if (!cardItem || isFolderItem(cardItem)) return;
-            list.splice(cardIndex, 1);
-            if (!Array.isArray(fld.children)) fld.children = [];
-            fld.children.push(cardItem);
-            save(list);
-            render(list);
+            moveCardIntoFolderInPlace(findCardElementByItem(cardItem), cardItem, findCardElementByItem(fld), fld);
           });
           moveFolderMenu.appendChild(b);
         });
@@ -1453,10 +1997,16 @@
           if (!cardItem || isFolderItem(cardItem)) return;
           var fName = (prompt('输入新分组名称：', '新建分组') || '').trim();
           if (!fName) return;
+          var cardEl = findCardElementByItem(cardItem);
           var newFld = { type: 'folder', id: makeFolderId(), name: fName.slice(0, 20), children: [cardItem] };
           list.splice(cardIndex, 1, newFld);
           save(list);
-          render(list);
+          if (cardEl) {
+            updateCardContent(cardEl, newFld);
+            pulseFolderAbsorb(cardEl);
+          } else {
+            render(list);
+          }
         });
         moveFolderMenu.appendChild(newBtn);
         moveFolderMenu.style.left = Math.min(lastCtxPos.x + 12, window.innerWidth - 190) + 'px';
@@ -1513,14 +2063,7 @@
             openMoveToFolderPicker(moveIdx);
             break;
           case 'moveout':
-            if (parentFolder && Array.isArray(parentFolder.children)) {
-              parentFolder.children.splice(ctxCard, 1);
-              var pIdx = list.indexOf(parentFolder);
-              list.splice(pIdx >= 0 ? pIdx + 1 : list.length, 0, item);
-              save(list);
-              render(list);
-              renderFolderGrid(parentFolder);
-            }
+            moveCardOutOfFolderInPlace(parentFolder, ctxCard);
             ctxCard = null;
             break;
           case 'delete':

@@ -590,6 +590,7 @@
         </div>
       </div>
       <div class="folder-grid" id="folderGrid"></div>
+      <div class="folder-drag-out-zone" id="folderDragOutZone" aria-hidden="true">拖到此处移出到主页</div>
     </div>
   </div>
 
@@ -824,10 +825,14 @@
 
   <!-- 编辑模式提示条 -->
   <div class="edit-banner" id="editBanner">
-    <span>编辑模式中：拖动卡片排序或拖入分组，拖到底部删除</span>
+    <span>编辑模式中：拖到缝隙排序 · 拖到分组移入 · 悬停卡片合并建组 · 点击分组可管理</span>
     <button type="button" id="editNewFolderBtn" style="margin-right:4px;">+ 新建分组</button>
     <button id="exitEditBtn">完成</button>
   </div>
+
+  <!-- 拖拽视觉提示浮层（唯一真相源：排序插入线 + 移入/合并胶囊） -->
+  <div class="drag-insert-line" id="dragInsertLine" aria-hidden="true"></div>
+  <div class="drag-intent-badge" id="dragIntentBadge" aria-hidden="true"></div>
 
   <!-- 删除区：编辑模式下拖入即删 -->
   <div class="dropzone" id="dropzone" aria-hidden="true">

@@ -338,3 +338,120 @@ test('T7b：WebDAV 测试连接、上传排除壁纸与凭证、拉取支持合�
   assert.strictEqual(document.documentElement.style.getPropertyValue('--hero-logo-alpha'), '0.9');
   assert.strictEqual(document.getElementById('heroLogoAlphaVal').textContent, '90%');
 });
+
+test('智能拖拽分组：移入不重建无关卡片、dragleave 不误清、缝隙排序与悬停建组、编辑态可打开管理分组', async () => {
+  const { window, document } = boot({
+    seed: {
+      'newtab.shortcuts.v1': JSON.stringify([
+        { name: '卡A', url: 'https://a.example', iconSrc: 'color', color: 'blue', letter: 'A' },
+        { name: '卡B', url: 'https://b.example', iconSrc: 'color', color: 'green', letter: 'B' },
+        { type: 'folder', id: 'fld_1', name: '收藏组', children: [
+          { name: '卡D', url: 'https://d.example', iconSrc: 'color', color: 'orange', letter: 'D' }
+        ] },
+        { name: '卡C', url: 'https://c.example', iconSrc: 'color', color: 'purple', letter: 'C' }
+      ])
+    }
+  });
+  const nav = document.querySelector('.shortcuts');
+  const dt = { effectAllowed: 'move', dropEffect: 'move', setData() {} };
+  const fireDrag = (el, type, props = {}) => {
+    const ev = Object.assign(new window.Event(type, { bubbles: true, cancelable: true }), { dataTransfer: dt, ...props });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+
+  // 进入编辑模式
+  document.getElementById('editBtn').click();
+
+  let cards = Array.from(nav.querySelectorAll('.shortcut'));
+  const cardA = cards[0];
+  const cardB = cards[1];
+  const folderEl = cards[2];
+  const cardC = cards[3];
+
+  // 模拟均匀横排几何坐标（每卡宽 80、间距 22）
+  const mockRects = () => {
+    const map = new Map([
+      [cardA, { left: 100, right: 180, top: 200, bottom: 300, width: 80, height: 100 }],
+      [cardB, { left: 202, right: 282, top: 200, bottom: 300, width: 80, height: 100 }],
+      [folderEl, { left: 304, right: 384, top: 200, bottom: 300, width: 80, height: 100 }],
+      [cardC, { left: 406, right: 486, top: 200, bottom: 300, width: 80, height: 100 }]
+    ]);
+    for (const [el, r] of map.entries()) {
+      el.getBoundingClientRect = () => r;
+    }
+  };
+  mockRects();
+
+  // 1. 拖卡B 到分组左边缘（卡B 本就在分组紧左侧，属无效空操作不显示误导竖线）；拖到分组右边缘（>88% 热区）应触发缝隙插入线而非入组
+  fireDrag(cardB, 'dragstart');
+  fireDrag(folderEl, 'dragover', { clientX: 308, clientY: 240 }); // ratio = 0.05 < 0.12，原地紧邻，不显示多余竖线
+  assert.strictEqual(folderEl.classList.contains('drop-into-folder'), false);
+  assert.strictEqual(document.getElementById('dragInsertLine').classList.contains('visible'), false);
+  fireDrag(folderEl, 'dragover', { clientX: 380, clientY: 240 }); // ratio = 76/80 = 0.95 > 0.88
+  assert.strictEqual(folderEl.classList.contains('drop-into-folder'), false);
+  assert.ok(document.getElementById('dragInsertLine').classList.contains('visible'), '分组右窄边应显示竖向插入线');
+
+  // 2. 拖卡B 到分组主体（12%~88%），即便子元素触发 dragleave 也不清状态，松手应精准入组且保留卡A/卡C原 DOM 节点（零卡顿）
+  fireDrag(folderEl, 'dragover', { clientX: 336, clientY: 240 }); // ratio = 32/80 = 0.40
+  assert.ok(folderEl.classList.contains('drop-into-folder'), '分组主体应锁定入组态');
+  assert.ok(document.getElementById('dragIntentBadge').classList.contains('visible'));
+  assert.ok(document.getElementById('dragIntentBadge').textContent.includes('收藏组'));
+  // 子元素模拟冒泡 dragleave（relatedTarget 仍在 nav 内）
+  fireDrag(folderEl.querySelector('.tile'), 'dragleave', { relatedTarget: folderEl.querySelector('.label') });
+  assert.ok(folderEl.classList.contains('drop-into-folder'), '子元素 dragleave 不应清除入组意图');
+  // 直接在边界轻微抖动位置松手（落点稍偏至边缘），应以锁定的入组意图为准而非临时变卦换位
+  fireDrag(folderEl, 'drop', { clientX: 305, clientY: 240 });
+
+  assert.strictEqual(document.querySelector('.shortcuts .shortcut') === cardA, true, '卡A 原 DOM 节点必须保留，不能整页重建');
+  assert.ok(Array.from(nav.querySelectorAll('.shortcut')).includes(cardC), '卡C 原 DOM 节点必须保留，不能整页重建');
+  const afterMoveInto = readShortcuts(window);
+  assert.strictEqual(afterMoveInto.length, 3);
+  assert.deepStrictEqual(afterMoveInto[1].children.map((c) => c.name), ['卡D', '卡B']);
+
+  // 3. 普通卡悬停另一普通卡中心 >= 450ms 触发合并建新分组，且不重建无关节点
+  cardA.getBoundingClientRect = () => ({ left: 100, right: 180, top: 200, bottom: 300, width: 80, height: 100 });
+  cardC.getBoundingClientRect = () => ({ left: 406, right: 486, top: 200, bottom: 300, width: 80, height: 100 });
+  fireDrag(cardA, 'dragstart');
+  fireDrag(cardC, 'dragover', { clientX: 446, clientY: 240 }); // ratio = 0.5
+  assert.strictEqual(cardC.classList.contains('drop-merge-folder'), false, '刚经过不应立即变合并组');
+  await waitFor(() => cardC.classList.contains('drop-merge-folder'), 900);
+  assert.ok(document.getElementById('dragIntentBadge').textContent.includes('合并'));
+  fireDrag(cardC, 'drop', { clientX: 446, clientY: 240 });
+
+  const afterMerge = readShortcuts(window);
+  assert.strictEqual(afterMerge.length, 2);
+  assert.strictEqual(afterMerge[1].type, 'folder');
+  assert.deepStrictEqual(afterMerge[1].children.map((c) => c.name), ['卡C', '卡A']);
+  assert.ok(Array.from(nav.querySelectorAll('.shortcut')).includes(folderEl), '原有分组 DOM 节点不应被重建');
+
+  // 4. 编辑模式下点击分组仍可打开弹窗，并在组内拖拽重排 + 拖到「移出到主页」区还原
+  folderEl.click();
+  const fModal = document.getElementById('folderModal');
+  assert.ok(fModal.classList.contains('open'), '编辑模式下点击分组也必须能打开弹窗管理');
+  const fGrid = document.getElementById('folderGrid');
+  const fCards = Array.from(fGrid.querySelectorAll('.shortcut'));
+  assert.strictEqual(fCards.length, 2); // 卡D, 卡B
+  fCards[0].getBoundingClientRect = () => ({ left: 20, right: 100, top: 20, bottom: 100, width: 80, height: 80 });
+  fCards[1].getBoundingClientRect = () => ({ left: 114, right: 194, top: 20, bottom: 100, width: 80, height: 80 });
+
+  // 组内把 卡B 拖到 卡D 前面
+  fireDrag(fCards[1], 'dragstart');
+  fireDrag(fCards[0], 'dragover', { clientX: 40, clientY: 50 });
+  fireDrag(fCards[0], 'drop', { clientX: 40, clientY: 50 });
+  let afterReorderInFolder = readShortcuts(window);
+  assert.deepStrictEqual(afterReorderInFolder[0].children.map((c) => c.name), ['卡B', '卡D']);
+
+  // 组内把 卡B 拖到「拖到此处移出到主页」区
+  const dragOutZone = document.getElementById('folderDragOutZone');
+  const firstChildAfter = fGrid.querySelector('.shortcut');
+  fireDrag(firstChildAfter, 'dragstart');
+  fireDrag(dragOutZone, 'dragover');
+  assert.ok(dragOutZone.classList.contains('active'));
+  fireDrag(dragOutZone, 'drop');
+
+  const afterDragOut = readShortcuts(window);
+  assert.strictEqual(afterDragOut.length, 3);
+  assert.strictEqual(afterDragOut[1].name, '卡B', '移出后卡B 应回到主页紧随原分组之后');
+  assert.deepStrictEqual(afterDragOut[0].children.map((c) => c.name), ['卡D']);
+});

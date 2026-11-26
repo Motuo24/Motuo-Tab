@@ -605,21 +605,59 @@
 
   /* 编辑模式：拖拽反馈 */
   .shortcut { position: relative; }
+  .shortcut.no-enter-anim { animation: none !important; }
   body.editing .shortcut { cursor: grab; }
   body.editing .shortcut:active { cursor: grabbing; }
   body.editing .shortcut.dragging {
-    opacity: 0.92;
-    transform: scale(1.08) rotate(2.5deg);
-    box-shadow: 0 18px 36px rgba(31, 35, 41, 0.18);
-    /* 拖拽中不需要过渡，让元素跟手 */
+    opacity: 0.45;
+    transform: scale(0.96);
     transition: none;
   }
-  body.editing .shortcut.drop-target {
-    outline: 2px dashed #2468f2;
-    outline-offset: 4px;
-    border-radius: 18px;
-    transform: translateY(-4px) scale(1.05);
-    transition: transform .15s ease;
+  .drag-insert-line {
+    position: fixed;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--accent, #2468f2);
+    box-shadow: 0 0 10px rgba(36, 104, 242, 0.45);
+    pointer-events: none;
+    z-index: 1250;
+    opacity: 0;
+    transition: opacity .1s ease, left .08s ease, top .08s ease, height .08s ease;
+  }
+  .drag-insert-line::before,
+  .drag-insert-line::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent, #2468f2);
+    transform: translateX(-50%);
+  }
+  .drag-insert-line::before { top: -3px; }
+  .drag-insert-line::after { bottom: -3px; }
+  .drag-insert-line.visible { opacity: 1; }
+  .drag-intent-badge {
+    position: fixed;
+    transform: translate(-50%, -100%);
+    padding: 5px 11px;
+    border-radius: 999px;
+    background: rgba(31, 35, 41, 0.9);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 1255;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+    opacity: 0;
+    transition: opacity .12s ease;
+  }
+  .drag-intent-badge.visible { opacity: 1; }
+  html[data-theme="dark"] .drag-intent-badge {
+    background: #3b82f6;
+    color: #ffffff;
   }
 
   /* 底部删除区 */
@@ -3856,9 +3894,24 @@
     justify-content: center;
     color: var(--text-3);
   }
-  .shortcut-folder.drop-into-folder .tile {
-    outline: 2px solid #2468f2;
-    transform: scale(1.06);
+  .shortcut .tile {
+    transition: transform .16s cubic-bezier(.22, 1, .36, 1), box-shadow .16s ease;
+  }
+  .shortcut-folder.drop-into-folder .tile,
+  .shortcut.drop-merge-folder .tile {
+    outline: 2.5px solid var(--accent, #2468f2);
+    outline-offset: 2px;
+    transform: scale(1.12);
+    box-shadow: 0 0 0 6px rgba(36, 104, 242, 0.16);
+    transition: transform .16s cubic-bezier(.22, 1, .36, 1), box-shadow .16s ease;
+  }
+  @keyframes folder-absorb {
+    0%   { transform: scale(1.14); }
+    50%  { transform: scale(0.94); }
+    100% { transform: scale(1); }
+  }
+  .shortcut.folder-absorb .tile {
+    animation: folder-absorb .28s cubic-bezier(.34, 1.56, .64, 1);
   }
   #folderModal .folder-dialog,
   html[data-theme="dark"] #folderModal .folder-dialog {
@@ -3907,7 +3960,35 @@
     max-height: 58vh;
     overflow-y: auto;
   }
-  .folder-grid .shortcut { width: auto; }
+  .folder-grid .shortcut { width: auto; cursor: grab; }
+  .folder-grid .shortcut:active { cursor: grabbing; }
+  .folder-grid .shortcut.dragging { opacity: 0.45; transform: scale(0.96); transition: none; }
+  .folder-drag-out-zone {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1.5px dashed var(--border-strong, rgba(31, 35, 41, 0.18));
+    color: var(--text-3);
+    font-size: 12.5px;
+    text-align: center;
+    display: none;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  #folderModal.folder-dragging .folder-drag-out-zone { display: block; }
+  .folder-drag-out-zone.active {
+    background: rgba(36, 104, 242, 0.08);
+    border-color: var(--accent, #2468f2);
+    color: var(--accent, #2468f2);
+  }
+  html[data-theme="dark"] .folder-drag-out-zone {
+    border-color: rgba(255, 255, 255, 0.18);
+    color: var(--ai-ink-3);
+  }
+  html[data-theme="dark"] .folder-drag-out-zone.active {
+    background: rgba(91, 141, 239, 0.14);
+    border-color: var(--accent, #5b8def);
+    color: var(--accent, #5b8def);
+  }
   .folder-grid-empty {
     grid-column: 1 / -1;
     padding: 36px 16px;

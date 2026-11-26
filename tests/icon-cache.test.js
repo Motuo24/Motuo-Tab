@@ -177,32 +177,45 @@ test('IndexedDB 从 v1 升级到 v2 自动创建 icons store 且保留已有 wal
   assert.strictEqual(storedCards[0].icon, 'https://example.com/favicon.ico', 'localStorage 应保持轻量远程 URL 而非膨胀成 base64');
 });
 
-test('引擎图标（含百度/必应/谷歌 remit.ee）首次缓存到 IndexedDB，二次进入优先秒用且不重复拉取', async () => {
+test('内置引擎使用透明底矢量 SVG 图标且免网络请求，自定义引擎与卡片图标首次缓存到 IndexedDB 后二次秒用', async () => {
   const mem = createMemoryIDB();
-  const googleRemitUrl = 'https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEX7J5qZdq2yzDGnGSV3J4cFDztxbAnNQACtyAAAj4IKVfVoyYBqFTwvT0E.jpeg';
+  const customEngineIconUrl = 'https://custom-engine.example/icon.png';
   const first = bootWithIDB({
     idb: mem,
     seed: {
+      'newtab.customEngines.v1': JSON.stringify([
+        { name: '自定义搜索', url: 'https://custom-engine.example/?q=%s', icon: customEngineIconUrl }
+      ]),
       'newtab.shortcuts.v1': JSON.stringify([
         { name: '卡片A', url: 'https://a.example', iconSrc: 'image', icon: 'https://a.example/icon.png' }
       ])
     }
   });
 
+  // 内置三大引擎（百度/必应/谷歌）均直接内置透明底 SVG data URL
+  assert.ok(first.document.getElementById('engineIcon').src.startsWith('data:image/svg+xml'), '主搜索引擎默认图标应为内嵌透明 SVG');
+  for (const key of ['baidu', 'bing', 'google']) {
+    const img = first.document.querySelector(`#engineSelector .opt[data-engine="${key}"] img`);
+    assert.ok(img && img.src.startsWith('data:image/svg+xml'), `${key} 引擎图标应为内嵌透明 SVG`);
+  }
+
   await waitFor(() =>
     mem.state.stores.icons &&
-    mem.state.stores.icons.has('https://www.baidu.com/favicon.ico') &&
-    mem.state.stores.icons.has('https://www.bing.com/favicon.ico') &&
-    mem.state.stores.icons.has(googleRemitUrl) &&
+    mem.state.stores.icons.has(customEngineIconUrl) &&
     mem.state.stores.icons.has('https://a.example/icon.png')
   );
-  assert.ok(first.document.getElementById('engineIcon').src.startsWith('data:image/'), '主搜索引擎图标应切换为本地缓存 data URL');
+  assert.strictEqual(first.calls.some((u) => /baidu\.com\/favicon|bing\.com\/favicon|remit\.ee/.test(u)), false, '内置引擎图标不应额外发起外网请求');
+  const customOptFirst = first.document.querySelector('#engineSelector .opt.custom-opt img');
+  assert.ok(customOptFirst && customOptFirst.src.startsWith('data:image/'), '自定义引擎远程图标应切换为本地缓存 data URL');
   assert.ok(first.document.querySelector('.shortcut .tile img').src.startsWith('data:image/'), '卡片图标应切换为本地缓存 data URL');
 
   // 二次进入：命中 7 天有效缓存，不应再发网络请求
   const second = bootWithIDB({
     idb: mem,
     seed: {
+      'newtab.customEngines.v1': JSON.stringify([
+        { name: '自定义搜索', url: 'https://custom-engine.example/?q=%s', icon: customEngineIconUrl }
+      ]),
       'newtab.shortcuts.v1': JSON.stringify([
         { name: '卡片A', url: 'https://a.example', iconSrc: 'image', icon: 'https://a.example/icon.png' }
       ])
@@ -211,10 +224,10 @@ test('引擎图标（含百度/必应/谷歌 remit.ee）首次缓存到 IndexedD
   });
 
   await second.window.__motuo.iconCache.ready;
-  await waitFor(() => second.document.getElementById('engineIcon').src.startsWith('data:image/'));
+  await waitFor(() => second.document.querySelector('#engineSelector .opt.custom-opt img').src.startsWith('data:image/'));
   assert.strictEqual(second.calls.length, 0, '未过期缓存不应再次发起网络请求');
-  const googleImg = second.document.querySelector('#engineSelector .opt[data-engine="google"] img');
-  assert.ok(googleImg && googleImg.src.startsWith('data:image/'), '谷歌 remit.ee 图标也应使用本地缓存');
+  const customOptSecond = second.document.querySelector('#engineSelector .opt.custom-opt img');
+  assert.ok(customOptSecond && customOptSecond.src.startsWith('data:image/'), '自定义引擎图标二次进入也应使用本地缓存');
 });
 
 test('过期缓存后台静默刷新：成功则更新，失败则保留旧缓存且不显示破图', async () => {

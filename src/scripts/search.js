@@ -18,10 +18,15 @@
       var SUGGEST_DEBOUNCE = 200;  // 联网建议防抖（ms）
       var SUGGEST_TIMEOUT = 2500;  // 单源 JSONP 超时（ms）
       var MAX_HISTORY = 20;
+      var BUILTIN_ENGINE_ICONS = {
+        baidu: "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cellipse cx='4.8' cy='10.7' rx='2' ry='2.75' transform='rotate(-22 4.8 10.7)' fill='%23306CFF'/%3E%3Cellipse cx='9.2' cy='6.1' rx='2.15' ry='2.95' transform='rotate(-10 9.2 6.1)' fill='%23306CFF'/%3E%3Cellipse cx='14.8' cy='6.1' rx='2.15' ry='2.95' transform='rotate(10 14.8 6.1)' fill='%23306CFF'/%3E%3Cellipse cx='19.2' cy='10.7' rx='2' ry='2.75' transform='rotate(22 19.2 10.7)' fill='%23306CFF'/%3E%3Cpath d='M12 10.6c-2.6 0-4.4 1.6-5.5 3.6-1.1 2-1.2 4.3.2 5.5 1.3 1.1 3.2.8 5.3.4 2.1.4 4 .7 5.3-.4 1.4-1.2 1.3-3.5.2-5.5-1.1-2-2.9-3.6-5.5-3.6z' fill='%23306CFF'/%3E%3Ccircle cx='9.35' cy='16.45' r='1.45' stroke='%23fff' stroke-width='1.15' fill='none'/%3E%3Cpath d='M10.8 13.4v4.5M13 15v1.7a1.45 1.45 0 0 0 2.9 0V15m0 0v2.9' stroke='%23fff' stroke-width='1.15' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E",
+        bing: "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='b1' x1='5' y1='2' x2='18' y2='21' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%2322D3EE'/%3E%3Cstop offset='1' stop-color='%230284C7'/%3E%3C/linearGradient%3E%3ClinearGradient id='b2' x1='10' y1='11' x2='19' y2='18' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%2338BDF8'/%3E%3Cstop offset='1' stop-color='%230EA5E9'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M5.4 2.5L9.6 4v12l6-3.5-2.9-1.4-1.8-3.6 8.5 3.1v4.2L9.6 20.5l-4.2-2.4V2.5z' fill='url(%23b1)'/%3E%3Cpath d='M9.6 16l9.8-5.4v4.2L9.6 20.5V16z' fill='url(%23b2)' opacity='.9'/%3E%3C/svg%3E",
+        google: "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='translate(1.2,1.2) scale(0.9)'%3E%3Cpath fill='%234285F4' d='M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z'/%3E%3Cpath fill='%2334A853' d='M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z'/%3E%3Cpath fill='%23FBBC05' d='M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z'/%3E%3Cpath fill='%23EA4335' d='M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z'/%3E%3C/g%3E%3C/svg%3E"
+      };
       var BUILTIN_ENGINES = {
-        baidu:  { name: '百度', url: 'https://www.baidu.com/s?wd=',       placeholder: '使用百度搜索，或者输入网址', icon: 'https://www.baidu.com/favicon.ico' },
-        bing:   { name: '必应', url: 'https://www.bing.com/search?q=',    placeholder: '使用必应搜索，或者输入网址', icon: 'https://www.bing.com/favicon.ico' },
-        google: { name: '谷歌', url: 'https://www.google.com/search?q=',  placeholder: '使用谷歌搜索，或者输入网址', icon: 'https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEX7J5qZdq2yzDGnGSV3J4cFDztxbAnNQACtyAAAj4IKVfVoyYBqFTwvT0E.jpeg' }
+        baidu:  { name: '百度', url: 'https://www.baidu.com/s?wd=',       placeholder: '使用百度搜索，或者输入网址', icon: BUILTIN_ENGINE_ICONS.baidu },
+        bing:   { name: '必应', url: 'https://www.bing.com/search?q=',    placeholder: '使用必应搜索，或者输入网址', icon: BUILTIN_ENGINE_ICONS.bing },
+        google: { name: '谷歌', url: 'https://www.google.com/search?q=',  placeholder: '使用谷歌搜索，或者输入网址', icon: BUILTIN_ENGINE_ICONS.google }
       };
 
       // 自定义引擎存储
@@ -118,7 +123,7 @@
             div.dataset.engine = k;
             var iconHtml = isSafeIconUrl(ce.icon)
               ? '<img class="opt-icon" data-icon-url="' + escapeAttr(ce.icon) + '" src="' + escapeAttr(resolveEngineIcon(ce.icon)) + '" alt="" />'
-              : '<span class="opt-icon" style="background:#f0f2f5;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#4b5158;">' + escapeHtml(ce.name.charAt(0)) + '</span>';
+              : '<span class="opt-icon opt-icon-fallback">' + escapeHtml(ce.name.charAt(0)) + '</span>';
             div.innerHTML = iconHtml + '<span>' + escapeHtml(ce.name) + '</span><button class="del-custom" data-custom-idx="' + i + '" title="删除此引擎">×</button>';
             selector.appendChild(div);
           });

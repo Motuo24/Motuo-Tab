@@ -442,7 +442,7 @@ test('智能拖拽分组：移入不重建无关卡片、dragleave 不误清、�
   let afterReorderInFolder = readShortcuts(window);
   assert.deepStrictEqual(afterReorderInFolder[0].children.map((c) => c.name), ['卡B', '卡D']);
 
-  // 组内把 卡B 拖到「拖到此处移出到主页」区
+  // 组内把 卡B 拖到「拖到此处移出到主页」区：原分组仅剩 卡D（1 个应用），自动解散为单卡并关闭弹窗
   const dragOutZone = document.getElementById('folderDragOutZone');
   const firstChildAfter = fGrid.querySelector('.shortcut');
   fireDrag(firstChildAfter, 'dragstart');
@@ -450,8 +450,66 @@ test('智能拖拽分组：移入不重建无关卡片、dragleave 不误清、�
   assert.ok(dragOutZone.classList.contains('active'));
   fireDrag(dragOutZone, 'drop');
 
+  assert.strictEqual(fModal.classList.contains('open'), false, '剩 1 项自动解散后应关闭分组弹窗');
   const afterDragOut = readShortcuts(window);
   assert.strictEqual(afterDragOut.length, 3);
-  assert.strictEqual(afterDragOut[1].name, '卡B', '移出后卡B 应回到主页紧随原分组之后');
-  assert.deepStrictEqual(afterDragOut[0].children.map((c) => c.name), ['卡D']);
+  assert.strictEqual(afterDragOut[0].type, undefined, '分组仅剩 1 项应自动解散为普通卡片');
+  assert.strictEqual(afterDragOut[0].name, '卡D');
+  assert.strictEqual(afterDragOut[1].name, '卡B', '移出后卡B 应回到主页紧随其后');
+  assert.strictEqual(nav.querySelectorAll('.shortcut-folder').length, 1, '主页上原分组节点应就地转为普通卡片（仅剩新合并组）');
+});
+
+test('分组精简自清理：移出最后 1 项自动消失、组内删至 1 项自动解散、删空自动消失', () => {
+  const { window, document } = boot({
+    seed: {
+      'newtab.shortcuts.v1': JSON.stringify([
+        { type: 'folder', id: 'f_one', name: '单卡组', children: [
+          { name: '唯一卡', url: 'https://one.example', iconSrc: 'color', color: 'blue', letter: '一' }
+        ] },
+        { type: 'folder', id: 'f_two', name: '双卡组', children: [
+          { name: '双卡1', url: 'https://two1.example', iconSrc: 'color', color: 'green', letter: '1' },
+          { name: '双卡2', url: 'https://two2.example', iconSrc: 'color', color: 'purple', letter: '2' }
+        ] }
+      ])
+    }
+  });
+
+  // 1. 将 1 项分组的唯一卡「移出到主页」→ 空分组自动消失，卡片回到主页且弹窗关闭
+  const nav = document.querySelector('.shortcuts');
+  nav.querySelectorAll('.shortcut-folder')[0].click();
+  const fModal = document.getElementById('folderModal');
+  const fGrid = document.getElementById('folderGrid');
+  assert.ok(fModal.classList.contains('open'));
+  fGrid.querySelector('.shortcut').dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+  document.querySelector('#ctxMenu button[data-action="moveout"]').click();
+  assert.strictEqual(fModal.classList.contains('open'), false);
+  let saved = readShortcuts(window);
+  assert.strictEqual(saved[0].type, undefined);
+  assert.strictEqual(saved[0].name, '唯一卡');
+
+  // 2. 在 2 项分组内右键删除其中 1 张 → 仅剩 1 项，分组自动解散为单卡「双卡2」
+  nav.querySelectorAll('.shortcut-folder')[0].click();
+  assert.ok(fModal.classList.contains('open'));
+  fGrid.querySelectorAll('.shortcut')[0].dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+  document.querySelector('#ctxMenu button[data-action="delete"]').click();
+  assert.strictEqual(fModal.classList.contains('open'), false);
+  saved = readShortcuts(window);
+  assert.strictEqual(saved.some((it) => it.type === 'folder'), false, '删至 1 项后不应再留空壳分组');
+  assert.deepStrictEqual(saved.map((it) => it.name), ['唯一卡', '双卡2']);
+
+  // 3. 若已有仅含 1 项的分组并在组内删除最后 1 张卡 → 分组直接消失
+  const secondBoot = boot({
+    seed: {
+      'newtab.shortcuts.v1': JSON.stringify([
+        { type: 'folder', id: 'f_empty', name: '待清空组', children: [
+          { name: '末卡', url: 'https://last.example', iconSrc: 'color', color: 'blue', letter: '末' }
+        ] }
+      ])
+    }
+  });
+  secondBoot.document.querySelector('.shortcut-folder').click();
+  secondBoot.document.querySelector('#folderGrid .shortcut').dispatchEvent(new secondBoot.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+  secondBoot.document.querySelector('#ctxMenu button[data-action="delete"]').click();
+  assert.strictEqual(secondBoot.document.getElementById('folderModal').classList.contains('open'), false);
+  assert.strictEqual(readShortcuts(secondBoot.window).length, 0, '删空所有应用后空分组应自动消失');
 });

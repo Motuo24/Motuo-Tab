@@ -1576,14 +1576,90 @@
         openModal(folderModal);
       }
 
+      function closeFolderModalIfMatching(folder) {
+        if (folder && openFolderId === folder.id && folderModal) {
+          openFolderId = null;
+          closeModal(folderModal);
+        }
+      }
+
+      // 当分组被删除/移空（0 项）或仅剩 1 项时，就地自动消失或解散为单卡（不整页重建）
+      function cleanupFolderIfSparseInPlace(folder) {
+        var idx = list.indexOf(folder);
+        if (idx === -1 || !isFolderItem(folder)) return false;
+        var kids = Array.isArray(folder.children) ? folder.children : [];
+        if (kids.length >= 2) return false;
+        closeFolderModalIfMatching(folder);
+        var folderEl = findCardElementByItem(folder);
+        if (kids.length === 0) {
+          list.splice(idx, 1);
+          save(list);
+          if (folderEl && folderEl.parentNode === nav) {
+            animateReorder(function () {
+              folderEl.parentNode.removeChild(folderEl);
+            }, nav, null);
+          } else {
+            render(list);
+          }
+          return true;
+        }
+        var soleChild = kids[0];
+        list.splice(idx, 1, soleChild);
+        save(list);
+        if (folderEl && folderEl.parentNode === nav) {
+          updateCardContent(folderEl, soleChild);
+        } else {
+          render(list);
+        }
+        return true;
+      }
+
       function moveCardOutOfFolderInPlace(parentFolder, childIdx) {
         if (!parentFolder || !Array.isArray(parentFolder.children)) return false;
         if (childIdx < 0 || childIdx >= parentFolder.children.length) return false;
         var item = parentFolder.children.splice(childIdx, 1)[0];
+        var remaining = parentFolder.children;
         var pIdx = list.indexOf(parentFolder);
+        var folderEl = findCardElementByItem(parentFolder);
+
+        // 所有应用都被移出（剩 0 项）：空分组自动消失，移出项接管原位置
+        if (remaining.length === 0) {
+          closeFolderModalIfMatching(parentFolder);
+          if (pIdx >= 0) list.splice(pIdx, 1, item);
+          else list.push(item);
+          save(list);
+          if (folderEl && folderEl.parentNode === nav) {
+            updateCardContent(folderEl, item);
+          } else {
+            render(list);
+          }
+          return true;
+        }
+
+        // 仅剩 1 项：分组自动解散为该单卡，并将刚移出的项紧随其后放回主页
+        if (remaining.length === 1) {
+          var soleChild = remaining[0];
+          closeFolderModalIfMatching(parentFolder);
+          if (pIdx >= 0) list.splice(pIdx, 1, soleChild, item);
+          else list.push(soleChild, item);
+          save(list);
+          if (folderEl && folderEl.parentNode === nav) {
+            animateReorder(function () {
+              var newCard = buildCard(item);
+              newCard.classList.add('no-enter-anim');
+              newCard.setAttribute('draggable', editing ? 'true' : 'false');
+              nav.insertBefore(newCard, folderEl.nextElementSibling || slot);
+              updateCardContent(folderEl, soleChild);
+            }, nav, null);
+          } else {
+            render(list);
+          }
+          return true;
+        }
+
+        // 仍剩 >= 2 项：保留分组，仅将移出卡平滑放回主页并刷新分组缩略图与弹窗网格
         list.splice(pIdx >= 0 ? pIdx + 1 : list.length, 0, item);
         save(list);
-        var folderEl = findCardElementByItem(parentFolder);
         animateReorder(function () {
           var newCard = buildCard(item);
           newCard.classList.add('no-enter-anim');
@@ -2069,10 +2145,12 @@
           case 'delete':
             if (inFld && parentFolder) {
               parentFolder.children.splice(ctxCard, 1);
-              save(list);
-              renderFolderGrid(parentFolder);
-              var rootF = nav.querySelector('.shortcut-folder[data-folder-id="' + parentFolder.id + '"]');
-              if (rootF) updateCardContent(rootF, parentFolder);
+              if (!cleanupFolderIfSparseInPlace(parentFolder)) {
+                save(list);
+                renderFolderGrid(parentFolder);
+                var rootF = findCardElementByItem(parentFolder);
+                if (rootF) updateCardContent(rootF, parentFolder);
+              }
             } else {
               var toRemove = nav.querySelectorAll('.shortcut')[ctxCard];
               list.splice(ctxCard, 1);

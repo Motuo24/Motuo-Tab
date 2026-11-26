@@ -222,3 +222,95 @@ test('消息操作：复制（过滤思考与 ops）、重新回答、原地修�
   assert.ok(document.querySelector('.ai-msg-assistant:not(.ai-msg-persist)').textContent.includes('修改问题后的新回答'));
   assert.strictEqual(document.getElementById('aiHeaderTitleText').textContent, '改写后的精准提问');
 });
+
+test('修复误显撤销按钮与精简顶栏：纯文本/思考提及 <ops> 或空 ops 不出现撤销，且无顶栏清空按钮', async () => {
+  const { window, document } = boot({
+    fetchStub(url) {
+      if (!String(url).includes('/chat/completions')) return Promise.resolve({ ok: false, status: 404 });
+      return sseResponse([{
+        choices: [{
+          delta: {
+            reasoning_content: '思考过程提到了 <ops> 标签，但并不需要执行操作。',
+            content: '普通回答正文，示例说明不要随意输出 <ops>。\n<ops>{"add":[],"remove":[]}</ops>'
+          }
+        }]
+      }]);
+    }
+  });
+  openAI(document);
+  configureAI(document, { deepSearch: true });
+
+  // 顶栏已去除独立删除/清空按钮
+  assert.strictEqual(document.getElementById('aiClear'), null, '侧边栏顶栏不应再显示删除/清空对话按钮');
+
+  sendMessage(document, '介绍一下卡片能力');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  assert.strictEqual(document.querySelectorAll('#aiMessages .ai-undo-btn').length, 0, '未实际改卡片不应显示撤销按钮');
+
+  // 切走再切回重渲染历史，仍然不能误渲染撤销按钮
+  const s1Id = window.__motuo.aiSessions.activeId();
+  document.getElementById('aiNewChatBtn').click();
+  window.__motuo.aiSessions.switchTo(s1Id);
+  assert.strictEqual(document.querySelectorAll('#aiMessages .ai-undo-btn').length, 0, '历史重渲染后也不应误显撤销按钮');
+});
+
+test('模型自动生成对话标题与单独标题提示词设置：首轮完成后自动更新且不覆盖手动改名', async () => {
+  const chatCalls = [];
+  const { window, document } = boot({
+    fetchStub(url, opts) {
+      if (!String(url).includes('/chat/completions')) return Promise.resolve({ ok: false, status: 404 });
+      const body = JSON.parse(opts.body);
+      chatCalls.push(body);
+      if (body.stream === false) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            choices: [{ message: { content: '《高效开发书签汇总》' } }]
+          })
+        });
+      }
+      return sseResponse([{ choices: [{ delta: { content: '推荐几个常用开发工具站给你参考。' } }] }]);
+    }
+  });
+
+  // 打开 AI 设置 -> 提示词 -> 对话标题，测试自定义与恢复默认
+  openAI(document);
+  document.getElementById('aiConfigToggle').click();
+  document.querySelector('#aiPromptLayerSeg [data-prompt-layer="title"]').click();
+  const titlePromptEl = document.getElementById('aiTitlePrompt');
+  const autoTitleEl = document.getElementById('aiAutoTitle');
+  assert.strictEqual(autoTitleEl.checked, true);
+  assert.strictEqual(titlePromptEl.hidden, false);
+
+  const defaultPrompt = titlePromptEl.value;
+  titlePromptEl.value = '自定义标题提示词：提炼8字内短标题';
+  titlePromptEl.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.strictEqual(document.getElementById('aiPromptResetBtn').hidden, false);
+  document.getElementById('aiPromptResetBtn').click();
+  assert.strictEqual(titlePromptEl.value, defaultPrompt);
+
+  // 设置自定义提示词并保存
+  titlePromptEl.value = '自定义标题提示词：请总结成中文短标题';
+  titlePromptEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+  configureAI(document, { autoTitle: true });
+  sendMessage(document, '帮我整理几个后端开发常用的网站，越简洁越好');
+
+  await waitFor(() => chatCalls.length === 2 && document.getElementById('aiHeaderTitleText').textContent === '高效开发书签汇总');
+  assert.strictEqual(chatCalls[1].stream, false);
+  assert.strictEqual(chatCalls[1].messages[0].content, '自定义标题提示词：请总结成中文短标题');
+  assert.ok(document.querySelector('.ai-session-item.active .ai-session-select').textContent === '高效开发书签汇总');
+
+  // 手动重命名后再次对话，不再覆盖自定义标题
+  const sid = window.__motuo.aiSessions.activeId();
+  window.prompt = () => '我的专属对话';
+  window.__motuo.aiSessions.rename(sid);
+  assert.strictEqual(document.getElementById('aiHeaderTitleText').textContent, '我的专属对话');
+
+  sendMessage(document, '再来一个数据库站点');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  await new Promise((r) => setTimeout(r, 80));
+  assert.strictEqual(chatCalls.length, 3, '已有手动标题后不应重复触发自动命名');
+  assert.strictEqual(document.getElementById('aiHeaderTitleText').textContent, '我的专属对话');
+});

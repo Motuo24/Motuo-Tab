@@ -721,7 +721,7 @@
         }
         active.messages = aiHistory;
         active.updatedAt = Date.now();
-        if (!active.customTitle) active.title = deriveSessionTitle(aiHistory);
+        if (!active.customTitle && !active.titleGenerated) active.title = deriveSessionTitle(aiHistory);
         persistSessionsStore();
         syncSessionHeaderTitle();
         renderSessionsList();
@@ -999,6 +999,12 @@
           errBox.textContent = errs.join('；');
         }
       }
+      var DEFAULT_TITLE_PROMPT = '请根据下面的对话内容，提炼一个简短准确的中文标题（不超过 12 个字）。只输出标题本身，不要加引号、书名号、序号或任何解释。';
+      function isAutoTitleEnabled() { return isChecked('aiAutoTitle', true); }
+      function currentTitlePrompt() {
+        var val = fieldValue('aiTitlePrompt');
+        return val || DEFAULT_TITLE_PROMPT;
+      }
       var activePromptLayer = 'system';
       var promptPreviewOpen = false;
       function syncPromptUI() {
@@ -1007,23 +1013,33 @@
         });
         var sysCtrl = document.getElementById('aiSystemPresetCtrl');
         var ctxCtrl = document.getElementById('aiContextPresetCtrl');
+        var titleCtrl = document.getElementById('aiTitlePresetCtrl');
         if (sysCtrl) sysCtrl.hidden = activePromptLayer !== 'system';
         if (ctxCtrl) ctxCtrl.hidden = activePromptLayer !== 'context';
+        if (titleCtrl) titleCtrl.hidden = activePromptLayer !== 'title';
         var desc = document.getElementById('aiPromptLayerDesc');
         if (desc) {
-          desc.textContent = activePromptLayer === 'context'
-            ? '每次发送前附加在当前用户消息前面，卡片或搜索状态变更后自动更新'
-            : '基础人设与能力边界，整段对话共享，不随卡片变动';
+          desc.textContent = activePromptLayer === 'title'
+            ? '新对话首轮回答完成后，使用当前模型生成简洁对话标题的指令'
+            : (activePromptLayer === 'context'
+              ? '每次发送前附加在当前用户消息前面，卡片或搜索状态变更后自动更新'
+              : '基础人设与能力边界，整段对话共享，不随卡片变动');
         }
+        var varRow = document.getElementById('aiPromptVarRow');
+        if (varRow) varRow.hidden = activePromptLayer === 'title';
         var sysBox = document.getElementById('aiSystemPrompt');
         var ctxBox = document.getElementById('aiContextPrompt');
+        var titleBox = document.getElementById('aiTitlePrompt');
         var previewBox = document.getElementById('aiPromptPreviewBox');
-        var activeBox = activePromptLayer === 'context' ? ctxBox : sysBox;
+        var isTitle = activePromptLayer === 'title';
+        var activeBox = isTitle ? titleBox : (activePromptLayer === 'context' ? ctxBox : sysBox);
+        if (isTitle) promptPreviewOpen = false;
         if (sysBox) sysBox.hidden = promptPreviewOpen || activePromptLayer !== 'system';
         if (ctxBox) ctxBox.hidden = promptPreviewOpen || activePromptLayer !== 'context';
+        if (titleBox) titleBox.hidden = activePromptLayer !== 'title';
         if (previewBox) {
-          previewBox.classList.toggle('open', promptPreviewOpen);
-          if (promptPreviewOpen && activeBox) {
+          previewBox.classList.toggle('open', !isTitle && promptPreviewOpen);
+          if (!isTitle && promptPreviewOpen && activeBox) {
             previewBox.textContent = fillPrompt(activeBox.value) || '（内容为空）';
           }
         }
@@ -1032,16 +1048,24 @@
           var len = String(activeBox.value || '').length;
           counter.textContent = len + ' 字 · 约 ' + Math.ceil(len * 0.65) + ' tokens';
         }
-        var activeList = activePromptLayer === 'context' ? contextPresetList : systemPresetList;
-        var activeId = activePromptLayer === 'context' ? activeContextPresetId : activeSystemPresetId;
-        var curPreset = presetById(activeList, activeId);
-        var builtins = activePromptLayer === 'context' ? builtinContextPresets() : builtinSystemPresets();
-        var defPreset = curPreset && builtins.filter(function (b) { return b.id === curPreset.id; })[0];
-        var isModifiedBuiltin = !!(curPreset && curPreset.builtin && defPreset && String(curPreset.text || '') !== String(defPreset.text || ''));
+        var isModifiedBuiltin = false;
+        if (isTitle) {
+          isModifiedBuiltin = !!(titleBox && titleBox.value.trim() && titleBox.value.trim() !== DEFAULT_TITLE_PROMPT);
+        } else {
+          var activeList = activePromptLayer === 'context' ? contextPresetList : systemPresetList;
+          var activeId = activePromptLayer === 'context' ? activeContextPresetId : activeSystemPresetId;
+          var curPreset = presetById(activeList, activeId);
+          var builtins = activePromptLayer === 'context' ? builtinContextPresets() : builtinSystemPresets();
+          var defPreset = curPreset && builtins.filter(function (b) { return b.id === curPreset.id; })[0];
+          isModifiedBuiltin = !!(curPreset && curPreset.builtin && defPreset && String(curPreset.text || '') !== String(defPreset.text || ''));
+        }
         var rstBtn = document.getElementById('aiPromptResetBtn');
         if (rstBtn) rstBtn.hidden = !isModifiedBuiltin;
         var previewBtn = document.getElementById('aiTogglePromptPreviewBtn');
-        if (previewBtn) previewBtn.textContent = promptPreviewOpen ? '返回编辑' : '预览展开效果';
+        if (previewBtn) {
+          previewBtn.hidden = isTitle;
+          previewBtn.textContent = promptPreviewOpen ? '返回编辑' : '预览展开效果';
+        }
       }
 
       function searchCatalog() {
@@ -1260,6 +1284,8 @@
           },
           systemPrompt: fieldValue('aiSystemPrompt'),
           contextPrompt: fieldValue('aiContextPrompt'),
+          titlePrompt: fieldValue('aiTitlePrompt'),
+          autoTitle: isAutoTitleEnabled(),
           systemPresets: systemPresetList,
           activeSystemPresetId: activeSystemPresetId,
           contextPresets: contextPresetList,
@@ -1383,6 +1409,14 @@
         if (!presetById(contextPresetList, activeContextPresetId)) activeContextPresetId = 'full';
         renderLayer('system');
         renderLayer('context');
+        var titleBox = document.getElementById('aiTitlePrompt');
+        if (titleBox) {
+          titleBox.value = (cfg && typeof cfg.titlePrompt === 'string' && cfg.titlePrompt.trim())
+            ? cfg.titlePrompt
+            : DEFAULT_TITLE_PROMPT;
+        }
+        var autoTitleEl = document.getElementById('aiAutoTitle');
+        if (autoTitleEl) autoTitleEl.checked = !(cfg && cfg.autoTitle === false);
         updateModelBadge();
         syncProviderFields();
         syncProfileRow();
@@ -1404,10 +1438,19 @@
         if (migrated) saveAIConfig(true);
       })();
 
-      ['aiEndpoint', 'aiKey', 'aiModel', 'aiCustomUrl', 'aiSearchKey', 'aiMaxTokens', 'aiSystemPrompt', 'aiContextPrompt', 'aiProfileName', 'aiCustomHeaders', 'aiExtraBody'].forEach(function (id) {
+      ['aiEndpoint', 'aiKey', 'aiModel', 'aiCustomUrl', 'aiSearchKey', 'aiMaxTokens', 'aiSystemPrompt', 'aiContextPrompt', 'aiTitlePrompt', 'aiProfileName', 'aiCustomHeaders', 'aiExtraBody'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.addEventListener('change', function () { saveAIConfig(); });
       });
+      var aiTitleBoxEl = document.getElementById('aiTitlePrompt');
+      if (aiTitleBoxEl) {
+        aiTitleBoxEl.addEventListener('input', function () {
+          syncPromptUI();
+          saveAIConfig();
+        });
+      }
+      var aiAutoTitleSwitch = document.getElementById('aiAutoTitle');
+      if (aiAutoTitleSwitch) aiAutoTitleSwitch.addEventListener('change', function () { saveAIConfig(); });
       if (aiBochaKey) {
         aiBochaKey.addEventListener('change', function () {
           searchKeyBag.bocha = aiBochaKey.value.trim();
@@ -1969,6 +2012,14 @@
       }
 
       function resetPromptLayer(kind) {
+        if (kind === 'title') {
+          var tBox = document.getElementById('aiTitlePrompt');
+          if (tBox) tBox.value = DEFAULT_TITLE_PROMPT;
+          syncPromptUI();
+          saveAIConfig();
+          flashSaved('已恢复默认');
+          return;
+        }
         var s = layerState(kind);
         var builtins = kind === 'context' ? builtinContextPresets() : builtinSystemPresets();
         var cur = presetById(s.list(), s.getId());
@@ -2068,7 +2119,8 @@
           var btn = e.target.closest ? e.target.closest('[data-prompt-layer]') : null;
           if (!btn) return;
           closeAllPopMenus();
-          activePromptLayer = btn.getAttribute('data-prompt-layer') === 'context' ? 'context' : 'system';
+          var layer = btn.getAttribute('data-prompt-layer');
+          activePromptLayer = (layer === 'context' || layer === 'title') ? layer : 'system';
           promptPreviewOpen = false;
           syncPromptUI();
         });
@@ -2798,10 +2850,14 @@
                 var frag = renderAIContent(content);
                 if (frag.childNodes.length) div.appendChild(frag);
               }
-              // 含 <ops> 的历史消息补"撤销"按钮：优先嵌入 .ai-tool-calls 操作栏右侧
-              if (typeof content === 'string' && /<ops>/i.test(content)) {
+              // 仅在确实保存过卡片修改快照时渲染"撤销"按钮（避免思考或正文提及 <ops> 时误显示）
+              var toolBar = div.querySelector('.ai-tool-calls');
+              var hasLegacySnap = false;
+              if (!msg.snapshotId && toolBar) {
+                try { hasLegacySnap = !!localStorage.getItem(AI_SNAPSHOT_KEY); } catch (eSnap) {}
+              }
+              if (msg.snapshotId || (toolBar && hasLegacySnap)) {
                 var undoBtn = createUndoButton(msg.snapshotId);
-                var toolBar = div.querySelector('.ai-tool-calls');
                 if (toolBar) toolBar.appendChild(undoBtn);
                 else div.appendChild(undoBtn);
               }
@@ -3472,13 +3528,72 @@
           toggleSessionsDrawer(false);
         }
       });
-      document.getElementById('aiClear').addEventListener('click', function () {
-        if (aiSending) return;
-        // 破坏性操作：仅在有历史时二次确认，防止误触
-        if (aiHistory.length > 1 && !confirm('确定清空当前对话？清空后不可恢复。')) return;
-        clearAIConversation();
-        showAIToast('对话已清空');
-      });
+      var aiClearBtn = document.getElementById('aiClear');
+      if (aiClearBtn) {
+        aiClearBtn.addEventListener('click', function () {
+          if (aiSending) return;
+          if (aiHistory.length > 1 && !confirm('确定清空当前对话？清空后不可恢复。')) return;
+          clearAIConversation();
+          showAIToast('对话已清空');
+        });
+      }
+
+      function sanitizeGeneratedTitle(raw) {
+        var s = String(raw || '')
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          .replace(/<think>[\s\S]*$/i, '')
+          .split(/\r?\n/)[0] || '';
+        s = s.trim()
+          .replace(/^["'“”‘’《》【】「」\[\]()（）]+/, '')
+          .replace(/["'“”‘’《》【】「」\[\]()（）.。!！?？:：,，;；]+$/, '')
+          .replace(/^(?:标题|对话标题)[：:]\s*/, '')
+          .trim();
+        if (!s) return '';
+        return s.length > 20 ? s.slice(0, 20) + '…' : s;
+      }
+
+      function maybeGenerateSessionTitle(sessionId, userText, assistantContent, endpoint, key, model) {
+        if (!isAutoTitleEnabled() || !endpoint || !key) return;
+        var ses = null;
+        for (var i = 0; i < aiSessions.length; i++) {
+          if (aiSessions[i] && aiSessions[i].id === sessionId) { ses = aiSessions[i]; break; }
+        }
+        if (!ses || ses.customTitle || ses.titleGenerated) return;
+        ses.titleGenerated = true;
+        var cleanAns = extractCopyableText(assistantContent).slice(0, 300);
+        var req = {
+          model: model || 'deepseek-flash',
+          messages: [
+            { role: 'system', content: currentTitlePrompt() },
+            { role: 'user', content: '用户：' + String(userText || '').slice(0, 300) + (cleanAns ? '\n助手：' + cleanAns : '') }
+          ],
+          stream: false,
+          max_tokens: 40,
+          temperature: 0.3
+        };
+        fetch(buildChatUrl(endpoint), {
+          method: 'POST',
+          headers: buildChatHeaders(key),
+          body: JSON.stringify(req)
+        }).then(function (res) {
+          if (!res || !res.ok) return null;
+          return res.json();
+        }).then(function (data) {
+          if (!data || !Array.isArray(data.choices) || !data.choices[0]) return;
+          var msg = data.choices[0].message || {};
+          var next = sanitizeGeneratedTitle(msg.content || data.choices[0].text || '');
+          if (!next) return;
+          var target = null;
+          for (var j = 0; j < aiSessions.length; j++) {
+            if (aiSessions[j] && aiSessions[j].id === sessionId) { target = aiSessions[j]; break; }
+          }
+          if (!target || target.customTitle) return;
+          target.title = next;
+          persistSessionsStore();
+          syncSessionHeaderTitle();
+          renderSessionsList();
+        }).catch(function () {});
+      }
 
       // AI 配置：独立弹窗（Esc / 遮罩 / 关闭按钮由主模块的 modal-mask 逻辑处理）
       var aiConfigModal = document.getElementById('aiConfigModal');
@@ -3504,7 +3619,10 @@
       function clearAIConversation() {
         if (aiSending) return;
         var ses = getActiveSession();
-        if (ses) ses.customTitle = false;
+        if (ses) {
+          ses.customTitle = false;
+          ses.titleGenerated = false;
+        }
         aiHistory = [{ role: 'system', content: buildSystemPrompt() }];
         saveAIHistory();
         renderAIHistory();
@@ -3579,7 +3697,8 @@
         aiHistory = aiHistory.slice(0, msgIdx);
         aiHistory.push({ role: 'user', content: trimmed });
         var active = getActiveSession();
-        if (active && !active.customTitle) active.title = deriveSessionTitle(aiHistory);
+        if (msgIdx === 1 && active && !active.customTitle) active.titleGenerated = false;
+        if (active && !active.customTitle && !active.titleGenerated) active.title = deriveSessionTitle(aiHistory);
         saveAIHistory();
         renderAIHistory();
         runAIRequest(trimmed);
@@ -3948,6 +4067,7 @@
         }
         pendingSnapshotId = null;
         try {
+          var reqSessionId = activeSessionId;
           aiHistory[0].content = buildSystemPrompt();
           setAISendState(true);
 
@@ -4104,6 +4224,7 @@
                   saveAIHistory();
                   attachAssistantFooter(group, aiHistory.indexOf(sMsg), false);
                   endAISend();
+                  maybeGenerateSessionTitle(reqSessionId, text, finalContent, endpoint, key, model);
                 }).catch(function (fErr) {
                   var fErrMsg = '联网搜索后回答失败：' + (fErr && fErr.message ? fErr.message : fErr);
                   bubble.innerHTML = renderMarkdown(fErrMsg);
@@ -4144,6 +4265,7 @@
               saveAIHistory();
               attachAssistantFooter(group, aiHistory.indexOf(nMsg), false);
               endAISend();
+              maybeGenerateSessionTitle(reqSessionId, text, finalContent, endpoint, key, model);
             };
 
             if (!opsApplied && !ctx.opsRetried && wantsCardChange(text) && looksLikeOpsAttempt(ctx.accumulated)) {

@@ -88,6 +88,8 @@ function configureAI(doc, cfg = {}) {
   doc.getElementById('aiWebSearch').checked = !!cfg.webSearch;
   doc.getElementById('aiBochaKey').value = cfg.bochaKey || 'sk-bocha-test';
   doc.getElementById('aiDeepSearch').checked = !!cfg.deepSearch;
+  const at = doc.getElementById('aiAutoTitle');
+  if (at) at.checked = !!cfg.autoTitle;
 }
 
 function sendMessage(doc, text) {

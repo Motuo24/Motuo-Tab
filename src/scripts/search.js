@@ -241,7 +241,7 @@
       var engineModal = document.getElementById('engineModal');
       var engineName = document.getElementById('engineName');
       var engineUrl = document.getElementById('engineUrl');
-      var engineIconInput = document.getElementById('engineIcon');
+      var engineIconInput = document.getElementById('customEngineIcon');
       var engineAddBtn = document.getElementById('engineAddBtn');
       var customEngineList = document.getElementById('customEngineList');
 

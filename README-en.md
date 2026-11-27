@@ -1,90 +1,54 @@
 # Motuo-Tab
 
-A browser New Tab replacement page: shortcut management, personalized wallpapers, an AI assistant, and a scratchpad.
+A browser New Tab replacement page: shortcut & folder management, personalized wallpapers, an AI assistant, a scratchpad, and cloud sync.
 
 [中文](README.md) · [English](README-en.md)
 
 > All data is stored locally in your browser (LocalStorage / IndexedDB) — **no backend required**.
-> The extension, single-file, and online versions behave identically: moving the file or using it online works the same.
+> The extension, single-file, and online builds share identical core features, and you can optionally sync settings across devices via your own WebDAV server.
 >
-> ⚠️ **Exception: the AI assistant (including web search) only works when installed as a browser extension.** When you open the single-file build directly via `file://`, the page has no extension host permissions, so cross-origin requests are blocked by the browser (they hang / time out / fail) and it cannot reach the model or search API. Use the **extension**, or an online / local `http(s)` server build.
+> ⚠️ **Exception: the AI assistant (including web search) and cross-origin WebDAV requests only work reliably in the browser extension build.** Opening the single-file HTML via `file://` lacks extension host permissions, so browsers block cross-origin requests. Use the **extension**, or serve it via an online host / local `http` server.
 
-***
+---
 
-## Changelog (v0.8.7)
+<p align="center">
+  <img src="docs/images/release-v092-banner.jpg" alt="Motuo-Tab v0.9.2 Visual & Experience Refresh" width="100%" />
+</p>
 
-- **AI settings**: multiple model profiles, thinking level, temperature, max length, and an editable system prompt with `{{cards}}` style tags
-- **Web search**: DeepSeek, Zhipu, Kimi, Bailian, Doubao, Qianfan, Bocha, You.com, Tencent, Tavily, or a custom endpoint. Each option notes auth, billing, time filters, and response shape (checked 2026-11-20)
-- **Card edits**: each change can be undone on its own; duplicate names are not added again
+<p align="center">
+  <img src="docs/images/release-v092-bento-en.jpg" alt="Motuo-Tab v0.9.2 Refreshed Design, Evolved Experience" width="100%" />
+</p>
 
-## Changelog (v0.8.6)
+<details>
+<summary>Expand full v0.9.2 highlights (complete history in <a href="CHANGELOG.md">CHANGELOG.md</a>)</summary>
 
-- **Search failures are specific**: the provider's reason (quota, invalid key, timeout) is given to the assistant, which is asked to tell you
-- **AI settings window**: the gear opens a separate window instead of a strip inside the sidebar
+- **Visuals & Themes**: Switchable dual-style original SVG logos (`Flowing M` / `Folded Page`), independent toggle & `20%–100%` opacity slider; time-of-day greetings; 6-tab System Settings dialog with large About view; Light / Dark / System Auto modes; transparent vector SVG icons for Baidu, Bing, and Google.
+- **Folders & Editing**: 2×2 thumbnail folders and centered folder modal; gap-line insertion sorting, highlighted folder drop badge, and 450ms hover-to-merge folder creation; open/manage/reorder/drag-out folders directly in edit mode; auto-dissolve at 1 item and auto-remove when emptied.
+- **AI Assistant & Settings**: Embedded multi-conversation drawer (Today / 7 Days / Older), model-generated session titles with customizable title prompt; copy / inline edit-and-resend / regenerate; timed reasoning accordion & integrated action/undo bar; 5-tab settings window with model profiles, `/v1/models` fetch, 11 search providers + custom endpoint, 3-layer prompt previews, and masked keys / sanitized exports.
+- **Search, Import & Sync**: Local-first + Baidu online suggestions (`↑↓`/`Enter`/`Esc`, privacy toggle), search history manager & customizable site-direct prefixes; Chrome / Edge / Firefox HTML bookmark importer with tree preview; WebDAV cloud sync (merge/overwrite, excludes wallpapers & credentials), 30-day backup reminders, and 7-day background IndexedDB icon refresh.
 
-## Changelog (v0.8.5)
-
-- **Search suggestions note**: Help explains that online suggestions send the current query to Baidu and can be turned off; search history can be managed in General settings
-
-- **Menu pills**: site-direct and online-suggestion pills share the menu's theme colors and shadow, including in dark mode
-
-## Changelog (v0.8.4)
-
-- **AI assistant Markdown list fix**: list bullets and numbers now stay inside the message bubble
-
-## Changelog (v0.8.3)
-
-- **Dynamic wallpapers**: video (MP4 / WebM) and animated images (GIF / WebP) as the background; muted, looped, autoplaying, blur still works
-
-- **AI assistant overhaul**: web search now uses our own text protocol `<web_search>`, avoiding the flakiness of DeepSeek native tool calling in thinking mode; fixed "search never triggers / reply fails after search / tags leak / raw JSON only / card rules missing"
-
-- **More robust card operations**: accepts `<ops>`, raw JSON, code blocks, arrays, and loose JSON; no longer forces an operation when a card already exists or info is missing
-
-- **Multi-round search**: up to 3 consecutive searches per turn; the thinking log keeps "search: query (N results)"
-
-- **Faster icons**: fetched icons are cached locally as data URLs, so pages no longer re-fetch them on every visit
-
-## Changelog (v0.8.2)
-
-- **Theme modes**: new Light / Dark / Auto switching; Auto mode recolors text in real time based on the wallpaper pixels beneath it
-
-- **Help center**: new "Help" entry in the menu, Markdown-style layout (left chapter navigation + right content), covering AI key setup, Bocha search key guide, and shortcut tutorials
-
-- **Shortcut dialog**: rebuilt visuals (split keycaps, ordered from few keys to many, softer description text) and added Command-key equivalents
-
-- **Menu redesign**: iconified menu items, grouped sections, isolated dangerous actions, pill-shaped site-direct search card
-
-- **Interaction polish**: clicking the bottom-right menu button now closes a dialog opened from the menu; fixed the menu button being hidden behind the modal overlay
-
-- **Default shortcuts**: refreshed built-in defaults (including image icons)
-
-- **AI assistant**: sidebar title replaced with the brand icon
-
-## Features
-
-- **Search**: Baidu / Bing / Google / custom engines (`%s` template); search history (manageable in General settings), suggestion dropdown (local history first, Baidu suggestions after, can be turned off), site-direct shortcuts (`zh`/`gh`/`bl`/`tb`/`db`)
-
-- **Shortcuts**: add / edit / delete, drag-to-sort, drag-to-bottom-to-delete, context menu, automatic favicon fetching
-
-- **Personalization**: image / video (dynamic) / animated / solid-color wallpaper, blur amount, card opacity (image / text toggles independently)
-
-- **AI assistant**: OpenAI-compatible streaming chat, deep thinking, web search (Bocha AI) with multi-round search, manage cards in natural language with one-click undo
-
-- **Scratchpad**: quick notes, auto-saved
-
-- **Export / Import**: full backup (shortcuts + wallpaper + AI config & history + personalization)
+</details>
 
 ## Screenshots
 
-Home (wallpaper + search + shortcuts):
+| Home | AI Sidebar |
+| --- | --- |
+| ![Home](docs/images/screenshot-home.png) | ![AI Sidebar](docs/images/screenshot-ai.png) |
 
-| Home                                      | Menu                                      |
-| ----------------------------------------- | ----------------------------------------- |
-| ![Home](docs/images/screenshot-home.webp) | ![Menu](docs/images/screenshot-menu.webp) |
+| AI Settings | System Settings |
+| --- | --- |
+| ![AI Settings](docs/images/screenshot-ai-settings.png) | ![System Settings](docs/images/screenshot-settings.png) |
 
-| Scratchpad                                            | AI Assistant                                    |
-| ----------------------------------------------------- | ----------------------------------------------- |
-| ![Scratchpad](docs/images/screenshot-scratchpad.webp) | ![AI Assistant](docs/images/screenshot-ai.webp) |
+---
+
+## Features
+
+- **Search**: Baidu / Bing / Google (transparent vector SVG icons) and custom engines (`%s` templates); local history + Baidu online suggestions (keyboard navigation, toggleable); customizable site-direct rules (default `zh` / `gh` / `bl` / `tb` / `db`) and search history management.
+- **Shortcuts & Folders**: Add, edit, delete, context menu, and automatic favicon caching in IndexedDB; 2×2 thumbnail folders with smart gap reordering, drop-into-folder, hover-to-merge folder creation, drag-to-bottom delete, in-folder reordering/drag-out, and auto-dissolve/auto-clean when sparse or empty.
+- **Personalization**: Switchable startpage Hero logos (independent toggle & opacity control) and time-of-day greetings; image / video (MP4 / WebM) / animated (GIF / WebP) / solid-color wallpapers, blur control, card opacity, and Light / Dark / System Auto themes.
+- **AI Assistant**: OpenAI-compatible streaming/non-streaming chat, multi-session drawer with model-generated titles, timed reasoning accordion, 11 web search providers with multi-round search, 3-layer custom prompts, and natural-language card/folder management with one-click undo.
+- **Scratchpad**: Quick notes auto-saved locally.
+- **Backup & Sync**: Full JSON export/import (with optional API key sanitization), Netscape bookmark HTML import, WebDAV cloud sync, and 30-day backup reminders.
 
 ## Installation
 
@@ -100,7 +64,7 @@ Download the latest extension package from [Releases](../../releases), unzip it,
 
 New tabs will now show Motuo-Tab.
 
-> ⚠️ **Keep the unzipped** **`extension`** **folder safe — it IS the extension.**
+> ⚠️ **Keep the unzipped `extension` folder safe — it IS the extension.**
 > "Load unpacked" does not copy files into the browser; the browser only references
 > this folder. Deleting, moving, or renaming it will break the extension.
 > Unzip it to a long-term, fixed location (e.g. `D:\Motuo-Tab\`).
@@ -108,7 +72,6 @@ New tabs will now show Motuo-Tab.
 **Updating & data safety**:
 
 - To update: unzip the new version **over the same path** (keep the folder's absolute path unchanged), then click the reload icon on the extension card — no reinstall needed;
-
 - Your data (shortcuts, AI config & history, etc.) lives in the browser's local storage, bound to the extension ID. For unpacked extensions the ID is derived from the folder's **absolute path** — once the path changes, the browser treats it as a brand-new extension and old data becomes unreachable. So never move or delete the folder.
 
 ### Single-file HTML (no installation)
@@ -116,21 +79,17 @@ New tabs will now show Motuo-Tab.
 Download the single-file `newtab.html` from [Releases](../../releases) and double-click to use it. You can also set it as your new tab page:
 
 - Edge: Settings → On startup → Open specific pages → add the file
-
 - Chrome: needs an extension such as "New Tab Redirect" pointing to the file
-
 - Other browsers (e.g. Firefox): just use the single file
 
 ### Firefox: Point the new tab to a local HTML via AutoConfig
 
 Firefox does not allow pointing the new tab page at a local `file://` path and has no built-in setting for it. Using Mozilla's official **AutoConfig** mechanism (written into the Firefox install directory, bypassing extension caching) is currently the only way to point the new tab directly at a local `file://` path. The following applies to Firefox 136 and later.
 
-**Step 1: open the** **`defaults/pref/`** **folder inside the Firefox install directory**
+**Step 1: open the `defaults/pref/` folder inside the Firefox install directory**
 
 - Windows: `C:\Program Files\Mozilla Firefox\defaults\pref`
-
 - macOS: `/Applications/Firefox.app/Contents/Resources/defaults/pref/` (adjust to your actual system path)
-
 - Linux: `/opt/firefox/defaults/pref/`
 
 Create `autoconfig.js` with:
@@ -141,7 +100,7 @@ pref("general.config.obscure_value", 0);
 pref("general.config.sandbox_enabled", false);
 ```
 
-**Step 2: go back to the Firefox install root (the parent of** **`defaults`) and create** **`mozilla.cfg`**
+**Step 2: go back to the Firefox install root (the parent of `defaults`) and create `mozilla.cfg`**
 
 The first line must be a comment (a hard requirement of Firefox, otherwise the whole file is ignored):
 
@@ -160,11 +119,11 @@ try {
 
 Replace `file:///C:/path/to/your/index.html` with the real absolute path of your local HTML (same on Linux/macOS, e.g. `file:///home/you/index.html`).
 
-**Step 3: restart Firefox and press** **`Ctrl+T`** to verify the new tab now points to the file.
+**Step 3: restart Firefox and press `Ctrl+T`** to verify the new tab now points to the file.
 
 ### Online preview / use
 
-Visit <https://xr24.cn/motuo-tab-online/> directly — no installation needed. Data still stays in your local browser (LocalStorage).
+Visit <https://xr24.cn/motuo-tab-online/> directly — no installation needed. Data still stays in your local browser (LocalStorage / IndexedDB).
 
 ### Manual build (for developers)
 
@@ -179,42 +138,41 @@ Artifacts: `dist/newtab.html` (single-file) and `dist/extension` (MV3 extension)
 
 ### Keyboard shortcuts
 
-| Shortcut | Action                                              |
-| -------- | --------------------------------------------------- |
-| `Ctrl+E` | Focus mode (content fades out, search box centers)  |
-| `Ctrl+K` | Edit mode (drag to sort / drag to bottom to delete) |
-| `Ctrl+A` | Open AI assistant                                   |
-| `Esc`    | Close modals / menus                                |
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+E` | Focus mode (content fades out, search box centers) |
+| `Ctrl+K` | Edit mode (gap reorder / drag or hover into folder / manage folders / drag to bottom to delete) |
+| `Ctrl+A` | Open AI assistant |
+| `Esc` | Close modals / menus |
 
 ### Site-direct search
 
-Type "prefix + space + keyword" in the search box to search directly on a site:
+Type "prefix + space + keyword" in the search box to search directly on a site (customizable under System Settings → Search & Direct):
 
-| Prefix | Site     |
-| ------ | -------- |
-| `zh`   | Zhihu    |
-| `gh`   | GitHub   |
-| `bl`   | Bilibili |
-| `tb`   | Taobao   |
-| `db`   | Douban   |
+| Default prefix | Site |
+| --- | --- |
+| `zh` | Zhihu |
+| `gh` | GitHub |
+| `bl` / `b站` | Bilibili |
+| `tb` | Taobao |
+| `db` | Douban |
 
 Example: `bl Node.js` → search Node.js on Bilibili.
 
 ### AI assistant
 
-1. Click the `AI` button in the bottom-left corner to open the panel
-2. Click `⚙` in the top-right to open the settings window: API endpoint, key, model (OpenAI-compatible, e.g. DeepSeek), and the Bocha search key
-3. Optional: enable "Web search" with a Bocha AI key; enable "Deep thinking" for model reasoning
+1. Click the `AI` button in the bottom-left corner to open the sidebar (open the history drawer on the top-left or start a new chat on the top-right)
+2. Click `⚙` in the top-right to open the standalone settings dialog: configure OpenAI-compatible API endpoint, key, model profiles, 11 web search providers (or custom endpoint), and 3-layer prompts (System / Context / Title)
+3. Toggle "Web search" or "Deep thinking" above the input box as needed
 
-Manage cards in natural language, e.g. "make GitHub green" or "move Zhihu to the front"; every operation can be undone.
+Manage shortcuts and folders in natural language, e.g. "make GitHub green" or "move Zhihu into Reading folder"; operations can be undone individually.
 
-> **Note**: the AI assistant needs to make cross-origin requests to the model endpoint and the Bocha search API, so it **only works in the browser extension build** (the extension declares `<all_urls>` host permissions). Opening `dist/newtab.html` via `file://` has no such permissions and the requests will be blocked, so AI features won't work; if you must use the single-file build, serve it over a local `http` server or an online host (`http/https`).
+> **Note**: the AI assistant needs to make cross-origin requests to the model endpoint and search APIs, so it **only works reliably in the browser extension build** (the extension declares `<all_urls>` host permissions). Opening `dist/newtab.html` via `file://` lacks such permissions and requests will be blocked; serve it over a local `http` server or an online host (`http/https`) if needed.
 
-### Data
+### Data & sync
 
-- Export / Import: bottom-right menu → General settings, exports a full JSON backup
-
-- All data stays local: `localStorage` (settings, shortcuts, AI history) and `IndexedDB` (image wallpaper); the full key list is documented in the header comment of `src/index.html`
+- **Export / Import / Bookmarks / WebDAV**: bottom-right menu → System Settings → Data Management for full JSON backups (optionally excluding API keys), browser bookmark HTML imports, manual icon cache refresh, and WebDAV cloud sync.
+- **Local storage**: `localStorage` stores settings, shortcuts, folders, and multi-session AI history; `IndexedDB` stores wallpapers and cached icons; the full key inventory is documented in `src/index.html`.
 
 ## Development
 
@@ -231,9 +189,12 @@ npm run gen:icons  # regenerate extension icons
 src/                  # source code
   index.html          # page template (external CSS/JS)
   styles/main.css     # styles
-  scripts/search.js   # search module
-  scripts/main.js     # main module (cards/wallpaper/AI/scratchpad/import-export)
+  scripts/search.js   # search module (engines/suggestions/history/site-direct)
+  scripts/main.js     # main module (cards/folders/wallpaper/theme/scratchpad/bookmarks/WebDAV)
+  scripts/ai-search.js# AI multi-provider web search adapter
+  scripts/ai.js       # AI assistant & multi-session chat
   scripts/idle.js     # idle-hide UI module
+  assets/             # default icon source images (inlined during build)
   favicon.ico
 scripts/              # build tooling
   build.js            # single-file + MV3 extension

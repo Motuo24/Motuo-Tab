@@ -10,7 +10,7 @@
 //     ├── manifest.json
 //     ├── newtab.html         （引用外部 CSS/JS，符合 MV3 CSP：禁内联脚本）
 //     ├── styles/main.css
-//     ├── scripts/{search,main,ai,idle}.js
+//     ├── scripts/{search,main,ai-search,ai,idle}.js
 //     ├── favicon.ico
 //     └── icons/icon{16,32,48,128}.png
 // ============================================================================
@@ -89,7 +89,7 @@ const manifest = {
   description: pkg.description,
   author: 'Motuo24',
   homepage_url: 'https://pod.xr24.cn',
-  // AI 助手需要跨域请求用户自填的模型接口，以及博查搜索 API。
+  // AI 助手与 WebDAV 云同步需要跨域请求用户自填的模型、联网搜索及同步接口。
   // 缺少 host_permissions 时，扩展页面的 fetch 会被 CORS 拦截（表现为请求挂起/超时）。
   host_permissions: ['<all_urls>'],
   chrome_url_overrides: { newtab: 'newtab.html' },

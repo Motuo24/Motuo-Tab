@@ -242,7 +242,7 @@ test('自定义搜索引擎渲染对危险字符转义', () => {
   const { document } = boot();
   document.getElementById('engineName').value = '<img src=x onerror=alert(1)>';
   document.getElementById('engineUrl').value = 'https://s.example/?q=%s';
-  document.getElementById('engineIcon').value = 'javascript:alert(1)';
+  document.getElementById('customEngineIcon').value = 'javascript:alert(1)';
   document.getElementById('engineAddBtn').click();
 
   const selector = document.getElementById('engineSelector');

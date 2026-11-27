@@ -169,7 +169,7 @@
   }
   /* 已迁移至搜索框正上方的 .hero-greeting */
 
-  /* 蓝色带圆点图标（仿百度风格） */
+  /* 搜索引擎图标触发区 */
   .search-box .logo {
     width: 26px; height: 26px;
     flex: 0 0 auto;

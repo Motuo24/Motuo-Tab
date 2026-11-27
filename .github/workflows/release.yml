@@ -25,11 +25,21 @@ jobs:
       - name: Prepare release notes
         run: |
           version="${GITHUB_REF_NAME#v}"
+          slug="v${version//./}"
+          : > dist/release-notes.md
+          if [ -f "docs/images/release-${slug}-banner.jpg" ]; then
+            echo "![Motuo-Tab ${GITHUB_REF_NAME}](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/docs/images/release-${slug}-banner.jpg)" >> dist/release-notes.md
+            echo "" >> dist/release-notes.md
+          fi
+          if [ -f "docs/images/release-${slug}-bento-zh.jpg" ]; then
+            echo "![Motuo-Tab ${GITHUB_REF_NAME} 核心特性一览](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/docs/images/release-${slug}-bento-zh.jpg)" >> dist/release-notes.md
+            echo "" >> dist/release-notes.md
+          fi
           awk -v version="$version" '
             $0 ~ "^## \\[" version "\\]" { printing=1; next }
             printing && /^## \[/ { exit }
             printing { print }
-          ' CHANGELOG.md > dist/release-notes.md
+          ' CHANGELOG.md >> dist/release-notes.md
       - name: Package extension zip
         run: |
           # 打包成带 extension/ 外层目录的压缩包：
@@ -39,6 +49,7 @@ jobs:
           cd ..
       - uses: softprops/action-gh-release@v2
         with:
+          name: Motuo-Tab ${{ github.ref_name }}
           body_path: dist/release-notes.md
           files: |
             dist/newtab.html

@@ -4291,6 +4291,73 @@
   .sys-logo-alpha-row.is-disabled {
     opacity: 0.48;
   }
+  /* 品牌避嫌模式：开启时隐藏已勾选卡片/分组（编辑模式下半透明标识便于管理） */
+  body.brand-safe-mode:not(.editing) .shortcut.brand-safe-hidden {
+    display: none !important;
+  }
+  body.brand-safe-mode.editing .shortcut.brand-safe-hidden {
+    opacity: 0.42;
+  }
+  body.brand-safe-mode.editing .shortcut.brand-safe-hidden .tile {
+    outline: 1.5px dashed rgba(217, 59, 59, 0.55);
+    outline-offset: 2px;
+  }
+  .brand-safe-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .brand-safe-summary {
+    font-size: 12px;
+    color: var(--ai-ink-2);
+  }
+  .brand-safe-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .brand-safe-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    max-height: 176px;
+    overflow-y: auto;
+    padding: 2px 0;
+  }
+  .brand-safe-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--ai-border-subtle);
+    background: var(--ai-surf-soft);
+    color: var(--ai-ink-1);
+    font-size: 12px;
+    line-height: 1.3;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background .14s ease, border-color .14s ease, color .14s ease;
+  }
+  .brand-safe-chip:hover {
+    border-color: var(--ai-accent);
+  }
+  .brand-safe-chip.selected {
+    background: rgba(36, 104, 242, 0.12);
+    border-color: var(--ai-accent);
+    color: var(--ai-accent);
+    font-weight: 550;
+  }
+  .brand-safe-chip-tag {
+    font-size: 10px;
+    opacity: 0.72;
+  }
+  html[data-theme="dark"] .brand-safe-chip.selected {
+    background: rgba(90, 155, 255, 0.18);
+  }
   #aboutLogoSlot .motuo-logo-svg,
   .sys-logo-thumb .motuo-logo-svg {
     opacity: 0.78;

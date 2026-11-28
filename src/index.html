@@ -286,7 +286,7 @@
                 </div>
               </div>
 
-              <div class="ai-row ai-row-last">
+              <div class="ai-row">
                 <div class="ai-row-meta">
                   <div class="ai-row-title">联网搜索建议</div>
                   <div class="ai-row-desc">输入搜索词时从百度获取实时联想建议（关闭后仅用本地历史）</div>
@@ -294,6 +294,26 @@
                 <div class="ai-row-ctrl">
                   <label class="ai-switch"><input type="checkbox" id="cfgToggleSuggestOnline" checked aria-label="联网搜索建议" /><span class="ai-switch-slider"></span></label>
                 </div>
+              </div>
+
+              <div class="ai-row ai-row-last stack" id="brandSafeRow">
+                <div class="ai-row-head">
+                  <div class="ai-row-meta">
+                    <div class="ai-row-title">品牌避嫌模式</div>
+                    <div class="ai-row-desc">开启后临时隐藏已勾选的卡片或分组，关闭即可原样恢复（适合截图/摆拍演示）</div>
+                  </div>
+                  <div class="ai-row-ctrl">
+                    <label class="ai-switch"><input type="checkbox" id="toggleBrandSafe" aria-label="品牌避嫌模式" /><span class="ai-switch-slider"></span></label>
+                  </div>
+                </div>
+                <div class="brand-safe-toolbar">
+                  <span class="brand-safe-summary" id="brandSafeSummary">已选 0 项避嫌隐藏 · 当前未开启</span>
+                  <div class="brand-safe-actions">
+                    <button type="button" class="ai-pill-btn" id="brandSafeSelectExtBtn">一键勾选外网图标</button>
+                    <button type="button" class="ai-pill-btn" id="brandSafeClearBtn">清空勾选</button>
+                  </div>
+                </div>
+                <div class="brand-safe-grid" id="brandSafeGrid" role="group" aria-label="选择避嫌隐藏的卡片或分组"></div>
               </div>
             </section>
 
@@ -814,6 +834,7 @@
     <button data-action="movetofolder">移入分组…</button>
     <button data-action="moveout" hidden>移出到主页</button>
     <button data-action="dissolvefolder" hidden>解散分组</button>
+    <button data-action="brandSafeToggle">避嫌隐藏</button>
     <button data-action="delete" class="danger">删除</button>
     <hr data-ctx-sep />
     <button data-action="copy">复制链接</button>

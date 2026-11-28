@@ -27,6 +27,8 @@
       var HERO_LOGO_KEY      = 'newtab.heroLogo.v1';       // T1 起始页 Hero Logo 开关（默认开）
       var LOGO_STYLE_KEY     = 'newtab.logoStyle.v1';      // T1 Logo 样式：a（流光 M）/ c（折角新页）
       var HERO_LOGO_ALPHA_KEY = 'newtab.heroLogoAlpha.v1'; // T1 起始页 Logo 透明度（0.2–1.0，默认 0.65）
+      var BRAND_SAFE_MODE_KEY   = 'newtab.brandSafe.v1';     // 品牌避嫌模式开关（'1' 开启，默认关闭）
+      var BRAND_SAFE_HIDDEN_KEY = 'newtab.brandSafeHidden.v1'; // 品牌避嫌隐藏名单（JSON 数组）
       var WEBDAV_KEY         = 'newtab.webdav.v1';         // T7b WebDAV 云同步配置
       var BACKUP_META_KEY    = 'newtab.backupMeta.v1';     // 备份提醒状态
       var BACKUP_REMIND_MS   = 30 * 86400000;
@@ -418,7 +420,7 @@
       function buildCard(item) {
         var a = document.createElement('a');
         var folder = isFolderItem(item);
-        a.className = 'shortcut' + (folder ? ' shortcut-folder' : '');
+        a.className = 'shortcut' + (folder ? ' shortcut-folder' : '') + (isBrandSafeHidden(item) ? ' brand-safe-hidden' : '');
         a.href = folder ? '#' : (item.url || '#');
         a.dataset.iconSrc = folder ? 'folder' : (item.iconSrc || 'color');
         if (folder && item.id) a.dataset.folderId = item.id;
@@ -450,7 +452,7 @@
         if (!card || !item) return;
         cardItemMap.set(card, item);
         var folder = isFolderItem(item);
-        card.className = 'shortcut no-enter-anim' + (folder ? ' shortcut-folder' : '');
+        card.className = 'shortcut no-enter-anim' + (folder ? ' shortcut-folder' : '') + (isBrandSafeHidden(item) ? ' brand-safe-hidden' : '');
         card.href = folder ? '#' : (item.url || '#');
         card.dataset.iconSrc = folder ? 'folder' : (item.iconSrc || 'color');
         if (folder && item.id) card.dataset.folderId = item.id;
@@ -2695,6 +2697,8 @@
         setShow('movetofolder', !isFld && !inFolderModal);
         setShow('moveout', !isFld && !!inFolderModal);
         setShow('dissolvefolder', isFld);
+        var bsBtn = ctxMenu.querySelector('[data-action="brandSafeToggle"]');
+        if (bsBtn) bsBtn.textContent = isBrandSafeHidden(item) ? '取消避嫌隐藏' : '避嫌隐藏';
         setShow('delete', true);
         var sep = ctxMenu.querySelector('[data-ctx-sep]');
         if (sep) sep.hidden = isFld;
@@ -2829,6 +2833,8 @@
             if (folderTitleInput) setTimeout(function () { folderTitleInput.focus(); folderTitleInput.select(); }, 30);
           } else if (action === 'dissolvefolder') {
             dissolveFolderAt(fIdx);
+          } else if (action === 'brandSafeToggle') {
+            toggleBrandSafeItem(item);
           } else if (action === 'delete') {
             var count = Array.isArray(item.children) ? item.children.length : 0;
             if (count > 0 && !confirm('确定删除分组「' + item.name + '」及其中的 ' + count + ' 张卡片吗？')) return;
@@ -2884,6 +2890,10 @@
             break;
           case 'copymd':
             navigator.clipboard.writeText('[' + item.name + '](' + item.url + ')').catch(function () {});
+            ctxCard = null;
+            break;
+          case 'brandSafeToggle':
+            toggleBrandSafeItem(item);
             ctxCard = null;
             break;
         }
@@ -3017,6 +3027,8 @@
                 heroLogo: readLS(HERO_LOGO_KEY),
                 logoStyle: readLS(LOGO_STYLE_KEY),
                 heroLogoAlpha: readLS(HERO_LOGO_ALPHA_KEY),
+                brandSafe: readLS(BRAND_SAFE_MODE_KEY),
+                brandSafeHidden: readLS(BRAND_SAFE_HIDDEN_KEY),
                 solidColor: readLS('newtab.solidColor.v1'),
                 blur: readLS('newtab.blur.v1'),
                 alpha: readLS('newtab.alpha.v1'),
@@ -3071,6 +3083,8 @@
           if (st.heroLogo !== undefined) writeLS(HERO_LOGO_KEY, st.heroLogo);
           if (st.logoStyle !== undefined) writeLS(LOGO_STYLE_KEY, st.logoStyle);
           if (st.heroLogoAlpha !== undefined) writeLS(HERO_LOGO_ALPHA_KEY, st.heroLogoAlpha);
+          if (st.brandSafe !== undefined) writeLS(BRAND_SAFE_MODE_KEY, st.brandSafe);
+          if (st.brandSafeHidden !== undefined) writeLS(BRAND_SAFE_HIDDEN_KEY, st.brandSafeHidden);
           writeLS('newtab.solidColor.v1', st.solidColor);
           writeLS('newtab.blur.v1', st.blur);
           writeLS('newtab.alpha.v1', st.alpha);
@@ -3082,6 +3096,8 @@
             applyTheme(st.theme);
           }
           renderBrandHero();
+          applyBrandSafeClassesToDom();
+          renderBrandSafeSettingsUI();
         }
 
         if (isFull && d.ai) {
@@ -3821,8 +3837,174 @@
 
       document.getElementById('generalConfigBtn').addEventListener('click', function () {
         toggleMenu(false);
+        renderBrandSafeSettingsUI();
         openSettingsModal('general');
       });
+
+      // ========== 品牌避嫌模式（临时隐藏选定卡片/分组，关闭后恢复） ==========
+      var toggleBrandSafeEl = document.getElementById('toggleBrandSafe');
+      var brandSafeSummaryEl = document.getElementById('brandSafeSummary');
+      var brandSafeGridEl = document.getElementById('brandSafeGrid');
+      var brandSafeSelectExtBtn = document.getElementById('brandSafeSelectExtBtn');
+      var brandSafeClearBtn = document.getElementById('brandSafeClearBtn');
+
+      function getBrandSafeItemKey(item) {
+        if (!item) return '';
+        if (isFolderItem(item) && item.id) return 'fld:' + item.id;
+        return 'name:' + (item.name || '');
+      }
+      function isBrandSafeEnabled() {
+        try { return localStorage.getItem(BRAND_SAFE_MODE_KEY) === '1'; } catch (e) { return false; }
+      }
+      function getBrandSafeHiddenKeys() {
+        try {
+          var raw = localStorage.getItem(BRAND_SAFE_HIDDEN_KEY);
+          if (!raw) return [];
+          var arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) return [];
+          var seen = {};
+          return arr.filter(function (k) {
+            if (typeof k !== 'string' || !k || seen[k]) return false;
+            seen[k] = true;
+            return true;
+          });
+        } catch (e) { return []; }
+      }
+      function isBrandSafeHidden(item) {
+        if (!item) return false;
+        var keys = getBrandSafeHiddenKeys();
+        if (!keys.length) return false;
+        var k = getBrandSafeItemKey(item);
+        return keys.indexOf(k) !== -1 || (!!item.name && keys.indexOf(item.name) !== -1);
+      }
+      function applyBrandSafeClassesToDom() {
+        var enabled = isBrandSafeEnabled();
+        if (document.body) document.body.classList.toggle('brand-safe-mode', enabled);
+        if (nav) {
+          nav.querySelectorAll('.shortcut').forEach(function (card) {
+            var it = cardItemMap.get(card);
+            if (it) card.classList.toggle('brand-safe-hidden', isBrandSafeHidden(it));
+          });
+        }
+        if (folderGrid) {
+          folderGrid.querySelectorAll('.shortcut').forEach(function (card) {
+            var it = cardItemMap.get(card);
+            if (it) card.classList.toggle('brand-safe-hidden', isBrandSafeHidden(it));
+          });
+        }
+      }
+      function renderBrandSafeSettingsUI() {
+        var enabled = isBrandSafeEnabled();
+        var keys = getBrandSafeHiddenKeys();
+        if (toggleBrandSafeEl) toggleBrandSafeEl.checked = enabled;
+        if (brandSafeSummaryEl) {
+          brandSafeSummaryEl.textContent = '已选 ' + keys.length + ' 项避嫌隐藏 · ' + (enabled ? '已生效（关闭即可恢复）' : '当前未开启');
+        }
+        if (!brandSafeGridEl) return;
+        brandSafeGridEl.innerHTML = '';
+        var entries = [];
+        (list || []).forEach(function (it) {
+          if (!it) return;
+          entries.push({ item: it, inFolder: false });
+          if (isFolderItem(it) && Array.isArray(it.children)) {
+            it.children.forEach(function (child) {
+              if (child) entries.push({ item: child, inFolder: true, folderName: it.name });
+            });
+          }
+        });
+        entries.forEach(function (ent) {
+          var it = ent.item;
+          var key = getBrandSafeItemKey(it);
+          if (!key) return;
+          var active = isBrandSafeHidden(it);
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'brand-safe-chip' + (active ? ' selected' : '');
+          btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+          btn.dataset.bsKey = key;
+          var lbl = document.createElement('span');
+          lbl.textContent = it.name || '未命名';
+          btn.appendChild(lbl);
+          if (isFolderItem(it) || ent.inFolder) {
+            var tag = document.createElement('span');
+            tag.className = 'brand-safe-chip-tag';
+            tag.textContent = isFolderItem(it) ? '分组' : ('组:' + (ent.folderName || ''));
+            btn.appendChild(tag);
+          }
+          btn.addEventListener('click', function () {
+            toggleBrandSafeItem(it);
+          });
+          brandSafeGridEl.appendChild(btn);
+        });
+      }
+      function setBrandSafeEnabled(on) {
+        var next = !!on;
+        try { localStorage.setItem(BRAND_SAFE_MODE_KEY, next ? '1' : '0'); } catch (e) {}
+        applyBrandSafeClassesToDom();
+        renderBrandSafeSettingsUI();
+        return next;
+      }
+      function setBrandSafeHiddenKeys(keys) {
+        var seen = {};
+        var clean = (Array.isArray(keys) ? keys : []).filter(function (k) {
+          if (typeof k !== 'string' || !k || seen[k]) return false;
+          seen[k] = true;
+          return true;
+        });
+        try { localStorage.setItem(BRAND_SAFE_HIDDEN_KEY, JSON.stringify(clean)); } catch (e) {}
+        applyBrandSafeClassesToDom();
+        renderBrandSafeSettingsUI();
+        return clean;
+      }
+      function toggleBrandSafeItem(item, forceHide) {
+        var key = getBrandSafeItemKey(item);
+        if (!key) return getBrandSafeHiddenKeys();
+        var keys = getBrandSafeHiddenKeys();
+        var idx = keys.indexOf(key);
+        var shouldHide = typeof forceHide === 'boolean' ? forceHide : (idx === -1 && !(item.name && keys.indexOf(item.name) !== -1));
+        if (shouldHide) {
+          if (idx === -1) keys.push(key);
+        } else {
+          keys = keys.filter(function (k) { return k !== key && k !== item.name; });
+        }
+        return setBrandSafeHiddenKeys(keys);
+      }
+      function isExternalBrandCard(it) {
+        if (!it || isFolderItem(it)) return false;
+        var u = String(it.url || '').trim();
+        var ic = String(it.icon || '').trim();
+        var isOwnOrLocal = function (s) {
+          return !s || /(?:^https?:\/\/(?:[^/]+\.)?xr24\.cn(?:\/|$)|^https?:\/\/(?:localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)|^data:)/i.test(s);
+        };
+        if (it.iconSrc === 'image' && /^https?:/i.test(ic) && !isOwnOrLocal(ic)) return true;
+        if (/^https?:/i.test(u) && !isOwnOrLocal(u)) return true;
+        return false;
+      }
+
+      if (toggleBrandSafeEl) {
+        toggleBrandSafeEl.addEventListener('change', function () {
+          setBrandSafeEnabled(this.checked);
+        });
+      }
+      if (brandSafeSelectExtBtn) {
+        brandSafeSelectExtBtn.addEventListener('click', function () {
+          var nextKeys = getBrandSafeHiddenKeys().slice();
+          walkCards(list, function (it) {
+            if (isExternalBrandCard(it)) {
+              var k = getBrandSafeItemKey(it);
+              if (k && nextKeys.indexOf(k) === -1) nextKeys.push(k);
+            }
+          });
+          setBrandSafeHiddenKeys(nextKeys);
+        });
+      }
+      if (brandSafeClearBtn) {
+        brandSafeClearBtn.addEventListener('click', function () {
+          setBrandSafeHiddenKeys([]);
+        });
+      }
+      applyBrandSafeClassesToDom();
+      renderBrandSafeSettingsUI();
 
       // ========== T1 起始页 Hero Logo 与时段问候语 ==========
       var MOTUO_LOGOS = {
@@ -5061,6 +5243,13 @@
         cleanIconDataUrl: cleanIconDataUrl,
         get ready() { return iconCacheReadyPromise; },
         getAllSync: function () { return Object.assign({}, iconCacheMem); }
+      };
+      window.__motuo.brandSafe = {
+        isEnabled: isBrandSafeEnabled,
+        setEnabled: setBrandSafeEnabled,
+        getHidden: getBrandSafeHiddenKeys,
+        setHidden: setBrandSafeHiddenKeys,
+        toggleItem: toggleBrandSafeItem
       };
 
       // ========== 速记本 ==========

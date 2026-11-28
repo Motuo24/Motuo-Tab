@@ -3,6 +3,8 @@
 
 const { test, afterEach } = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs');
+const path = require('path');
 const { JSDOM } = require('jsdom');
 const { HTML, waitFor } = require('./helpers');
 
@@ -332,4 +334,184 @@ test('图标缓存超过 200 条上限时按时间优先淘汰未被引用的旧
   assert.ok(mem.state.stores.icons.size <= 200, '缓存总数应被裁剪到 200 条以内');
   assert.strictEqual(mem.state.stores.icons.has('https://old0.example/i.png'), false, '最早未被引用的记录应优先淘汰');
   assert.ok(mem.state.stores.icons.has('https://new.example/i.png'), '当前被引用的图标应保留');
+});
+
+function makePixelBuffer(w, h, filler) {
+  const buf = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const [r, g, b, a] = filler(x, y);
+      const i = (y * w + x) * 4;
+      buf[i] = r; buf[i + 1] = g; buf[i + 2] = b; buf[i + 3] = a;
+    }
+  }
+  return buf;
+}
+
+test('SVG 图标清洗：消除全画布浅色底（内联/百分比/CSS类/根样式），保留深色彩色徽标与全白剪影', async () => {
+  const ctx = bootWithIDB({ seed: { 'newtab.shortcuts.v1': '[]' } });
+  await ctx.window.__motuo.iconCache.ready;
+  const { cleanSvgMarkup, cleanSvgDataUrl } = ctx.window.__motuo.iconCache;
+
+  // 1. #fff / 100% / <style> class / root background 各种形式
+  const svgRectWhite = '<svg viewBox="0 0 32 32"><rect width="32" height="32" fill="#fff"/><path d="M4 4h24v24H4z" fill="#1e6cff"/></svg>';
+  const cleanedRect = cleanSvgMarkup(svgRectWhite);
+  assert.strictEqual(cleanedRect.includes('#fff'), false, '应移除 #fff 满画布背景 rect');
+  assert.ok(cleanedRect.includes('#1e6cff'), '应保留前景图形');
+
+  const svgPct = '<svg viewBox="0 0 64 64"><rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/><circle cx="32" cy="32" r="18" fill="#10b981"/></svg>';
+  assert.strictEqual(cleanSvgMarkup(svgPct).includes('#ffffff'), false, '应移除 100% 白色背景 rect');
+
+  const svgStyleCls = '<svg viewBox="0 0 32 32"><style>.cls-bg{fill:#fafafa;}.cls-fg{fill:#2468f2;}</style><rect class="cls-bg" width="32" height="32"/><circle class="cls-fg" cx="16" cy="16" r="10"/></svg>';
+  const cleanedCls = cleanSvgMarkup(svgStyleCls);
+  assert.strictEqual(cleanedCls.includes('class="cls-bg"'), false, '应识别 <style> 浅中性色类并移除背景 rect');
+  assert.ok(cleanedCls.includes('cls-fg'), '前景圆形应保留');
+
+  const svgRootStyle = '<svg viewBox="0 0 24 24" style="background:#ffffff; display:block"><path fill="#ef4444" d="M2 2h20v20H2z"/></svg>';
+  const cleanedRoot = cleanSvgMarkup(svgRootStyle);
+  assert.strictEqual(/background\s*:\s*#ffffff/i.test(cleanedRoot), false, '应清理 root svg 白色 background');
+  assert.ok(cleanedRoot.includes('#ef4444'), '应保留前景 path');
+
+  // 2. base64 与 UTF-8 SVG data URL 清洗
+  const b64In = 'data:image/svg+xml;base64,' + Buffer.from(svgPct, 'utf8').toString('base64');
+  const b64Out = cleanSvgDataUrl(b64In);
+  assert.strictEqual(b64Out.changed, true);
+  assert.strictEqual(Buffer.from(b64Out.dataUrl.split(',')[1], 'base64').toString('utf8').includes('#ffffff'), false);
+
+  const utfIn = 'data:image/svg+xml,' + encodeURIComponent(svgRectWhite);
+  const utfOut = cleanSvgDataUrl(utfIn);
+  assert.strictEqual(utfOut.changed, true);
+  assert.strictEqual(decodeURIComponent(utfOut.dataUrl.split(',')[1]).includes('#fff'), false);
+
+  // 3. 彩色/黑色实底品牌徽标保留
+  const blueBadge = '<svg viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#2468f2"/><path d="M8 8h16v16H8z" fill="#ffffff"/></svg>';
+  assert.strictEqual(cleanSvgMarkup(blueBadge), blueBadge, '蓝色品牌圆角方底不应被删');
+  const blackBadge = '<svg viewBox="0 0 32 32"><rect width="32" height="32" fill="#000000"/><circle cx="16" cy="16" r="8" fill="#ffffff"/></svg>';
+  assert.strictEqual(cleanSvgMarkup(blackBadge), blackBadge, '黑色品牌实底不应被删');
+
+  // 4. 全白单色剪影防误删保护
+  const whiteOnly = '<svg viewBox="0 0 32 32"><rect width="32" height="32" fill="#ffffff"/></svg>';
+  assert.strictEqual(cleanSvgMarkup(whiteOnly), whiteOnly, '仅剩唯一白色形状时应保护不删');
+});
+
+test('光栅像素清洗 cleanIconImageData：剥除顶部黑线与浅白/浅灰底，保护深色徽标/封闭内白洞/四边线框/全白剪影', async () => {
+  const ctx = bootWithIDB({ seed: { 'newtab.shortcuts.v1': '[]' } });
+  await ctx.window.__motuo.iconCache.ready;
+  const { cleanIconImageData } = ctx.window.__motuo.iconCache;
+
+  // 1. 顶部 1px 纯黑杂线 + 纯白底 + 中央深色图形（模拟 基元律动）
+  const w = 16, h = 16;
+  const rhythmLike = makePixelBuffer(w, h, (x, y) => {
+    if (y === 0) return [0, 0, 0, 255];
+    if (x >= 5 && x <= 10 && y >= 5 && y <= 10) return [60, 60, 60, 255];
+    return [255, 255, 255, 255];
+  });
+  const res1 = cleanIconImageData(rhythmLike, w, h);
+  assert.strictEqual(res1.changed, true);
+  assert.strictEqual(res1.data[0 * w * 4 + 3], 0, '顶部黑线像素应变透明');
+  assert.strictEqual(res1.data[(1 * w + 1) * 4 + 3], 0, '外围纯白背景应变透明');
+  assert.strictEqual(res1.data[(7 * w + 7) * 4 + 3], 255, '中央深色主体应完整保留');
+
+  // 2. 透明底 + 顶部 1px 黑线（模拟 Roogoo）
+  const roogooLike = makePixelBuffer(w, h, (x, y) => {
+    if (y === 0) return [0, 0, 0, 255];
+    if (x >= 5 && x <= 10 && y >= 5 && y <= 10) return [40, 140, 255, 255];
+    return [0, 0, 0, 0];
+  });
+  const res2 = cleanIconImageData(roogooLike, w, h);
+  assert.strictEqual(res2.changed, true);
+  assert.strictEqual(res2.data[(0 * w + 8) * 4 + 3], 0, '独立顶部黑线应消除');
+  assert.strictEqual(res2.data[(7 * w + 7) * 4 + 3], 255, '蓝色图标主体应保留');
+
+  // 3. 顶部黑线 + 浅灰底(225,225,225) + 闭合深色环内保留纯白镂空（如 Cursor）
+  const grayBgClosedRing = makePixelBuffer(w, h, (x, y) => {
+    if (y === 0) return [0, 0, 0, 255];
+    const inOuter = x >= 4 && x <= 11 && y >= 4 && y <= 11;
+    const inInner = x >= 6 && x <= 9 && y >= 6 && y <= 9;
+    if (inInner) return [255, 255, 255, 255];
+    if (inOuter) return [20, 20, 20, 255];
+    return [225, 225, 225, 255];
+  });
+  const res3 = cleanIconImageData(grayBgClosedRing, w, h);
+  assert.strictEqual(res3.changed, true);
+  assert.strictEqual(res3.data[(2 * w + 2) * 4 + 3], 0, '外围浅灰背景应变透明');
+  assert.strictEqual(res3.data[(7 * w + 7) * 4 + 3], 255, '闭合图形内部的纯白细节不应被洪泛消掉');
+
+  // 4. 实底深色/蓝色品牌徽标完全保留
+  const blackBadge = makePixelBuffer(w, h, (x, y) => (
+    (x >= 5 && x <= 10 && y >= 5 && y <= 10) ? [255, 255, 255, 255] : [18, 18, 22, 255]
+  ));
+  assert.strictEqual(cleanIconImageData(blackBadge, w, h).changed, false, '黑色方底品牌图标应原样保留');
+
+  const blueBadge = makePixelBuffer(w, h, (x, y) => (
+    (x >= 5 && x <= 10 && y >= 5 && y <= 10) ? [255, 255, 255, 255] : [0, 102, 255, 255]
+  ));
+  assert.strictEqual(cleanIconImageData(blueBadge, w, h).changed, false, '蓝色方底品牌图标应原样保留');
+
+  // 5. 刻意四边细框不应被误认为四条杂线删光
+  const framedBox = makePixelBuffer(w, h, (x, y) => {
+    if (x === 0 || x === w - 1 || y === 0 || y === h - 1) return [0, 0, 0, 255];
+    return [255, 255, 255, 255];
+  });
+  assert.strictEqual(cleanIconImageData(framedBox, w, h).changed, false, '完整四边边框应受保护不误删');
+
+  // 6. 纯白图形占满实体时不触发全删
+  const allWhiteSolid = makePixelBuffer(w, h, () => [255, 255, 255, 255]);
+  assert.strictEqual(cleanIconImageData(allWhiteSolid, w, h).changed, false, '纯白图形应触发防全删保护');
+});
+
+test('既有 IndexedDB 历史缓存缺少 cleanVer 时，启动即在本地无感清理且 0 网络请求', async () => {
+  const dirtySvg = '<svg viewBox="0 0 32 32"><rect width="100%" height="100%" fill="#ffffff"/><path fill="#2468f2" d="M4 4h24v24H4z"/></svg>';
+  const dirtyDataUrl = 'data:image/svg+xml;base64,' + Buffer.from(dirtySvg, 'utf8').toString('base64');
+  const mem = createMemoryIDB({
+    version: 2,
+    stores: {
+      wallpapers: {},
+      icons: {
+        'https://svg.example/icon.svg': {
+          url: 'https://svg.example/icon.svg',
+          dataUrl: dirtyDataUrl,
+          fetchedAt: Date.now() - 60000,
+          size: dirtyDataUrl.length
+        }
+      }
+    }
+  });
+
+  const ctx = bootWithIDB({
+    idb: mem,
+    seed: {
+      'newtab.shortcuts.v1': JSON.stringify([
+        { name: 'SVG站', url: 'https://svg.example', iconSrc: 'image', icon: 'https://svg.example/icon.svg' }
+      ])
+    },
+    fetchStub: () => Promise.reject(new Error('should not fetch cached entry'))
+  });
+
+  await waitFor(() => {
+    const entry = mem.state.stores.icons.get('https://svg.example/icon.svg');
+    return entry && entry.cleanVer === 1 && entry.dataUrl !== dirtyDataUrl;
+  });
+
+  assert.strictEqual(ctx.calls.length, 0, '升级历史缓存应纯本地完成，不应发起网络请求');
+  const upgraded = mem.state.stores.icons.get('https://svg.example/icon.svg');
+  const decoded = Buffer.from(upgraded.dataUrl.split(',')[1], 'base64').toString('utf8');
+  assert.strictEqual(decoded.includes('#ffffff'), false, 'IndexedDB 内缓存的 SVG 应已清除白色底框');
+  const imgEl = ctx.document.querySelector('.shortcut .tile img');
+  assert.strictEqual(imgEl.src, upgraded.dataUrl, '页面渲染的图标应已切换为清理后的 data URL');
+});
+
+test('0.9.2.1 版本号及精修内置 PNG 图标资源完整性校验', () => {
+  const rootDir = path.join(__dirname, '..');
+  const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'dist', 'extension', 'manifest.json'), 'utf8'));
+  assert.strictEqual(manifest.version, '0.9.2.1');
+  assert.ok(HTML.includes('v0.9.2.1'), 'dist/newtab.html 应包含 v0.9.2.1 版本展示');
+
+  const mainSrc = fs.readFileSync(path.join(rootDir, 'src', 'scripts', 'main.js'), 'utf8');
+  ['default-rhythm.png', 'default-roogoo.png', 'default-bocha.png'].forEach((fname) => {
+    assert.ok(mainSrc.includes('__ASSET_' + fname + '__'), `src/scripts/main.js 应引用 ${fname}`);
+    const assetBytes = fs.readFileSync(path.join(rootDir, 'src', 'assets', fname));
+    assert.ok(assetBytes.length > 1000, `${fname} 应为有效非空图像`);
+    assert.deepStrictEqual(Array.from(assetBytes.slice(0, 4)), [137, 80, 78, 71], `${fname} 应为标准 PNG 文件`);
+  });
 });

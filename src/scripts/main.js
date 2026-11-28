@@ -295,6 +295,7 @@
         while (tile.firstChild) tile.removeChild(tile.firstChild);
         tile.removeAttribute('style');
         tile.className = 'tile';
+        tile.dataset.iconState = 'fallback-letter';
         var ch = (item.letter || (item.name || '').trim().charAt(0).toUpperCase()) || '?';
         if (item.color) {
           applyTileColor(tile, item.color);
@@ -344,6 +345,7 @@
         while (tile.firstChild) tile.removeChild(tile.firstChild);
         tile.removeAttribute('style');
         tile.className = 'tile folder-tile';
+        tile.dataset.iconState = 'folder';
         var kids = Array.isArray(folder.children) ? folder.children : [];
         if (!kids.length) {
           var em = document.createElement('div');
@@ -377,6 +379,9 @@
           }
           // 背景用主题变量：深色模式为深色，自动模式为透明（背景由 CSS 反色层提供）
           tile.style.background = 'var(--tile-img-bg)';
+          tile.dataset.iconState = cachedSrc
+            ? (/^bmicon:/i.test(item.icon) ? 'cached-bookmark-image' : 'cached-remote-image')
+            : (/^data:image\//i.test(item.icon) ? 'inline-data-image' : (/^https?:/i.test(item.icon) ? 'remote-image' : 'image'));
           var img = document.createElement('img');
           if (/^(?:https?:|bmicon:)/i.test(item.icon)) img.dataset.iconUrl = item.icon;
           img.src = cachedSrc || item.icon;
@@ -397,6 +402,7 @@
           };
           tile.appendChild(img);
         } else {
+          tile.dataset.iconState = item.iconSrc === 'auto' ? 'auto-pending' : 'color-letter';
           var ch = (item.letter || (item.name || '').trim().charAt(0).toUpperCase()) || '?';
           if (item.color) {
             applyTileColor(tile, item.color);
@@ -4852,6 +4858,166 @@
       toggleImgAlpha.addEventListener('change', syncAlpha);
       toggleLtrAlpha.addEventListener('change', syncAlpha);
 
+      function summarizeIconValue(icon) {
+        if (!icon || typeof icon !== 'string') return '';
+        var s = icon.trim();
+        if (!s) return '';
+        if (/^https?:/i.test(s)) return s;
+        var dm = s.match(/^data:(image\/[a-z0-9.+-]+)/i);
+        if (dm) return '[本地图片 data:' + dm[1].toLowerCase() + ']';
+        if (/^data:/i.test(s)) return '[本地图片 data URI]';
+        if (/^bmicon:/i.test(s)) return '[书签缓存图标]';
+        return s.slice(0, 120);
+      }
+
+      function resolveIconStateForCard(it, domCard) {
+        if (!it) return 'unknown';
+        if (isFolderItem(it)) return 'folder';
+        if (domCard) {
+          var tile = domCard.querySelector('.tile');
+          if (tile && tile.dataset && tile.dataset.iconState) return tile.dataset.iconState;
+        }
+        if (it.iconSrc === 'image') {
+          if (!it.icon) return 'fallback-letter';
+          if (/^data:image\//i.test(it.icon)) return 'inline-data-image';
+          if (/^bmicon:/i.test(it.icon)) return getCachedIconSync(it.icon) ? 'cached-bookmark-image' : 'fallback-letter';
+          if (/^https?:/i.test(it.icon)) return getCachedIconSync(it.icon) ? 'cached-remote-image' : 'remote-image';
+          return 'image';
+        }
+        if (it.iconSrc === 'auto') return 'auto-pending';
+        return 'color-letter';
+      }
+
+      function inspectCards() {
+        var domByItem = new WeakMap();
+        if (nav) {
+          nav.querySelectorAll('.shortcut').forEach(function (cardEl) {
+            var mapped = cardItemMap.get(cardEl);
+            if (mapped) domByItem.set(mapped, cardEl);
+          });
+        }
+        var rootCards = 0, folderCount = 0, folderCards = 0;
+        var items = (list || []).map(function (it, idx) {
+          if (!it) return null;
+          if (isFolderItem(it)) {
+            folderCount++;
+            var kids = Array.isArray(it.children) ? it.children : [];
+            folderCards += kids.length;
+            return {
+              type: 'folder',
+              id: it.id || '',
+              name: it.name || '',
+              order: idx + 1,
+              groupId: null,
+              children: kids.map(function (c, ci) {
+                return {
+                  type: 'card',
+                  name: (c && c.name) || '',
+                  url: (c && c.url) || '',
+                  iconSrc: (c && c.iconSrc) || 'color',
+                  icon: summarizeIconValue(c && c.icon),
+                  iconResolved: resolveIconStateForCard(c, null),
+                  color: (c && c.color) || '',
+                  letter: (c && c.letter) || '',
+                  order: (idx + 1) + '.' + (ci + 1),
+                  groupId: it.id || '',
+                  groupName: it.name || ''
+                };
+              })
+            };
+          }
+          rootCards++;
+          return {
+            type: 'card',
+            name: it.name || '',
+            url: it.url || '',
+            iconSrc: it.iconSrc || 'color',
+            icon: summarizeIconValue(it.icon),
+            iconResolved: resolveIconStateForCard(it, domByItem.get(it) || null),
+            color: it.color || '',
+            letter: it.letter || '',
+            order: idx + 1,
+            groupId: null
+          };
+        }).filter(Boolean);
+        return {
+          rootTotal: items.length,
+          rootCards: rootCards,
+          folderCount: folderCount,
+          folderCards: folderCards,
+          totalCards: rootCards + folderCards,
+          items: items
+        };
+      }
+
+      function probeIconUrl(url) {
+        var u = String(url || '').trim();
+        if (!/^https?:\/\//i.test(u)) {
+          return Promise.resolve({ reachable: false, cached: false, reason: '不支持的图标协议' });
+        }
+        return fetch(u, { mode: 'cors', signal: AbortSignal.timeout(6000) })
+          .then(function (r) {
+            if (!r || !r.ok) {
+              return { reachable: false, cached: false, status: r ? r.status : 0, reason: 'HTTP ' + (r ? r.status : 'error') };
+            }
+            var ct = (r.headers && typeof r.headers.get === 'function') ? String(r.headers.get('content-type') || '') : '';
+            if (ct && !/image|octet-stream|icon|svg/i.test(ct)) {
+              return { reachable: false, cached: false, status: r.status, reason: '返回内容非图片 (' + ct.split(';')[0].trim() + ')' };
+            }
+            return r.blob().then(function (blob) {
+              if (!blob || blob.size <= 0) {
+                return { reachable: false, cached: false, reason: '返回图片为空' };
+              }
+              if (blob.size > ICON_MAX_SINGLE_BYTES) {
+                return { reachable: true, cached: false, reason: '' };
+              }
+              return new Promise(function (resolve) {
+                var fr = new FileReader();
+                fr.onload = function () {
+                  var raw = typeof fr.result === 'string' ? fr.result : '';
+                  if (!raw) { resolve({ reachable: false, cached: false, reason: '读取图片内容失败' }); return; }
+                  cleanIconDataUrlStr(raw).then(function (cleaned) {
+                    var finalUrl = cleaned || raw;
+                    putIconToDB(u, finalUrl, Date.now()).then(function () {
+                      applyCachedIconsToDom();
+                      resolve({ reachable: true, cached: true, reason: '' });
+                    });
+                  });
+                };
+                fr.onerror = function () { resolve({ reachable: false, cached: false, reason: '读取图片失败' }); };
+                fr.readAsDataURL(blob);
+              });
+            });
+          })
+          .catch(function (err) {
+            if (!canCleanRaster()) {
+              return { reachable: false, cached: false, reason: (err && err.message) ? err.message : '网络请求失败' };
+            }
+            return new Promise(function (resolve) {
+              var settled = false;
+              var img = new Image();
+              var timer = setTimeout(function () {
+                if (settled) return;
+                settled = true;
+                resolve({ reachable: false, cached: false, reason: '图片加载超时或被拦截' });
+              }, 5000);
+              img.onload = function () {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve({ reachable: true, cached: false, reason: '' });
+              };
+              img.onerror = function () {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve({ reachable: false, cached: false, reason: '图片加载失败（可能 404 或被屏蔽）' });
+              };
+              img.src = u;
+            });
+          });
+      }
+
       // 卡片桥：ai.js 是后加载的独立脚本，读写真卡片列表走这里
       window.__motuo = window.__motuo || {};
       window.__motuo.cards = {
@@ -4862,6 +5028,7 @@
         nav: nav,
         applyAutoIcon: applyAutoIcon,
         normalizeUrl: normalizeUrl,
+        inspect: inspectCards,
         keys: {
           config: AI_CONFIG_KEY,
           history: AI_HISTORY_KEY,
@@ -4887,6 +5054,7 @@
         getSync: getCachedIconSync,
         put: putIconToDB,
         sync: syncIcons,
+        probe: probeIconUrl,
         cleanSvgMarkup: cleanSvgMarkup,
         cleanSvgDataUrl: cleanSvgDataUrl,
         cleanIconImageData: cleanIconImageData,

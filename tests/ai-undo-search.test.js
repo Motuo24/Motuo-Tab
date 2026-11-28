@@ -151,3 +151,80 @@ test('问题二：撤销为纯回滚 —— 联网搜索开启时撤销也不自
   assert.strictEqual(calls.filter((c) => c.url.includes('/chat/completions')).length, 1, '撤销后不应重发原指令');
   assert.strictEqual(calls.filter((c) => c.url.includes('web-search')).length, 0, '撤销后不应触发联网搜索');
 });
+
+test('修复：Markdown Bug 报告中的示例 JSON / 代码块 / 行内 <ops> 不触发改卡也不显示撤销按钮', async () => {
+  const bugReportMarkdown = [
+    '# Bug 报告：页内助手上下文缺少字段',
+    '',
+    '## 一、复现方式',
+    '比如执行合并语法时常见如下写法：',
+    '```json',
+    '{"update":[{"name":"GitHub","color":"green"}]}',
+    '```',
+    '或直接示例单个卡片结构：',
+    '```json',
+    '{"name":"示例新卡","url":"https://example.org","iconSrc":"auto"}',
+    '```',
+    '## 二、说明',
+    '文内仅在代码反引号里提及 `<ops>{"remove":["知乎"]}</ops>`，绝不应误执行。'
+  ].join('\n');
+
+  const { window, document } = boot({
+    fetchStub: chatOnlyStub([[{ choices: [{ delta: { content: bugReportMarkdown } }] }]])
+  });
+
+  openAI(document);
+  configureAI(document);
+  const beforeList = readShortcuts(window);
+
+  sendMessage(document, '为什么图标改不了，请生成 bug 报告');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  assert.deepStrictEqual(readShortcuts(window), beforeList, '长篇报告中的示例 JSON / 行内 <ops> 不得改动任何卡片');
+  assert.strictEqual(document.querySelectorAll('.ai-undo-btn').length, 0, '未发生 ops 改卡绝不能出现撤销按钮');
+  assert.strictEqual(window.localStorage.getItem('newtab.ai.snapshot.v1'), null, '未改卡不应写入撤销快照');
+
+  // 切换新对话再切回，依然不得误显撤销按钮，且 Markdown 示例代码完整保留
+  const s1Id = window.__motuo.aiSessions.activeId();
+  document.getElementById('aiNewChatBtn').click();
+  window.__motuo.aiSessions.switchTo(s1Id);
+  assert.strictEqual(document.querySelectorAll('.ai-undo-btn').length, 0, '历史重渲染后也不得误显撤销按钮');
+  assert.ok(document.getElementById('aiMessages').textContent.includes('Bug 报告'), '报告正文应完整展示');
+});
+
+test('修复：即使 localStorage 留有旧快照，未实际改卡的空/无效 <ops> 也不再误显撤销，且已撤销状态可持久化', async () => {
+  const DUPLICATE_OPS_STREAM = [
+    { choices: [{ delta: { content: '未新增重复项\n<ops>{"add":[{"name":"GitHub","url":"https://github.com","iconSrc":"color","color":"blue"}]}</ops>' } }] }
+  ];
+  const { window, document } = boot({
+    fetchStub: chatOnlyStub([UPDATE_OPS_STREAM, DUPLICATE_OPS_STREAM])
+  });
+
+  openAI(document);
+  configureAI(document);
+
+  // 第 1 轮：真实改动 GitHub（写入旧快照 newtab.ai.snapshot.v1）
+  sendMessage(document, '把 GitHub 改成绿色');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  assert.strictEqual(document.querySelectorAll('.ai-undo-btn').length, 1, '第 1 轮真实改动应显示 1 个撤销按钮');
+  assert.ok(window.localStorage.getItem('newtab.ai.snapshot.v1'), '第 1 轮写入全局快照');
+
+  // 第 2 轮：重复 add 实际未改动列表，绝不可借用第 1 轮旧快照渲染出第 2 个撤销按钮
+  sendMessage(document, '再加一个 GitHub');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  const groups = document.querySelectorAll('#aiMessages .ai-msg-group-assistant');
+  assert.strictEqual(groups.length, 2);
+  assert.strictEqual(groups[0].querySelectorAll('.ai-undo-btn').length, 1, '第 1 条消息保留撤销按钮');
+  assert.strictEqual(groups[1].querySelectorAll('.ai-undo-btn').length, 0, '未产生改动的第 2 条消息绝不能渲染撤销按钮');
+  assert.ok(groups[1].querySelector('.ai-tool-call.warn'), '未生效操作应展示无需改动提示芯片');
+
+  // 撤销第 1 轮并切走再切回：确认第 1 条维持 ✓ 已撤销，第 2 条仍无撤销按钮
+  groups[0].querySelector('.ai-undo-btn').click();
+  const s1Id = window.__motuo.aiSessions.activeId();
+  document.getElementById('aiNewChatBtn').click();
+  window.__motuo.aiSessions.switchTo(s1Id);
+  const reloadedGroups = document.querySelectorAll('#aiMessages .ai-msg-group-assistant');
+  const firstUndoAfter = reloadedGroups[0].querySelector('.ai-undo-btn');
+  assert.ok(firstUndoAfter && firstUndoAfter.disabled && firstUndoAfter.textContent === '✓ 已撤销', '重渲染后已撤销状态应持久化保留');
+  assert.strictEqual(reloadedGroups[1].querySelectorAll('.ai-undo-btn').length, 0, '重渲染后第 2 条消息仍不应显示撤销按钮');
+});

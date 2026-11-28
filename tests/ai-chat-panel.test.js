@@ -314,3 +314,122 @@ test('模型自动生成对话标题与单独标题提示词设置：首轮完�
   assert.strictEqual(chatCalls.length, 3, '已有手动标题后不应重复触发自动命名');
   assert.strictEqual(document.getElementById('aiHeaderTitleText').textContent, '我的专属对话');
 });
+
+test('P0-P2：环境前缀提供完整卡片只读字段与分组计数，并向模型回传 ops 回执与远程图标可达性探测', async () => {
+  const bigBase64Icon = 'data:image/png;base64,' + 'A'.repeat(256);
+  const seedCards = [
+    { name: 'RO音乐下载', url: 'http://192.168.1.90:23330/', iconSrc: 'auto', color: 'blue' },
+    { name: '本地图卡', url: 'https://local.example/', iconSrc: 'image', icon: bigBase64Icon },
+    {
+      type: 'folder',
+      id: 'fld_tx',
+      name: 'TX网站',
+      children: [
+        { name: 'TX工具网', url: 'https://www.xr24.cn', iconSrc: 'color', color: 'white', letter: '🛠️' },
+        { name: 'TX同学录', url: 'https://class.xr24.cn', iconSrc: 'color', color: 'sky', letter: '🎓' }
+      ]
+    }
+  ];
+
+  const chatPayloads = [];
+  let chatSeq = 0;
+  const { window, document } = boot({
+    seed: {
+      'newtab.shortcuts.v1': JSON.stringify(seedCards),
+      'newtab.shortcuts.v1.bak': JSON.stringify(seedCards)
+    },
+    fetchStub(url, opts) {
+      const u = String(url);
+      if (u.includes('/chat/completions')) {
+        const body = JSON.parse(opts.body);
+        if (body.stream === false) {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ choices: [{ message: { content: '图标调整' } }] }) });
+        }
+        chatSeq++;
+        chatPayloads.push(body);
+        if (chatSeq === 1) {
+          return sseResponse([{
+            choices: [{
+              delta: {
+                content: '已更换音符图标。\n<ops>{"update":[{"name":"RO音乐下载","iconSrc":"https://cdn.example/music.svg"}]}</ops>'
+              }
+            }]
+          }]);
+        }
+        if (chatSeq === 2) {
+          return sseResponse([{
+            choices: [{
+              delta: {
+                content: '已换坏链做验证。\n<ops>{"update":[{"name":"TX工具网","iconSrc":"image","icon":"https://cdn.example/missing.png"}]}</ops>'
+              }
+            }]
+          }]);
+        }
+        return sseResponse([{ choices: [{ delta: { content: '确认完毕。' } }] }]);
+      }
+      if (u === 'https://cdn.example/music.svg') {
+        const svg = '<svg viewBox="0 0 24 24"><path fill="#2468f2" d="M9 18V5l12-2v13"/></svg>';
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: { get: (k) => (String(k).toLowerCase() === 'content-type' ? 'image/svg+xml' : null) },
+          blob: () => Promise.resolve(new window.Blob([svg], { type: 'image/svg+xml' }))
+        });
+      }
+      if (u === 'https://cdn.example/missing.png') {
+        return Promise.resolve({ ok: false, status: 404 });
+      }
+      return Promise.reject(new Error('unexpected ' + u));
+    }
+  });
+
+  openAI(document);
+  configureAI(document, { autoTitle: false });
+
+  // 第 1 轮：校验发给模型的上下文包含 P0+P2 全部只读字段，且不泄漏冗长 base64
+  sendMessage(document, '帮我把 RO音乐下载 换成音符图标');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+
+  const firstMsgs = chatPayloads[0].messages;
+  const sysText = firstMsgs.find((m) => m.role === 'system').content;
+  const ctxUserText = firstMsgs.filter((m) => m.role === 'user').pop().content;
+
+  assert.ok(sysText.includes('通用助手') || sysText.includes('Motuo-Tab'));
+  assert.ok(ctxUserText.includes('主表共 3 项：2 张独立卡片 + 1 个分组；分组内共 2 张卡片，全部快捷方式合计 4 张'), 'P2 分组计数口径必须明确');
+  assert.ok(ctxUserText.includes('#1 名称：RO音乐下载') && ctxUserText.includes('iconSrc：auto') && ctxUserText.includes('iconResolved：auto-pending'), '应透传 RO音乐下载 的完整字段与实时状态');
+  assert.ok(ctxUserText.includes('[本地图片 data:image/png]') && !ctxUserText.includes('AAAA'), '本地图片应展示脱敏摘要而非爆出 base64');
+  assert.ok(ctxUserText.includes('id：fld_tx') && ctxUserText.includes('#3.1 名称：TX工具网') && ctxUserText.includes('letter：🛠️'), '分组与组内子卡字段应完整暴露');
+  assert.ok(ctxUserText.includes('iconSrc="image" 配合 icon="https://..."'), 'ops 契约应明确 iconSrc 取值语义');
+
+  // 校验兼容规范化：iconSrc 传入直链自动转为 iconSrc="image" + icon="..."
+  const listAfter1 = JSON.parse(window.localStorage.getItem('newtab.shortcuts.v1'));
+  const roCard = listAfter1.find((x) => x.name === 'RO音乐下载');
+  assert.strictEqual(roCard.iconSrc, 'image');
+  assert.strictEqual(roCard.icon, 'https://cdn.example/music.svg');
+
+  // 等待第 1 轮异步图标可达性探测写回历史回执
+  await waitFor(() => {
+    const h = JSON.parse(window.localStorage.getItem('newtab.ai.history.v1'));
+    const a = h.filter((m) => m.role === 'assistant')[0];
+    return a && a.opsReceipt && Array.isArray(a.opsReceipt.iconChecks) && a.opsReceipt.iconChecks.length === 1;
+  });
+
+  // 第 2 轮：传入 404 坏图到分组内卡片，验证 (a) 上一轮回执已随历史回传模型，(b) 支持分组内更新，(c) 404 图标展示失败芯片并记入回执
+  sendMessage(document, '把 TX工具网 换成另一个图试试');
+  await waitFor(() => document.getElementById('aiSend').textContent === '发送');
+  await waitFor(() => document.querySelectorAll('#aiMessages .ai-tool-call.fail').length >= 1);
+
+  const secondMsgs = chatPayloads[1].messages;
+  const prevAssistantSent = secondMsgs.find((m) => m.role === 'assistant');
+  assert.ok(prevAssistantSent && prevAssistantSent.content.includes('[操作回执：'), '下一轮应携带上一轮结构化操作回执');
+  assert.ok(prevAssistantSent.content.includes('RO音乐下载.iconSrc: auto -> image'), '回执应含精准 from -> to 变更记录');
+  assert.ok(prevAssistantSent.content.includes('reachable=true'), '回执应含远程图标可达性结果');
+
+  const listAfter2 = JSON.parse(window.localStorage.getItem('newtab.shortcuts.v1'));
+  const txFolder = listAfter2.find((x) => x.type === 'folder' && x.id === 'fld_tx');
+  assert.strictEqual(txFolder.children[0].iconSrc, 'image');
+  assert.strictEqual(txFolder.children[0].icon, 'https://cdn.example/missing.png');
+
+  const failChip = document.querySelector('#aiMessages .ai-tool-call.fail');
+  assert.ok(failChip && failChip.textContent.includes('图标不可达') && failChip.textContent.includes('HTTP 404'), '404 图标应显示不可达警告芯片');
+});

@@ -2816,6 +2816,8 @@
   .ai-tool-call.remove { background: rgba(255, 77, 79, 0.12); color: #d4380d; }
   .ai-tool-call.update { background: rgba(232, 138, 43, 0.15); color: #b35a14; }
   .ai-tool-call.reorder{ background: rgba(36, 104, 242, 0.12); color: #2468f2; }
+  .ai-tool-call.warn   { background: rgba(154, 160, 166, 0.14); color: #5b6470; }
+  .ai-tool-call.fail   { background: rgba(217, 59, 59, 0.12); color: #d93b3b; }
   /* 流式输出中 <ops> 块的占位 + 加载指示 */
   .ai-spinner {
     display: inline-block;
@@ -3530,6 +3532,8 @@
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(255, 255, 255, 0.09);
   }
+  html[data-theme="dark"] .ai-tool-call.warn { background: rgba(255, 255, 255, 0.08); color: var(--text-3); }
+  html[data-theme="dark"] .ai-tool-call.fail { background: rgba(255, 107, 107, 0.14); color: var(--danger); }
   html[data-theme="dark"] .ai-undo-btn {
     background: rgba(255, 255, 255, 0.07);
     color: var(--text-2);

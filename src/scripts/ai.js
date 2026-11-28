@@ -53,6 +53,7 @@
       var aiSending = false; // 是否正在请求中
       var lastSearchQuery = '';
       var pendingSnapshotId = null;
+      var pendingOpsReceipt = null;
       var aiProfiles = [];
       var activeProfile = null;
       try { lastSearchQuery = localStorage.getItem('newtab.ai.lastQuery.v1') || ''; } catch (e) {}
@@ -203,15 +204,40 @@
         return n;
       }
       function searchFreshness() { return fieldValue('aiSearchFreshness') || 'noLimit'; }
+      function formatInspectCardLine(it, indent) {
+        var prefix = (indent || '') + '- ';
+        if (it.order !== undefined && it.order !== null && it.order !== '') prefix += '#' + it.order + ' ';
+        var parts = [
+          '名称：' + it.name,
+          '网址：' + (it.url ? it.url : '（未设置）'),
+          'iconSrc：' + (it.iconSrc || 'color'),
+          'icon：' + (it.icon ? it.icon : '（无）'),
+          'iconResolved：' + (it.iconResolved || 'unknown')
+        ];
+        if (it.color) parts.push('color：' + it.color);
+        if (it.letter) parts.push('letter：' + it.letter);
+        return prefix + parts.join(' ｜ ');
+      }
       function cardLinesText() {
+        var info = typeof cards.inspect === 'function' ? cards.inspect() : null;
+        var items = info ? info.items : (cards.list || []);
         var lines = [];
-        for (var i = 0; i < cards.list.length; i++) {
-          var it = cards.list[i];
-          if (it && it.type === 'folder') {
+        if (info) {
+          lines.push('（主表共 ' + info.rootTotal + ' 项：' + info.rootCards + ' 张独立卡片 + ' + info.folderCount + ' 个分组；分组内共 ' + info.folderCards + ' 张卡片，全部快捷方式合计 ' + info.totalCards + ' 张）');
+        }
+        for (var i = 0; i < items.length; i++) {
+          var it = items[i];
+          if (!it) continue;
+          if (it.type === 'folder') {
             var kids = Array.isArray(it.children) ? it.children : [];
-            lines.push('- [分组] ' + it.name + '（' + kids.length + ' 项）' + (kids.length ? '：' + kids.map(function (c) { return c.name + (c.url ? '(' + c.url + ')' : ''); }).join('、') : ''));
-          } else if (it) {
-            lines.push('- 名称：' + it.name + ' ｜ 网址：' + (it.url ? it.url : '（未设置）'));
+            var fHead = '- ' + (it.order ? ('#' + it.order + ' ') : '') + '[分组] ' + it.name +
+              '（' + (it.id ? ('id：' + it.id + '，') : '') + '共 ' + kids.length + ' 项）';
+            lines.push(fHead);
+            for (var ci = 0; ci < kids.length; ci++) {
+              lines.push(formatInspectCardLine(kids[ci], '  '));
+            }
+          } else {
+            lines.push(formatInspectCardLine(it, ''));
           }
         }
         return lines.join('\n') || '（暂无卡片）';
@@ -229,9 +255,10 @@
       function opsContractText() {
         var first = cards.list.length ? String(cards.list[0].name).replace(/"/g, '') : 'GitHub';
         return '## 卡片操作\n'
-          + '只有确实要改快捷方式时，才在回复末尾输出一个 <ops>。只写用到的键，不要输出空数组。\n'
-          + '已存在的同名卡片不要再 add。没有把握的网址先问，不要编。\n'
-          + '改名写成 {"name":"现有名称","newName":"新名称"}。\n'
+          + '只有确实要增删改或排序快捷方式时，才在回复末尾输出一个 <ops>...</ops>。只写用到的键，不要输出空数组。\n'
+          + '禁止未输出 <ops> 或操作未生效时在回复里宣称“已修改/已换好”；执行后系统会在回复末尾附上[操作回执]供下轮核实。\n'
+          + '已存在的同名卡片不要再 add。没有把握的网址先问，不要编。update/remove 支持匹配主页卡片与分组内卡片；改名写成 {"name":"现有名称","newName":"新名称"}。\n'
+          + '字段语义：iconSrc="auto"（自动抓网站 favicon，内网地址可能失败并回退为 fallback-letter 占位图标）；iconSrc="image" 配合 icon="https://..." 或 "data:image/svg+xml;utf8,..."（自定义图标直链，内网站点推荐直接给可访问的图标 URL）；iconSrc="color" 配合 color（预设色名或 #RRGGBB）与可选 letter（1–2 字符或 Emoji）。\n'
           + 'reorder 是整表排序：只写一个名字时，这张放到最前，其余按原来的相对顺序接在后面。\n'
           + '正例：\n已添加 Google\n<ops>\n{"add":[{"name":"Google","url":"https://www.google.com","iconSrc":"auto","color":"blue"}]}\n</ops>\n'
           + '已将该卡片图标改为绿色\n<ops>\n{"update":[{"name":"' + first + '","color":"green"}]}\n</ops>\n';
@@ -332,7 +359,7 @@
             name: '完整环境',
             builtin: true,
             text: '## 当前环境\n'
-              + '页面上现有 {{card_count}} 张快捷方式。下面是此刻的列表。\n'
+              + '主表共 {{card_count}} 项（含卡片与分组），详细分布与字段如下。\n'
               + '{{cards}}\n\n'
               + '## 站内直达\n{{site_direct}}\n\n'
               + '{{search_rules}}\n'
@@ -611,6 +638,9 @@
         msgs.forEach(function (m) {
           if (!m || m.role !== 'assistant') return;
           if (!m.rendered) return;
+          if (typeof m.rendered === 'string' && /\bai-undo-btn\b/.test(m.rendered)) {
+            m.legacyUndo = true;
+          }
           var content = m.content;
           if (typeof content !== 'string' || !/<think>|<tool_call>|<ops>/i.test(content)) {
             try {
@@ -727,6 +757,35 @@
         renderSessionsList();
       }
 
+      function formatOpsReceiptForModel(rc) {
+        if (!rc || typeof rc !== 'object') return '';
+        var segs = [];
+        if (rc.applied && Array.isArray(rc.changed) && rc.changed.length) {
+          segs.push('已变更 ' + rc.changed.map(function (c) {
+            if (c.op === 'update') return c.name + '.' + c.field + ': ' + c.from + ' -> ' + c.to;
+            if (c.op === 'add') return '新增 ' + c.name;
+            if (c.op === 'remove') return '删除 ' + c.name;
+            if (c.op === 'moveToFolder') return c.name + ' -> 分组「' + c.to + '」';
+            if (c.op === 'reorder') return '重排顺序';
+            return c.name || c.op;
+          }).join('；'));
+        } else {
+          segs.push('未应用任何卡片改动');
+        }
+        if (Array.isArray(rc.skipped) && rc.skipped.length) {
+          segs.push('跳过：' + rc.skipped.map(function (s) { return (s.name || s.op) + '(' + s.reason + ')'; }).join('；'));
+        }
+        if (Array.isArray(rc.failed) && rc.failed.length) {
+          segs.push('失败：' + rc.failed.map(function (f) { return (f.name || f.op) + '(' + f.reason + ')'; }).join('；'));
+        }
+        if (Array.isArray(rc.iconChecks) && rc.iconChecks.length) {
+          segs.push('图标探测：' + rc.iconChecks.map(function (ck) {
+            return ck.name + '(' + ck.url + ') ' + (ck.reachable ? 'reachable=true' : ('reachable=false: ' + (ck.reason || '加载失败')));
+          }).join('；'));
+        }
+        return segs.join(' ｜ ');
+      }
+
       // 发送给模型前清洗历史：<think>/<tool_call>/<ops> 只是前端渲染用的语义标签，
       // 不应回传给模型。否则模型会把它们当成自己的历史正文（尤其 <tool_call>），
       // 干扰它后续是否/如何真正发起工具调用的判断。
@@ -752,7 +811,12 @@
           if (m.role === 'tool') continue;
           var copy = {};
           for (var k in m) {
-            if (Object.prototype.hasOwnProperty.call(m, k) && k !== 'tool_calls' && k !== 'reasoning_content' && k !== 'hidden' && k !== 'snapshotId' && k !== 'searchQuery') copy[k] = m[k];
+            if (Object.prototype.hasOwnProperty.call(m, k) &&
+              k !== 'tool_calls' && k !== 'reasoning_content' && k !== 'hidden' &&
+              k !== 'snapshotId' && k !== 'searchQuery' && k !== 'opsReceipt' &&
+              k !== 'legacyUndo' && k !== 'undone') {
+              copy[k] = m[k];
+            }
           }
           if (m.role === 'assistant' && typeof copy.content === 'string') {
             copy.content = copy.content
@@ -761,6 +825,10 @@
               .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
               .replace(/<ops>[\s\S]*?<\/ops>/gi, '')
               .trim();
+            if (m.opsReceipt) {
+              var rcLine = formatOpsReceiptForModel(m.opsReceipt);
+              if (rcLine) copy.content = (copy.content ? copy.content + '\n' : '') + '[操作回执：' + rcLine + ']';
+            }
           }
           if (m.tool_calls && (copy.content === null || copy.content === undefined || copy.content === '')) continue;
           out.push(copy);
@@ -2730,7 +2798,7 @@
       //   <tool_call>…</tool_call> → 联网搜索状态块（前端样式）
       //   <ops>…</ops>            → 工具操作 chips（前端样式）
       //   其余                    → Markdown 正文
-      function renderAIContent(content) {
+      function renderAIContent(content, msg) {
         var frag = document.createDocumentFragment();
         var rest = String(content || '');
 
@@ -2791,9 +2859,12 @@
           frag.appendChild(chipsWrap);
         }
 
-        // 3) ops 工具操作
-        var opsMatch = rest.match(/<ops>([\s\S]*?)<\/ops>/i);
-        if (opsMatch) {
+        // 3) ops 工具操作（屏蔽反引号与围栏代码块中的文档示例，历史记录仅在有真实操作数据时渲染芯片）
+        var maskedOps = maskMarkdownCodeForOps(rest);
+        var opsMatch = maskedOps.match(/<ops>([\s\S]*?)<\/ops>/i);
+        var hasRealOps = !!(msg && (msg.snapshotId || msg.opsReceipt || msg.legacyUndo));
+        if (opsMatch && (hasRealOps || !isMultiSectionReport(rest))) {
+          var realInner = rest.slice(opsMatch.index + 5, opsMatch.index + opsMatch[0].length - 6);
           var summary = (rest.slice(0, opsMatch.index) + rest.slice(opsMatch.index + opsMatch[0].length)).trim();
           if (summary) {
             var p = document.createElement('div');
@@ -2801,11 +2872,11 @@
             p.innerHTML = renderMarkdown(summary);
             frag.appendChild(p);
           }
-          try {
-            var ops = JSON.parse(opsMatch[1].trim());
-            var chips = renderOpsChips(ops);
+          var parsedOps = tryParseOps(realInner);
+          if (parsedOps) {
+            var chips = renderOpsChips(parsedOps, msg && msg.opsReceipt);
             if (chips && chips.childNodes.length) frag.appendChild(chips);
-          } catch (e) {}
+          }
           rest = '';
         }
 
@@ -2847,17 +2918,18 @@
               if (isErr) {
                 div.innerHTML = renderMarkdown(content);
               } else {
-                var frag = renderAIContent(content);
+                var frag = renderAIContent(content, msg);
                 if (frag.childNodes.length) div.appendChild(frag);
               }
-              // 仅在确实保存过卡片修改快照时渲染"撤销"按钮（避免思考或正文提及 <ops> 时误显示）
+              // 仅在确实保存过卡片修改快照（或旧版带 undo 的遗留记录）时渲染“撤销”按钮，避免误显
               var toolBar = div.querySelector('.ai-tool-calls');
               var hasLegacySnap = false;
-              if (!msg.snapshotId && toolBar) {
+              if (!msg.snapshotId && msg.legacyUndo) {
                 try { hasLegacySnap = !!localStorage.getItem(AI_SNAPSHOT_KEY); } catch (eSnap) {}
               }
-              if (msg.snapshotId || (toolBar && hasLegacySnap)) {
+              if ((typeof msg.snapshotId === 'string' && msg.snapshotId !== '') || hasLegacySnap) {
                 var undoBtn = createUndoButton(msg.snapshotId);
+                if (msg.undone) markUndone(undoBtn);
                 if (toolBar) toolBar.appendChild(undoBtn);
                 else div.appendChild(undoBtn);
               }
@@ -2935,7 +3007,7 @@
       }
 
       // 实时解析 <ops> 标签，分段渲染气泡（streaming=true 时 <ops> 块显示 placeholder）
-      function renderStreamBubble(el, text, streaming) {
+      function renderStreamBubble(el, text, streaming, opts) {
         // 保留气泡内的思考过程容器（深度思考时创建在 bubble 内部）
         var thinkingEls = el.querySelectorAll('.ai-thinking');
         var failEls = el.querySelectorAll('.ai-search-fail');
@@ -2975,15 +3047,16 @@
           .replace(/<tool_call>(?:(?!<\/tool_call>)[\s\S])*$/i, '')
           .replace(/<think>(?:(?!<\/think>)[\s\S])*$/i, '');
 
-        // 定位 ops 区域：优先 <ops> 标签；其次已配平的裸 JSON / 代码块；再次流式中未闭合的代码围栏。
-        // 这样模型就算不用 <ops> 包裹，也不会把原始 JSON 暴露在气泡里。
+        // 定位 ops 区域：仅在允许兜底且非长篇报告时才探测代码块/裸 JSON，防止把示例 JSON 当成真实操作
+        var allowFallback = !opts || opts.allowFallback !== false;
         var opsStart = -1, opsEnd = -1;
-        var m = text.match(/<ops>([\s\S]*?)(<\/ops>|$)/i);
+        var masked = maskMarkdownCodeForOps(text);
+        var m = masked.match(/<ops>([\s\S]*?)(<\/ops>|$)/i);
         if (m) {
           opsStart = m.index;
           opsEnd = m.index + m[0].length;
-        } else {
-          var ex = extractOps(text);
+        } else if (allowFallback && !isMultiSectionReport(text)) {
+          var ex = extractOps(text, opts);
           if (ex) {
             opsStart = ex.start;
             opsEnd = ex.end;
@@ -3024,8 +3097,29 @@
         }
       }
 
-      // 把 ops 渲染成 tool call chips（add/remove/update/reorder）
-      function renderOpsChips(ops) {
+      // 把 ops 与回执渲染成 tool call chips（add/remove/update/reorder + warn/fail）
+      function appendReceiptChip(container, kind, labelText, detailText) {
+        var chip = document.createElement('span');
+        chip.className = 'ai-tool-call ' + kind;
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'ai-tool-icon';
+        iconSpan.textContent = kind === 'fail' ? '!' : '·';
+        var labelSpan = document.createElement('span');
+        labelSpan.className = 'ai-tool-label';
+        labelSpan.textContent = labelText;
+        chip.appendChild(iconSpan);
+        chip.appendChild(labelSpan);
+        if (detailText) {
+          var detailSpan = document.createElement('span');
+          detailSpan.className = 'ai-tool-detail';
+          detailSpan.textContent = detailText;
+          detailSpan.title = detailText;
+          chip.appendChild(detailSpan);
+        }
+        container.appendChild(chip);
+      }
+
+      function renderOpsChips(ops, receipt) {
         var container = document.createElement('div');
         container.className = 'ai-tool-calls';
 
@@ -3095,6 +3189,24 @@
             var pre = ops.reorder.slice(0, 4).join(' → ');
             return pre + (ops.reorder.length > 4 ? ' …' : '');
           });
+        }
+        if (receipt) {
+          if (Array.isArray(receipt.failed) && receipt.failed.length) {
+            appendReceiptChip(container, 'fail', '操作未生效', receipt.failed.map(function (f) {
+              return (f.name ? f.name + '：' : '') + f.reason;
+            }).join('；'));
+          } else if (!receipt.applied && Array.isArray(receipt.skipped) && receipt.skipped.length) {
+            appendReceiptChip(container, 'warn', '无需改动', receipt.skipped.map(function (s) {
+              return (s.name ? s.name + '：' : '') + s.reason;
+            }).join('；'));
+          }
+          if (Array.isArray(receipt.iconChecks)) {
+            receipt.iconChecks.forEach(function (ck) {
+              if (ck && ck.reachable === false) {
+                appendReceiptChip(container, 'fail', '图标不可达', ck.name + '（' + (ck.reason || '加载失败') + '）');
+              }
+            });
+          }
         }
 
         return container;
@@ -3233,15 +3345,33 @@
         return null;
       }
 
-      // 从任意内容中提取 ops：<ops> 标签 / ```json 代码块 / 裸 JSON / JSON 数组 / 单卡片对象。
-      // 模型偶尔不按 <ops> 包裹、直接吐 JSON，这里统一兜住。
-      function extractOps(content) {
+      function maskMarkdownCodeForOps(text) {
+        var mask = function (m) { return new Array(m.length + 1).join(' '); };
+        return String(text || '')
+          .replace(/```[\s\S]*?```/g, mask)
+          .replace(/`[^`\n]+`/g, mask);
+      }
+
+      function isMultiSectionReport(text) {
+        var s = String(text || '');
+        var headings = s.match(/^#{1,3}\s+/gm) || [];
+        var fences = s.match(/```/g) || [];
+        return headings.length >= 2 || (headings.length >= 1 && fences.length >= 4);
+      }
+
+      // 从任意内容中提取 ops：显式 <ops> 标签（忽略代码反引号/报告中的示例）；
+      // 仅在 allowFallback 且非长篇报告时才兜底解析 ```json 代码块 / 裸 JSON。
+      function extractOps(content, opts) {
         var s = String(content || '');
-        var m = s.match(/<ops>([\s\S]*?)<\/ops>/i);
+        var allowFallback = !opts || opts.allowFallback !== false;
+        var masked = maskMarkdownCodeForOps(s);
+        var m = masked.match(/<ops>([\s\S]*?)<\/ops>/i);
         if (m) {
-          var obj = tryParseOps(m[1]);
-          if (obj) return { ops: obj, start: m.index, end: m.index + m[0].length, text: m[0] };
+          var innerRaw = s.slice(m.index + 5, m.index + m[0].length - 6);
+          var obj = tryParseOps(innerRaw);
+          if (obj) return { ops: obj, start: m.index, end: m.index + m[0].length, text: s.slice(m.index, m.index + m[0].length) };
         }
+        if (!allowFallback || isMultiSectionReport(s)) return null;
         var fence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
         if (fence) {
           var obj2 = tryParseOps(fence[1]);
@@ -3254,35 +3384,38 @@
       }
 
       // 把裸 JSON / 代码块的 ops 规范成 <ops>…</ops>，便于统一渲染与保存
-      function normalizeOpsTags(content) {
+      function normalizeOpsTags(content, opts) {
         var s = String(content || '');
-        var tagged = s.match(/<ops>([\s\S]*?)<\/ops>/i);
+        var masked = maskMarkdownCodeForOps(s);
+        var tagged = masked.match(/<ops>([\s\S]*?)<\/ops>/i);
         if (tagged) {
-          var parsed = parseLooseJson(tagged[1]);
+          var rawInner = s.slice(tagged.index + 5, tagged.index + tagged[0].length - 6);
+          var parsed = parseLooseJson(rawInner);
           var ops = coerceOps(parsed);
           if (!ops) return s;
           return s.slice(0, tagged.index) + '<ops>' + JSON.stringify(ops) + '</ops>' + s.slice(tagged.index + tagged[0].length);
         }
-        var ex = extractOps(s);
+        var ex = extractOps(s, opts);
         if (!ex) return s;
         return s.slice(0, ex.start) + '<ops>' + JSON.stringify(ex.ops) + '</ops>' + s.slice(ex.end);
       }
 
       // 深度思考兜底：正文里没有 ops，但思考流(reasoning_content)里有显式 <ops> 标签时并入。
       // 只认带标签的，避免把思考里的示例 JSON 误当指令。
-      function mergeReasoningOps(content, reasoning) {
+      function mergeReasoningOps(content, reasoning, opts) {
         var s = String(content || '');
-        if (extractOps(s)) return s;
-        var m = String(reasoning || '').match(/<ops>[\s\S]*?<\/ops>/i);
-        if (m) return (s ? s + '\n' : '') + m[0];
+        if (extractOps(s, opts)) return s;
+        var r = String(reasoning || '');
+        var m = maskMarkdownCodeForOps(r).match(/<ops>[\s\S]*?<\/ops>/i);
+        if (m) return (s ? s + '\n' : '') + r.slice(m.index, m.index + m[0].length);
         return s;
       }
 
-      // 是否"修改卡片"意图（纠错重试的门控）：查询类返回 false
+      // 是否"修改卡片"意图（纠错重试与裸 JSON 兜底的门控）：查询/写报告类返回 false
       function wantsCardChange(t) {
         var s = String(t || '');
         if (!s) return false;
-        if (/(哪些|有哪些|有没有|是什么|在不在|多少|查询|列出|告诉|介绍|怎么用)/.test(s)) return false;
+        if (/(bug\s*报告|故障报告|报错分析|写个报告|生成报告|哪些|有哪些|有没有|是什么|在不在|多少|查询|列出|告诉|介绍|怎么用)/i.test(s)) return false;
         return /(加|添加|新增|删|删除|移除|改|换|更新|设置|重命名|改名|移到|移动|置顶|排序|整理|颜色|图标|卡片|快捷方式|网址|url)/i.test(s);
       }
 
@@ -3290,15 +3423,15 @@
       // 纯文字回答（如"已存在，无需添加"）不能重试，否则会逼出重复 ops。
       function looksLikeOpsAttempt(s) {
         var t = String(s || '');
-        if (!t) return false;
-        if (/<ops\b/i.test(t)) return true;
+        if (!t || isMultiSectionReport(t)) return false;
+        if (/<ops\b/i.test(maskMarkdownCodeForOps(t))) return true;
         if (t.indexOf('```') !== -1) return true;
         if (/["']?(add|remove|update|reorder)["']?\s*[:：]/i.test(t)) return true;
         return false;
       }
 
-      function applyOpsFromContent(content, bubble) {
-        var ex = extractOps(content);
+      function applyOpsFromContent(content, bubble, opts) {
+        var ex = extractOps(content, opts);
         if (!ex) return false;
         var ops = ex.ops;
 
@@ -3308,7 +3441,59 @@
         var removeArr = Array.isArray(ops.remove) ? ops.remove : [];
         var updateArr = Array.isArray(ops.update) ? ops.update : [];
         var reorderArr = Array.isArray(ops.reorder) ? ops.reorder : null;
+        var moveArr = Array.isArray(ops.moveToFolder) ? ops.moveToFolder : [];
 
+        var receipt = {
+          ok: true,
+          applied: false,
+          changed: [],
+          skipped: [],
+          failed: [],
+          iconChecks: []
+        };
+        function shortReceiptVal(k, v) {
+          if (v === undefined) return '（未设置）';
+          if (k === 'icon' && typeof v === 'string' && /^data:/i.test(v)) return '[本地图片]';
+          return String(v);
+        }
+        function isSafeIconValue(s) {
+          return /^(?:https?:\/\/|data:image\/|bmicon:)/i.test(s);
+        }
+        function normalizeIconFields(raw) {
+          var obj = Object.assign({}, raw);
+          var invalidReason = '';
+          if (typeof obj.iconSrc === 'string') {
+            var trimmedSrc = obj.iconSrc.trim();
+            if (/^(?:https?:\/\/|data:image\/)/i.test(trimmedSrc)) {
+              obj.icon = trimmedSrc;
+              obj.iconSrc = 'image';
+            } else if (/^\s*(?:javascript|vbscript|data:text|data:application):/i.test(trimmedSrc)) {
+              invalidReason = '图标来源协议不合法';
+              delete obj.iconSrc;
+            } else if (trimmedSrc === '') {
+              obj.iconSrc = 'color';
+            } else {
+              obj.iconSrc = trimmedSrc;
+            }
+          } else if (obj.iconSrc === null) {
+            obj.iconSrc = 'color';
+          }
+          if (typeof obj.icon === 'string') {
+            var trimmedIcon = obj.icon.trim();
+            if (!trimmedIcon) {
+              obj.icon = '';
+            } else if (!isSafeIconValue(trimmedIcon)) {
+              invalidReason = '图标地址格式或协议不支持';
+              delete obj.icon;
+            } else {
+              obj.icon = trimmedIcon;
+              if (!obj.iconSrc || obj.iconSrc === 'auto') obj.iconSrc = 'image';
+            }
+          } else if (obj.icon === null) {
+            obj.icon = '';
+          }
+          return { obj: obj, invalidReason: invalidReason };
+        }
         function safeNormalizeCardUrl(u) {
           var s = String(u || '').trim();
           if (!s || /^\s*(?:javascript|data|vbscript):/i.test(s)) return '';
@@ -3316,20 +3501,29 @@
           if (/^(file|mailto|about|chrome|chrome-extension|ftp|https?):/i.test(s)) return s;
           return 'http://' + s;
         }
-        addArr = addArr.map(function (a2) {
-          if (!a2 || !a2.name || !a2.url) return null;
-          var normUrl = safeNormalizeCardUrl(a2.url);
-          if (!normUrl) return null;
-          return Object.assign({}, a2, { url: normUrl });
-        }).filter(Boolean);
-        addArr.forEach(function (a2) {
+
+        addArr = addArr.map(function (rawAdd) {
+          if (!rawAdd || !rawAdd.name || !rawAdd.url) {
+            if (rawAdd && rawAdd.name) receipt.failed.push({ op: 'add', name: rawAdd.name, reason: '缺少有效网址' });
+            return null;
+          }
+          var normUrl = safeNormalizeCardUrl(rawAdd.url);
+          if (!normUrl) {
+            receipt.failed.push({ op: 'add', name: rawAdd.name, reason: '网址协议不合法' });
+            return null;
+          }
+          var normIcon = normalizeIconFields(rawAdd);
+          if (normIcon.invalidReason) {
+            receipt.failed.push({ op: 'add', name: rawAdd.name, reason: normIcon.invalidReason });
+            return null;
+          }
+          var a2 = Object.assign({}, normIcon.obj, { url: normUrl });
           if (!a2.iconSrc) a2.iconSrc = 'auto';
           if (a2.iconSrc === 'auto' && !a2.color) a2.color = 'blue';
-        });
+          return a2;
+        }).filter(Boolean);
 
         // 从当前 list 出发，按 ops 应用 diff（没提到的字段原样保留）
-        // 注意：必须逐项拷贝，浅拷贝 slice() 会让 update 原地改到 list 共享对象，
-        // 进而污染下方用于撤销的快照（update 类操作将无法正确撤销）。
         function cloneItemDeep(it) {
           if (!it || typeof it !== 'object') return it;
           if (it.type === 'folder') {
@@ -3343,55 +3537,121 @@
           nameIndex = {};
           newList.forEach(function (it, idx) { nameIndex[it.name] = idx; });
         }
+        function findCardLocation(nm) {
+          if (nameIndex[nm] !== undefined) {
+            return { arr: newList, idx: nameIndex[nm], folder: null };
+          }
+          for (var fi = 0; fi < newList.length; fi++) {
+            var fld = newList[fi];
+            if (!fld || fld.type !== 'folder' || !Array.isArray(fld.children)) continue;
+            for (var ci = 0; ci < fld.children.length; ci++) {
+              if (fld.children[ci] && fld.children[ci].name === nm) {
+                return { arr: fld.children, idx: ci, folder: fld, folderIdx: fi };
+              }
+            }
+          }
+          return null;
+        }
         reindex();
 
-        // remove: 按 name 删
+        // remove: 按 name 删（支持主页与分组内）
         removeArr.forEach(function (nm) {
-          if (nameIndex[nm] !== undefined) {
-            newList.splice(nameIndex[nm], 1);
-            reindex();
+          var loc = findCardLocation(nm);
+          if (!loc) {
+            receipt.skipped.push({ op: 'remove', name: nm, reason: '未找到该卡片' });
+            return;
           }
+          loc.arr.splice(loc.idx, 1);
+          if (loc.folder && loc.arr.length === 0) {
+            newList.splice(loc.folderIdx, 1);
+          }
+          receipt.changed.push({ op: 'remove', name: nm });
+          reindex();
         });
 
-        // update: 按 name 合并字段；newName / rename 才改显示名
-        updateArr.forEach(function (u) {
-          if (!u || !u.name) return;
-          var idx2 = nameIndex[u.name];
-          if (idx2 === undefined) return;
+        // update: 按 name 合并字段（支持主页与分组内）；newName / rename 才改显示名
+        var autoRefreshNames = [];
+        var probeTargets = [];
+        updateArr.forEach(function (rawU) {
+          if (!rawU || !rawU.name) return;
+          var loc = findCardLocation(rawU.name);
+          if (!loc) {
+            receipt.failed.push({ op: 'update', name: rawU.name, reason: '未找到同名卡片' });
+            return;
+          }
+          var normIcon = normalizeIconFields(rawU);
+          if (normIcon.invalidReason) {
+            receipt.failed.push({ op: 'update', name: rawU.name, reason: normIcon.invalidReason });
+            return;
+          }
+          var u = normIcon.obj;
+          var targetItem = loc.arr[loc.idx];
           var nextName = u.newName || u.rename;
-          if (nextName && nextName !== u.name && nameIndex[nextName] === undefined) {
-            newList[idx2].name = nextName;
-            reindex();
-            idx2 = nameIndex[nextName];
+          if (nextName && nextName !== u.name && !findCardLocation(nextName)) {
+            receipt.changed.push({ op: 'update', name: targetItem.name, field: 'name', from: targetItem.name, to: nextName });
+            targetItem.name = nextName;
+            if (!loc.folder) reindex();
           }
           var keys = Object.keys(u);
           for (var ki = 0; ki < keys.length; ki++) {
             var k = keys[ki];
             if (k === 'name' || k === 'newName' || k === 'rename') continue;
-            if (k === 'url' && typeof u[k] === 'string' && u[k].trim()) {
+            if (k === 'url') {
+              if (typeof u[k] !== 'string' || !u[k].trim()) continue;
               var normU = safeNormalizeCardUrl(u[k]);
-              if (normU) newList[idx2][k] = normU;
+              if (!normU) {
+                receipt.failed.push({ op: 'update', name: targetItem.name, reason: '网址协议不合法' });
+                continue;
+              }
+              if (targetItem.url !== normU) {
+                receipt.changed.push({ op: 'update', name: targetItem.name, field: 'url', from: targetItem.url || '', to: normU });
+                targetItem.url = normU;
+              }
               continue;
             }
-            newList[idx2][k] = u[k];
+            if (targetItem[k] !== u[k]) {
+              receipt.changed.push({
+                op: 'update',
+                name: targetItem.name,
+                field: k,
+                from: shortReceiptVal(k, targetItem[k]),
+                to: shortReceiptVal(k, u[k])
+              });
+              targetItem[k] = u[k];
+            }
+          }
+          if (!loc.folder && (u.iconSrc === 'auto' || (targetItem.iconSrc === 'auto' && u.url))) {
+            autoRefreshNames.push(targetItem);
+          }
+          if (targetItem.iconSrc === 'image' && typeof targetItem.icon === 'string' && /^https?:\/\//i.test(targetItem.icon)) {
+            probeTargets.push({ name: targetItem.name, url: targetItem.icon });
           }
         });
 
         // add: 已有同名则跳过，追加到末尾
         var addedNames = {};
         addArr.forEach(function (c) {
-          if (nameIndex[c.name] !== undefined) return;
+          if (findCardLocation(c.name)) {
+            receipt.skipped.push({ op: 'add', name: c.name, reason: '已存在同名卡片' });
+            return;
+          }
           newList.push(c);
           addedNames[c.name] = true;
+          receipt.changed.push({ op: 'add', name: c.name, field: 'iconSrc', from: '（无）', to: c.iconSrc });
+          if (c.iconSrc === 'image' && typeof c.icon === 'string' && /^https?:\/\//i.test(c.icon)) {
+            probeTargets.push({ name: c.name, url: c.icon });
+          }
           reindex();
         });
 
         // moveToFolder: 把已有卡片移入指定分组（不存在则自动建组）
-        var moveArr = Array.isArray(ops.moveToFolder) ? ops.moveToFolder : [];
         moveArr.forEach(function (mv) {
           if (!mv || !mv.card || !mv.folder) return;
           var cIdx = nameIndex[mv.card];
-          if (cIdx === undefined || newList[cIdx].type === 'folder') return;
+          if (cIdx === undefined || newList[cIdx].type === 'folder') {
+            receipt.skipped.push({ op: 'moveToFolder', name: mv.card, reason: '未找到主表卡片' });
+            return;
+          }
           var cardObj = newList.splice(cIdx, 1)[0];
           reindex();
           var fIdx = nameIndex[mv.folder];
@@ -3403,12 +3663,14 @@
           }
           if (!Array.isArray(fld.children)) fld.children = [];
           fld.children.push(cardObj);
+          receipt.changed.push({ op: 'moveToFolder', name: mv.card, to: fld.name });
         });
 
         // reorder: 按给定名字顺序重排（不重命名，只重排现有项；新加的不在列表里时自动忽略）
         if (reorderArr && reorderArr.length > 0) {
           var orderMap = {};
           reorderArr.forEach(function (nm, idx3) { orderMap[nm] = idx3; });
+          var beforeOrder = newList.map(function (x) { return x.name; }).join('|');
           newList.sort(function (a, b) {
             var ai = orderMap[a.name];
             var bi = orderMap[b.name];
@@ -3417,6 +3679,9 @@
             if (bi === undefined) return -1;
             return ai - bi;
           });
+          if (newList.map(function (x) { return x.name; }).join('|') !== beforeOrder) {
+            receipt.changed.push({ op: 'reorder', name: reorderArr.slice(0, 4).join(' → ') });
+          }
         }
 
         // 危险操作检测：删超过 3 个、或者几乎清空（剩不到 2 个）
@@ -3424,6 +3689,12 @@
         if (shouldConfirmBulkDelete() && (willDelete > 3 || (newList.length < 2 && cards.list.length > 0 && willDelete > 0))) {
           var msg = 'AI 准备删除 ' + willDelete + ' 个卡片，剩余 ' + newList.length + ' 个。\n确定要执行吗？';
           if (!confirm(msg)) {
+            receipt.ok = false;
+            receipt.applied = false;
+            receipt.changed = [];
+            receipt.failed.push({ op: 'remove', name: '', reason: '用户取消删除' });
+            pendingSnapshotId = null;
+            pendingOpsReceipt = receipt;
             if (bubble) {
               bubble.classList.add('ai-msg-cancelled');
               var cancelTag = document.createElement('div');
@@ -3436,11 +3707,26 @@
         }
 
         if (JSON.stringify(newList) === JSON.stringify(cards.list)) {
-          showAIToast('没有需要应用的改动');
+          receipt.applied = false;
+          receipt.ok = receipt.failed.length === 0 && receipt.changed.length === 0;
+          if (!receipt.skipped.length && !receipt.failed.length) {
+            receipt.skipped.push({ op: 'ops', name: '', reason: '与当前配置一致，未产生改动' });
+          }
+          pendingSnapshotId = null;
+          pendingOpsReceipt = receipt;
+          showAIToast(receipt.failed.length ? ('操作未生效：' + receipt.failed[0].reason) : '没有需要应用的改动');
+          if (bubble) {
+            var noopChips = renderOpsChips(ops, receipt);
+            var oldPh = bubble.querySelector('.ai-ops-placeholder');
+            if (oldPh) oldPh.replaceWith(noopChips);
+            else bubble.appendChild(noopChips);
+          }
           return true;
         }
 
-        // 每条操作一份快照；同时写旧键，兼容只认 newtab.ai.snapshot.v1 的撤销
+        // 每条真实修改保留一份快照，并附上结构化回执
+        receipt.applied = true;
+        receipt.ok = receipt.failed.length === 0;
         var snapId = '';
         var before = cards.list.map(cloneItemDeep);
         var snap = { list: before, time: Date.now() };
@@ -3455,14 +3741,14 @@
           localStorage.setItem(AI_SNAPSHOT_KEY, JSON.stringify(snap));
         } catch (e) {}
         pendingSnapshotId = snapId;
+        pendingOpsReceipt = receipt;
 
         cards.list = newList;
         var savedOk = save(cards.list);
         render(cards.list);
 
-        // 自动抓图标写回新卡：同名时优先对上网址，避免打到旧卡
-        addArr.forEach(function (c) {
-          if (c.iconSrc !== 'auto' || !addedNames[c.name]) return;
+        // 自动抓图标写回（新建 auto 卡 & 更新改为 auto 的主页卡）
+        var triggerAutoForItem = function (c) {
           var cardEls = nav.querySelectorAll('.shortcut');
           var hit = null;
           for (var ci = 0; ci < cardEls.length; ci++) {
@@ -3473,26 +3759,55 @@
             hit = card;
           }
           if (hit) applyAutoIcon(hit, Array.prototype.indexOf.call(cardEls, hit), c.color || 'blue');
+        };
+        addArr.forEach(function (c) {
+          if (c.iconSrc === 'auto' && addedNames[c.name]) triggerAutoForItem(c);
         });
+        autoRefreshNames.forEach(triggerAutoForItem);
 
         // 保存结果用轻提示反馈，不再往气泡里插技术性状态行
         showAIToast(savedOk ? '已应用 AI 的修改' : '修改已应用，但保存失败（存储空间不足？）');
 
         // 把流式时的 placeholder 换成实际的 tool call chips，并在同一栏末尾放入"撤销"按钮
+        var chipsBar = null;
         if (bubble) {
-          var chips = renderOpsChips(ops);
+          chipsBar = renderOpsChips(ops, receipt);
           var oldPlaceholder = bubble.querySelector('.ai-ops-placeholder');
           if (oldPlaceholder) {
-            oldPlaceholder.replaceWith(chips);
+            oldPlaceholder.replaceWith(chipsBar);
           } else {
-            bubble.appendChild(chips);
+            bubble.appendChild(chipsBar);
           }
           var undoBtn = createUndoButton(snapId);
-          if (chips && chips.nodeType === 1) {
-            chips.appendChild(undoBtn);
+          if (chipsBar && chipsBar.nodeType === 1) {
+            chipsBar.appendChild(undoBtn);
           } else {
             bubble.appendChild(undoBtn);
           }
+        }
+
+        // P1：对新增/更新的远程图标直链做可达性探测（并缓存在本地；失败则反馈给历史与界面）
+        var iconApi = window.__motuo && window.__motuo.iconCache;
+        if (probeTargets.length && iconApi && typeof iconApi.probe === 'function') {
+          Promise.all(probeTargets.map(function (pt) {
+            return iconApi.probe(pt.url).then(function (res) {
+              var ck = {
+                name: pt.name,
+                url: pt.url,
+                reachable: !!(res && res.reachable),
+                cached: !!(res && res.cached),
+                reason: (res && res.reason) || ''
+              };
+              receipt.iconChecks.push(ck);
+              if (!ck.reachable && chipsBar) {
+                var undoNode = chipsBar.querySelector('.ai-undo-btn');
+                appendReceiptChip(chipsBar, 'fail', '图标不可达', ck.name + '（' + (ck.reason || '加载失败') + '）');
+                if (undoNode) chipsBar.appendChild(undoNode);
+              }
+            }).catch(function () {});
+          })).then(function () {
+            saveAIHistory();
+          });
         }
         return true;
       }
@@ -3664,6 +3979,21 @@
           if (!id || (legacy && JSON.stringify(legacy.list) === JSON.stringify(snap.list))) {
             localStorage.removeItem(AI_SNAPSHOT_KEY);
           }
+          var histChanged = false;
+          var groupEl = undoBtn.closest ? undoBtn.closest('.ai-msg-group') : null;
+          var groupIdx = groupEl ? parseInt(groupEl.getAttribute('data-msg-index'), 10) : NaN;
+          if (id) {
+            for (var hi = 0; hi < aiHistory.length; hi++) {
+              if (aiHistory[hi] && aiHistory[hi].snapshotId === id) {
+                aiHistory[hi].undone = true;
+                histChanged = true;
+              }
+            }
+          } else if (!isNaN(groupIdx) && aiHistory[groupIdx]) {
+            aiHistory[groupIdx].undone = true;
+            histChanged = true;
+          }
+          if (histChanged) saveAIHistory();
           markUndone(undoBtn);
           showAIToast('已撤销，卡片恢复到操作前');
         } catch (e) {
@@ -3693,6 +4023,7 @@
         }
         if (typeof msgIdx !== 'number' || msgIdx < 1 || msgIdx >= aiHistory.length) return;
         pendingSnapshotId = null;
+        pendingOpsReceipt = null;
         aiHistory[0].content = buildSystemPrompt();
         aiHistory = aiHistory.slice(0, msgIdx);
         aiHistory.push({ role: 'user', content: trimmed });
@@ -3781,6 +4112,7 @@
         }
         var userText = String(aiHistory[userIdx].content || '');
         pendingSnapshotId = null;
+        pendingOpsReceipt = null;
         aiHistory[0].content = buildSystemPrompt();
         aiHistory = aiHistory.slice(0, userIdx + 1);
         saveAIHistory();
@@ -3878,6 +4210,8 @@
 
       // 统一收尾：任何路径结束都复位发送态（避免卡在"处理中…"）
       function endAISend() {
+        pendingSnapshotId = null;
+        pendingOpsReceipt = null;
         setAISendState(false);
       }
 
@@ -3887,6 +4221,10 @@
         if (pendingSnapshotId) {
           msg.snapshotId = pendingSnapshotId;
           pendingSnapshotId = null;
+        }
+        if (pendingOpsReceipt) {
+          msg.opsReceipt = pendingOpsReceipt;
+          pendingOpsReceipt = null;
         }
         aiHistory.push(msg);
         return msg;
@@ -3926,11 +4264,11 @@
           if (idx !== -1) aiHistory.splice(idx, 1);
           saveAIHistory();
 
-          var normalized = normalizeOpsTags(retryAccum);
-          if (extractOps(normalized)) {
+          var normalized = normalizeOpsTags(retryAccum, { allowFallback: true });
+          if (extractOps(normalized, { allowFallback: true })) {
             ctx.accumulated = normalized;
-            renderStreamBubble(ctx.bubble, ctx.accumulated, false);
-            applyOpsFromContent(ctx.accumulated, ctx.bubble);
+            renderStreamBubble(ctx.bubble, ctx.accumulated, false, { allowFallback: true });
+            applyOpsFromContent(ctx.accumulated, ctx.bubble, { allowFallback: true });
             if (window.console && console.log) console.log('[AI] ← 纠错重试结果:', ctx.accumulated);
           }
         });
@@ -3949,7 +4287,7 @@
           return consumeChatResponse(res, {
             onContent: function (c) {
               ctx.accumulated += c;
-              renderStreamBubble(ctx.bubble, ctx.accumulated, true);
+              renderStreamBubble(ctx.bubble, ctx.accumulated, true, { allowFallback: ctx.allowOpsFallback });
               aiMessages.scrollTop = aiMessages.scrollHeight;
             },
             onReasoning: function (rc) {
@@ -4066,6 +4404,8 @@
           return;
         }
         pendingSnapshotId = null;
+        pendingOpsReceipt = null;
+        pendingOpsReceipt = null;
         try {
           var reqSessionId = activeSessionId;
           aiHistory[0].content = buildSystemPrompt();
@@ -4089,6 +4429,7 @@
             bubble: bubble,
             deepThinkingOn: !!(aiDeepSearch && aiDeepSearch.checked),
             webSearchEnabled: !!(aiWebSearch && aiWebSearch.checked && providerReady()),
+            allowOpsFallback: wantsCardChange(text),
             maxRounds: maxSearchRounds(),
             pendingToolCallId: null,
             pendingToolCallName: null,
@@ -4133,7 +4474,7 @@
               },
               onContent: function (c) {
                 ctx.accumulated += c;
-                renderStreamBubble(bubble, ctx.accumulated, true);
+                renderStreamBubble(bubble, ctx.accumulated, true, { allowFallback: ctx.allowOpsFallback });
                 aiMessages.scrollTop = aiMessages.scrollHeight;
               },
               onReasoning: function (rc) {
@@ -4191,11 +4532,12 @@
               try { _tcArgs = JSON.parse(ctx.pendingToolCallArgs); } catch (e) { console.warn('[AI] 工具参数解析失败:', e); }
               if (_tcArgs) {
                 return runSearchRoundFlow(ctx, _tcArgs.query || text, 1).then(function () {
-                  ctx.accumulated = normalizeOpsTags(mergeReasoningOps(ctx.accumulated, ctx.reasoningAccum));
-                  renderStreamBubble(bubble, ctx.accumulated, false);
+                  var opsOpts = { allowFallback: ctx.allowOpsFallback };
+                  ctx.accumulated = normalizeOpsTags(mergeReasoningOps(ctx.accumulated, ctx.reasoningAccum, opsOpts), opsOpts);
+                  renderStreamBubble(bubble, ctx.accumulated, false, opsOpts);
                   var _bt = bubble.querySelector('.ai-thinking');
                   if (_bt) finishThinking(_bt);
-                  applyOpsFromContent(ctx.accumulated, bubble);
+                  applyOpsFromContent(ctx.accumulated, bubble, opsOpts);
 
                   if (ctx.searchChipParts.length) {
                     var chipsWrap = document.createElement('div');
@@ -4244,15 +4586,16 @@
             var _dtDone = bubble.querySelector('.ai-thinking');
             if (_dtDone) finishThinking(_dtDone);
 
-            ctx.accumulated = mergeReasoningOps(ctx.accumulated, ctx.reasoningAccum);
+            var opsOpts = { allowFallback: ctx.allowOpsFallback };
+            ctx.accumulated = mergeReasoningOps(ctx.accumulated, ctx.reasoningAccum, opsOpts);
             if (!ctx.accumulated) {
               endAISend();
               return;
             }
             if (window.console && console.log) console.log('[AI] ← final content:', ctx.accumulated);
-            ctx.accumulated = normalizeOpsTags(ctx.accumulated);
-            renderStreamBubble(bubble, ctx.accumulated, false);
-            var opsApplied = applyOpsFromContent(ctx.accumulated, bubble);
+            ctx.accumulated = normalizeOpsTags(ctx.accumulated, opsOpts);
+            renderStreamBubble(bubble, ctx.accumulated, false, opsOpts);
+            var opsApplied = applyOpsFromContent(ctx.accumulated, bubble, opsOpts);
 
             var finalizeNormal = function () {
               var finalContent = stripToolMarkup(ctx.accumulated)
@@ -4305,6 +4648,7 @@
           return;
         }
         pendingSnapshotId = null;
+        pendingOpsReceipt = null;
 
         try {
           aiHistory[0].content = buildSystemPrompt();
